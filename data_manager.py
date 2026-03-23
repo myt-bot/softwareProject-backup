@@ -5,7 +5,7 @@
 class DataManager:
     def load_dataset_provider(self, source_type, path):
         """
-        读取本地文件（CSV/Images）或调用内置数据集（MNIST/CIFAR）。
+        读取本地文件（CSV/Images）或调用内置数据集（MNIST/CIFAR）
         """
         pass
 
