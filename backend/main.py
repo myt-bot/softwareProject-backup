@@ -17,41 +17,90 @@ app = FastAPI(title="Visual Deep Learning Model Builder")
 
 @app.get("/health")
 def health_check():
-    """检查后端服务是否正常运行。"""
+    """检查后端服务是否正常运行。
+
+    参数：
+        无。
+
+    返回：
+        后续应返回服务状态信息，例如 {"status": "ok"}。
+    """
     pass
 
 
 @app.get("/devices")
 def list_devices():
-    """返回当前本机可用的计算设备，例如 CPU 和 CUDA GPU。"""
+    """返回当前本机可用的计算设备，例如 CPU 和 CUDA GPU。
+
+    参数：
+        无。
+
+    返回：
+        后续应返回设备列表和默认设备信息，供前端渲染设备选择器。
+    """
     pass
 
 
 @app.post("/validate")
 def validate_model(request: ModelRequest):
-    """校验模型结构，并推导每一层的张量维度变化。"""
+    """校验模型结构，并推导每一层的张量维度变化。
+
+    参数：
+        request：模型校验请求体，包含前端画布生成的模型图结构。
+
+    返回：
+        后续应返回校验是否通过、错误节点、错误说明和每层维度信息。
+    """
     pass
 
 
 @app.post("/train")
 def start_training(request: TrainRequest):
-    """根据用户选择的 CPU 或 GPU 启动本地训练任务。"""
+    """根据用户选择的 CPU 或 GPU 启动本地训练任务。
+
+    参数：
+        request：训练请求体，包含模型图结构和训练配置。
+
+    返回：
+        后续应返回训练任务编号、初始状态和必要的提示信息。
+    """
     pass
 
 
 @app.get("/train/{job_id}/status")
 def get_training_status(job_id: str):
-    """返回指定训练任务的当前状态、日志和进度。"""
+    """返回指定训练任务的当前状态、日志和进度。
+
+    参数：
+        job_id：训练任务编号，用于定位某一次本地训练任务。
+
+    返回：
+        后续应返回任务状态、当前 epoch、进度百分比和训练日志。
+    """
     pass
 
 
 @app.get("/train/{job_id}/result")
 def get_training_result(job_id: str):
-    """返回训练完成后的最终指标和相关产物信息。"""
+    """返回训练完成后的最终指标和相关产物信息。
+
+    参数：
+        job_id：训练任务编号，用于查询对应训练任务的最终结果。
+
+    返回：
+        后续应返回 loss、accuracy、模型文件路径和训练摘要。
+    """
     pass
 
 
 @app.post("/export/pytorch")
 def export_pytorch_code(request: CodeExportRequest):
-    """根据可视化模型结构生成 PyTorch 源代码。"""
+    """根据可视化模型结构生成 PyTorch 源代码。
+
+    参数：
+        request：代码导出请求体，包含模型图结构和导出类名。
+
+    返回：
+        后续应返回生成的 PyTorch 源代码字符串。
+    """
     pass
