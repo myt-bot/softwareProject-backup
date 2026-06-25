@@ -1,0 +1,55 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+  background: #f6f7f9;
+  color: #1f2933;
+}
+
+.topbar {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  background: #ffffff;
+  border-bottom: 1px solid #d8dee8;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.workspace {
+  min-height: calc(100vh - 224px);
+  display: grid;
+  grid-template-columns: 240px 1fr 320px;
+  gap: 1px;
+  background: #d8dee8;
+}
+
+.panel,
+.canvas,
+.training-panel {
+  background: #ffffff;
+}
+
+.panel {
+  padding: 16px;
+}
+
+.canvas {
+  min-width: 0;
+  position: relative;
+}
+
+.training-panel {
+  min-height: 160px;
+  border-top: 1px solid #d8dee8;
+  padding: 16px 24px;
+}
