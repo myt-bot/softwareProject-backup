@@ -136,28 +136,28 @@ project/
 
 ## 当前计划支持的层类型
 
-| 层类型 | 说明 | 主要参数 |
-| --- | --- | --- |
-| Input | 输入层 | shape |
-| Conv2D | 二维卷积层 | out_channels, kernel_size, stride, padding |
-| ReLU | 激活函数 | 无 |
-| Pooling | 池化层 | kernel_size, stride, padding |
-| Flatten | 展平层 | 无 |
-| Linear | 全连接层 | out_features |
-| Dropout | 随机失活层 | p |
-| Output | 输出层 | num_classes |
+| 层类型  | 说明       | 主要参数                                   |
+| ------- | ---------- | ------------------------------------------ |
+| Input   | 输入层     | shape                                      |
+| Conv2D  | 二维卷积层 | out_channels, kernel_size, stride, padding |
+| ReLU    | 激活函数   | 无                                         |
+| Pooling | 池化层     | kernel_size, stride, padding               |
+| Flatten | 展平层     | 无                                         |
+| Linear  | 全连接层   | out_features                               |
+| Dropout | 随机失活层 | p                                          |
+| Output  | 输出层     | num_classes                                |
 
 ## 后端接口设计
 
-| 方法 | 路径 | 功能 | 编写者 |
-| --- | --- | --- | --- |
-| GET | /health | 检查后端服务是否正常 | 待填写 |
-| GET | /devices | 获取可用计算设备 | 待填写 |
-| POST | /validate | 校验模型结构并推导维度 | 待填写 |
-| POST | /train | 启动训练任务 | 待填写 |
-| GET | /train/{job_id}/status | 查询训练状态 | 待填写 |
-| GET | /train/{job_id}/result | 查询训练结果 | 待填写 |
-| POST | /export/pytorch | 导出 PyTorch 代码 | 待填写 |
+| 方法 | 路径                   | 功能                   | 编写者 |
+| ---- | ---------------------- | ---------------------- | ------ |
+| GET  | /health                | 检查后端服务是否正常   | 待填写 |
+| GET  | /devices               | 获取可用计算设备       | 待填写 |
+| POST | /validate              | 校验模型结构并推导维度 | 待填写 |
+| POST | /train                 | 启动训练任务           | 待填写 |
+| GET  | /train/{job_id}/status | 查询训练状态           | 待填写 |
+| GET  | /train/{job_id}/result | 查询训练结果           | 待填写 |
+| POST | /export/pytorch        | 导出 PyTorch 代码      | 待填写 |
 
 ## 后端模块和函数说明
 
@@ -165,126 +165,126 @@ project/
 
 ### backend/main.py
 
-| 函数 | 功能 | 编写者 |
-| --- | --- | --- |
-| health_check | 检查后端服务是否正常运行 | 待填写 |
-| list_devices | 返回当前本机可用的计算设备 | 待填写 |
-| validate_model | 校验模型结构，并推导每一层的张量维度变化 | 待填写 |
-| start_training | 根据用户选择的 CPU 或 GPU 启动本地训练任务 | 待填写 |
-| get_training_status | 返回指定训练任务的当前状态、日志和进度 | 待填写 |
-| get_training_result | 返回训练完成后的最终指标和相关产物信息 | 待填写 |
-| export_pytorch_code | 根据可视化模型结构生成 PyTorch 源代码 | 待填写 |
+| 函数                | 功能                                       | 编写者 |
+| ------------------- | ------------------------------------------ | ------ |
+| health_check        | 检查后端服务是否正常运行                   | 待填写 |
+| list_devices        | 返回当前本机可用的计算设备                 | 待填写 |
+| validate_model      | 校验模型结构，并推导每一层的张量维度变化   | 待填写 |
+| start_training      | 根据用户选择的 CPU 或 GPU 启动本地训练任务 | 待填写 |
+| get_training_status | 返回指定训练任务的当前状态、日志和进度     | 待填写 |
+| get_training_result | 返回训练完成后的最终指标和相关产物信息     | 待填写 |
+| export_pytorch_code | 根据可视化模型结构生成 PyTorch 源代码      | 待填写 |
 
 ### backend/schemas.py
 
-| 类 | 功能 | 编写者 |
-| --- | --- | --- |
-| LayerConfig | 描述画布中的一个模型层节点以及它的可编辑参数 | 待填写 |
-| ConnectionConfig | 描述画布中两个层节点之间的连接关系 | 待填写 |
-| ModelGraph | 描述前端传给后端的完整模型图结构 | 待填写 |
-| TrainConfig | 描述训练超参数以及用户选择的计算设备 | 待填写 |
-| ModelRequest | 模型校验和维度推导接口的请求体 | 待填写 |
-| TrainRequest | 启动本地训练任务接口的请求体 | 待填写 |
-| CodeExportRequest | 导出 PyTorch 代码接口的请求体 | 待填写 |
+| 类                | 功能                                         | 编写者 |
+| ----------------- | -------------------------------------------- | ------ |
+| LayerConfig       | 描述画布中的一个模型层节点以及它的可编辑参数 | 待填写 |
+| ConnectionConfig  | 描述画布中两个层节点之间的连接关系           | 待填写 |
+| ModelGraph        | 描述前端传给后端的完整模型图结构             | 待填写 |
+| TrainConfig       | 描述训练超参数以及用户选择的计算设备         | 待填写 |
+| ModelRequest      | 模型校验和维度推导接口的请求体               | 待填写 |
+| TrainRequest      | 启动本地训练任务接口的请求体                 | 待填写 |
+| CodeExportRequest | 导出 PyTorch 代码接口的请求体                | 待填写 |
 
 ### backend/device.py
 
-| 函数 | 功能 | 编写者 |
-| --- | --- | --- |
-| get_available_devices | 检测当前可用的计算设备，并返回给前端用于展示 | 待填写 |
-| is_cuda_available | 检查当前本机的 PyTorch 是否可以使用 CUDA GPU | 待填写 |
-| resolve_device | 根据用户选择决定训练实际使用的设备 | 待填写 |
-| get_device_summary | 返回适合在设置面板中展示的 CPU/GPU 信息 | 待填写 |
+| 函数                  | 功能                                         | 编写者 |
+| --------------------- | -------------------------------------------- | ------ |
+| get_available_devices | 检测当前可用的计算设备，并返回给前端用于展示 | 李汪洋 |
+| is_cuda_available     | 检查当前本机的 PyTorch 是否可以使用 CUDA GPU | 李汪洋 |
+| resolve_device        | 根据用户选择决定训练实际使用的设备           | 李汪洋 |
+| get_device_summary    | 返回适合在设置面板中展示的 CPU/GPU 信息      | 李汪洋 |
 
 ### backend/model_builder.py
 
-| 函数 | 功能 | 编写者 |
-| --- | --- | --- |
-| build_model | 将已经通过校验的可视化模型图转换成 PyTorch 模型对象 | 待填写 |
-| build_sequential_layers | 将排序后的层配置转换成顺序执行的神经网络主体 | 待填写 |
-| create_layer | 根据一个可视化层配置创建对应的 PyTorch 层 | 待填写 |
-| order_layers | 将画布中的模型节点排序为实际执行顺序 | 待填写 |
-| extract_model_summary | 生成便于展示或调试的模型结构摘要 | 待填写 |
+| 函数                    | 功能                                                | 编写者 |
+| ----------------------- | --------------------------------------------------- | ------ |
+| build_model             | 将已经通过校验的可视化模型图转换成 PyTorch 模型对象 | 待填写 |
+| build_sequential_layers | 将排序后的层配置转换成顺序执行的神经网络主体        | 待填写 |
+| create_layer            | 根据一个可视化层配置创建对应的 PyTorch 层           | 待填写 |
+| order_layers            | 将画布中的模型节点排序为实际执行顺序                | 待填写 |
+| extract_model_summary   | 生成便于展示或调试的模型结构摘要                    | 待填写 |
 
 ### backend/validator.py
 
-| 函数 | 功能 | 编写者 |
-| --- | --- | --- |
-| validate_model_graph | 执行完整模型校验，并返回错误、警告和维度信息 | 待填写 |
-| validate_required_nodes | 检查模型图中是否包含 Input、Output 等必要节点 | 待填写 |
-| validate_connections | 检查是否存在缺失、重复、非法或暂不支持的连接关系 | 待填写 |
-| validate_layer_params | 检查某一层的可编辑参数是否合法 | 待填写 |
-| infer_all_shapes | 按执行顺序推导每一层的输入维度和输出维度 | 待填写 |
-| infer_layer_shape | 根据输入维度和层参数推导某一层的输出维度 | 待填写 |
-| infer_conv2d_shape | 根据通道数、卷积核、步长和填充推导 Conv2D 输出维度 | 待填写 |
-| infer_pooling_shape | 根据池化核、步长和填充推导池化层输出维度 | 待填写 |
-| infer_flatten_shape | 根据多维张量输入推导 Flatten 后的一维向量长度 | 待填写 |
-| build_error_message | 将校验错误转换成适合初学者阅读的解释文本 | 待填写 |
+| 函数                    | 功能                                               | 编写者 |
+| ----------------------- | -------------------------------------------------- | ------ |
+| validate_model_graph    | 执行完整模型校验，并返回错误、警告和维度信息       | 待填写 |
+| validate_required_nodes | 检查模型图中是否包含 Input、Output 等必要节点      | 待填写 |
+| validate_connections    | 检查是否存在缺失、重复、非法或暂不支持的连接关系   | 待填写 |
+| validate_layer_params   | 检查某一层的可编辑参数是否合法                     | 待填写 |
+| infer_all_shapes        | 按执行顺序推导每一层的输入维度和输出维度           | 待填写 |
+| infer_layer_shape       | 根据输入维度和层参数推导某一层的输出维度           | 待填写 |
+| infer_conv2d_shape      | 根据通道数、卷积核、步长和填充推导 Conv2D 输出维度 | 待填写 |
+| infer_pooling_shape     | 根据池化核、步长和填充推导池化层输出维度           | 待填写 |
+| infer_flatten_shape     | 根据多维张量输入推导 Flatten 后的一维向量长度      | 待填写 |
+| build_error_message     | 将校验错误转换成适合初学者阅读的解释文本           | 待填写 |
 
 ### backend/trainer.py
 
-| 函数 | 功能 | 编写者 |
-| --- | --- | --- |
-| create_training_job | 在训练开始前创建并登记一个训练任务 | 待填写 |
-| run_training_job | 执行一个已登记训练任务的完整训练流程 | 待填写 |
-| prepare_dataset | 加载并预处理用户选择的内置数据集 | 待填写 |
-| train_one_epoch | 训练一个 epoch，并返回该轮训练指标 | 待填写 |
-| evaluate_model | 评估模型，并返回验证损失和准确率 | 待填写 |
-| save_training_artifacts | 保存训练产生的模型权重、指标和日志 | 待填写 |
-| get_job_status | 返回训练任务的当前状态和进度 | 待填写 |
-| get_job_result | 返回已完成训练任务的最终指标和保存文件路径 | 待填写 |
-| stop_training_job | 请求取消一个正在运行的训练任务 | 待填写 |
+| 函数                    | 功能                                       | 编写者 |
+| ----------------------- | ------------------------------------------ | ------ |
+| create_training_job     | 在训练开始前创建并登记一个训练任务         | 待填写 |
+| run_training_job        | 执行一个已登记训练任务的完整训练流程       | 待填写 |
+| prepare_dataset         | 加载并预处理用户选择的内置数据集           | 待填写 |
+| train_one_epoch         | 训练一个 epoch，并返回该轮训练指标         | 待填写 |
+| evaluate_model          | 评估模型，并返回验证损失和准确率           | 待填写 |
+| save_training_artifacts | 保存训练产生的模型权重、指标和日志         | 待填写 |
+| get_job_status          | 返回训练任务的当前状态和进度               | 待填写 |
+| get_job_result          | 返回已完成训练任务的最终指标和保存文件路径 | 待填写 |
+| stop_training_job       | 请求取消一个正在运行的训练任务             | 待填写 |
 
 ### backend/code_exporter.py
 
-| 函数 | 功能 | 编写者 |
-| --- | --- | --- |
-| export_to_pytorch | 根据可视化模型图生成完整的 PyTorch 模型源代码 | 待填写 |
-| generate_imports | 生成导出代码所需的 import 语句 | 待填写 |
-| generate_model_class | 生成导出模型对应的 nn.Module 类主体 | 待填写 |
-| generate_layer_code | 生成某一个 PyTorch 层的源代码 | 待填写 |
-| generate_forward_method | 生成导出 PyTorch 模型的 forward 方法 | 待填写 |
-| format_python_code | 在返回前端之前格式化生成的 Python 代码 | 待填写 |
+| 函数                    | 功能                                          | 编写者 |
+| ----------------------- | --------------------------------------------- | ------ |
+| export_to_pytorch       | 根据可视化模型图生成完整的 PyTorch 模型源代码 | 待填写 |
+| generate_imports        | 生成导出代码所需的 import 语句                | 待填写 |
+| generate_model_class    | 生成导出模型对应的 nn.Module 类主体           | 待填写 |
+| generate_layer_code     | 生成某一个 PyTorch 层的源代码                 | 待填写 |
+| generate_forward_method | 生成导出 PyTorch 模型的 forward 方法          | 待填写 |
+| format_python_code      | 在返回前端之前格式化生成的 Python 代码        | 待填写 |
 
 ### backend/templates.py
 
-| 函数 | 功能 | 编写者 |
-| --- | --- | --- |
+| 函数                    | 功能                                      | 编写者 |
+| ----------------------- | ----------------------------------------- | ------ |
 | get_available_templates | 返回前端可选择的模型模板，例如 MLP 和 CNN | 待填写 |
-| create_mlp_template | 创建适合初学者使用的 MLP 模板图 | 待填写 |
-| create_cnn_template | 创建适合图像分类任务的入门 CNN 模板图 | 待填写 |
-| apply_template | 返回用户选择的模板图，供前端加载到画布中 | 待填写 |
+| create_mlp_template     | 创建适合初学者使用的 MLP 模板图           | 待填写 |
+| create_cnn_template     | 创建适合图像分类任务的入门 CNN 模板图     | 待填写 |
+| apply_template          | 返回用户选择的模板图，供前端加载到画布中  | 待填写 |
 
 ## 前端模块和函数说明
 
 ### frontend/src/app.js
 
-| 函数 | 功能 | 编写者 |
-| --- | --- | --- |
-| initializeApp | 初始化页面状态，加载可用设备，并绑定界面事件 | 待填写 |
-| initializeLayerPalette | 渲染支持的层类型列表 | 待填写 |
-| initializeCanvas | 初始化可视化模型画布或图编辑器 | 待填写 |
-| initializePropertyPanel | 渲染当前选中层的可编辑参数 | 待填写 |
-| initializeTrainingPanel | 渲染训练设置、设备选择、指标展示和操作按钮 | 待填写 |
-| getCurrentModelGraph | 将当前画布状态转换为后端需要的模型 JSON | 待填写 |
-| loadModelGraph | 将后端或模板提供的模型 JSON 加载到可视化画布中 | 待填写 |
-| handleValidateModel | 将当前模型图发送到后端，并展示结构校验结果 | 待填写 |
-| handleStartTraining | 将模型图和训练配置发送到后端，启动本地训练 | 待填写 |
-| pollTrainingStatus | 定时查询训练状态，并更新界面中的训练进度 | 待填写 |
-| renderTrainingCurves | 根据后端返回的训练指标绘制 loss 和 accuracy 曲线 | 待填写 |
-| handleExportCode | 向后端请求生成的 PyTorch 代码，并展示给用户 | 待填写 |
+| 函数                    | 功能                                             | 编写者 |
+| ----------------------- | ------------------------------------------------ | ------ |
+| initializeApp           | 初始化页面状态，加载可用设备，并绑定界面事件     | 待填写 |
+| initializeLayerPalette  | 渲染支持的层类型列表                             | 待填写 |
+| initializeCanvas        | 初始化可视化模型画布或图编辑器                   | 待填写 |
+| initializePropertyPanel | 渲染当前选中层的可编辑参数                       | 待填写 |
+| initializeTrainingPanel | 渲染训练设置、设备选择、指标展示和操作按钮       | 待填写 |
+| getCurrentModelGraph    | 将当前画布状态转换为后端需要的模型 JSON          | 待填写 |
+| loadModelGraph          | 将后端或模板提供的模型 JSON 加载到可视化画布中   | 待填写 |
+| handleValidateModel     | 将当前模型图发送到后端，并展示结构校验结果       | 待填写 |
+| handleStartTraining     | 将模型图和训练配置发送到后端，启动本地训练       | 待填写 |
+| pollTrainingStatus      | 定时查询训练状态，并更新界面中的训练进度         | 待填写 |
+| renderTrainingCurves    | 根据后端返回的训练指标绘制 loss 和 accuracy 曲线 | 待填写 |
+| handleExportCode        | 向后端请求生成的 PyTorch 代码，并展示给用户      | 待填写 |
 
 ### frontend/src/api/client.js
 
-| 函数 | 功能 | 编写者 |
-| --- | --- | --- |
-| fetchHealth | 调用后端健康检查接口，确认服务是否可访问 | 待填写 |
-| fetchDevices | 向后端请求当前可用的 CPU/GPU 设备 | 待填写 |
-| validateModel | 将可视化模型图发送给后端，用于结构校验和维度推导 | 待填写 |
-| startTraining | 根据选择的数据集、超参数和设备启动本地训练任务 | 待填写 |
-| fetchTrainingStatus | 查询训练任务的当前状态和进度 | 待填写 |
-| fetchTrainingResult | 查询已完成训练任务的最终指标和产物信息 | 待填写 |
-| exportPytorchCode | 向后端请求根据模型图生成的 PyTorch 模型代码 | 待填写 |
+| 函数                | 功能                                             | 编写者 |
+| ------------------- | ------------------------------------------------ | ------ |
+| fetchHealth         | 调用后端健康检查接口，确认服务是否可访问         | 待填写 |
+| fetchDevices        | 向后端请求当前可用的 CPU/GPU 设备                | 待填写 |
+| validateModel       | 将可视化模型图发送给后端，用于结构校验和维度推导 | 待填写 |
+| startTraining       | 根据选择的数据集、超参数和设备启动本地训练任务   | 待填写 |
+| fetchTrainingStatus | 查询训练任务的当前状态和进度                     | 待填写 |
+| fetchTrainingResult | 查询已完成训练任务的最终指标和产物信息           | 待填写 |
+| exportPytorchCode   | 向后端请求根据模型图生成的 PyTorch 模型代码      | 待填写 |
 
 ## 增量开发计划
 
