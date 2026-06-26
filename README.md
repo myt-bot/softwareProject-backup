@@ -227,9 +227,9 @@ project/
 | ----------------------- | ------------------------------------------ | ------ |
 | create_training_job     | 在训练开始前创建并登记一个训练任务         | 待填写 |
 | run_training_job        | 执行一个已登记训练任务的完整训练流程       | 待填写 |
-| prepare_dataset         | 加载并预处理用户选择的内置数据集           | 待填写 |
-| train_one_epoch         | 训练一个 epoch，并返回该轮训练指标         | 待填写 |
-| evaluate_model          | 评估模型，并返回验证损失和准确率           | 待填写 |
+| prepare_dataset         | 加载并预处理用户选择的内置数据集           | 李汪洋 |
+| train_one_epoch         | 训练一个 epoch，并返回该轮训练指标         | 李汪洋 |
+| evaluate_model          | 评估模型，并返回验证损失和准确率           | 李汪洋 |
 | save_training_artifacts | 保存训练产生的模型权重、指标和日志         | 待填写 |
 | get_job_status          | 返回训练任务的当前状态和进度               | 待填写 |
 | get_job_result          | 返回已完成训练任务的最终指标和保存文件路径 | 待填写 |
