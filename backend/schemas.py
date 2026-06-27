@@ -59,11 +59,13 @@ class TrainConfig(BaseModel):
         device：用户选择的计算设备，例如 cpu、cuda 或 auto。
     """
 
-    dataset: str
-    epochs: int
-    batch_size: int
-    learning_rate: float
-    device: str
+    dataset_name: str = "MNIST"
+    epochs: int = 1
+    batch_size: int = 64
+    rate: float = 0.001
+    device: str = "cpu"
+    loss_fn: str = "cross_entropy"
+    optimizer: str = "sgd"
 
 
 class ModelRequest(BaseModel):
