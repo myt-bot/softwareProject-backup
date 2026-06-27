@@ -23,7 +23,7 @@ export async function validateModel(modelGraph) {
 export async function startTraining(modelGraph, trainConfig) {
   // 参数：
   //   modelGraph：当前画布模型图，用于后端构建训练模型。
-  //   trainConfig：训练配置，包含 dataset、epochs、batch_size、learning_rate 和 device。
+  //   trainConfig：训练配置，包含 dataset_name、epochs、batch_size、rate、device、loss_fn 和 optimizer。
   // 返回：后续应返回训练任务编号和初始状态。
 }
 

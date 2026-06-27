@@ -19,9 +19,9 @@ def create_training_job(model_graph, train_config):
     参数：
         model_graph：前端传入的模型图结构，用于后续构建 PyTorch 模型。
         train_config：训练配置，包含数据集、轮数、批大小、学习率和设备选择。
-        train_config为字典，包含字段：dataset_name、epochs、batch_size、rate、device、loss_fn、optimizer
+        train_config 包含字段：dataset_name、epochs、batch_size、rate、device、loss_fn、optimizer。
     返回：
-        后续应返回训练任务编号和初始任务状态。
+        dict：训练任务编号和初始任务状态。
     """
     def generate_job_id():
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -38,6 +38,13 @@ def create_training_job(model_graph, train_config):
         "total_epochs": train_config.epochs,
         "metrics": [],
         "error": None
+    }
+
+    return {
+        "job_id": job_id,
+        "status": "pending",
+        "current_epoch": 0,
+        "total_epochs": train_config.epochs,
     }
 
 
@@ -222,7 +229,10 @@ def prepare_dataset(dataset_name, batch_size):
             shuffle=True
     )
 
-    test_DataLoader = torch.utils.data.DataLoader(dataset=test_data)
+    test_DataLoader = torch.utils.data.DataLoader(
+            dataset=test_data,
+            batch_size=batch_size
+    )
 
     return train_DataLoader, test_DataLoader
 

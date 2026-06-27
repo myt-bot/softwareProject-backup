@@ -125,27 +125,29 @@ project/
     "connections": []
   },
   "train_config": {
-    "dataset": "MNIST",
+    "dataset_name": "MNIST",
     "epochs": 5,
     "batch_size": 64,
-    "learning_rate": 0.001,
-    "device": "cuda"
+    "rate": 0.001,
+    "device": "cuda",
+    "loss_fn": "cross_entropy",
+    "optimizer": "sgd"
   }
 }
 ```
 
 ## 当前计划支持的层类型
 
-| 层类型  | 说明       | 主要参数                                   |
-| ------- | ---------- | ------------------------------------------ |
-| Input   | 输入层     | shape                                      |
-| Conv2D  | 二维卷积层 | out_channels, kernel_size, stride, padding |
-| ReLU    | 激活函数   | 无                                         |
-| Pooling | 池化层     | kernel_size, stride, padding               |
-| Flatten | 展平层     | 无                                         |
-| Linear  | 全连接层   | out_features                               |
-| Dropout | 随机失活层 | p                                          |
-| Output  | 输出层     | num_classes                                |
+| 层类型  | 说明       | 主要参数                                         |
+| ------- | ---------- | ------------------------------------------------ |
+| Input   | 输入层     | shape                                            |
+| Conv2D  | 二维卷积层 | out_channels, kernel_size, stride, padding       |
+| ReLU    | 激活函数   | 无                                               |
+| Pooling | 池化层     | kernel_size, stride, padding                     |
+| Flatten | 展平层     | 无                                               |
+| Linear  | 全连接层   | out_features                                     |
+| Dropout | 随机失活层 | p                                                |
+| Output  | 输出节点   | 无，分类数量由前置 Linear 层的 out_features 决定 |
 
 ## 后端接口设计
 
@@ -198,13 +200,13 @@ project/
 
 ### backend/model_builder.py
 
-| 函数                    | 功能                                                | 编写者 |
-| ----------------------- | --------------------------------------------------- | ------ |
-| build_model             | 将已经通过校验的可视化模型图转换成 PyTorch 模型对象 | 待填写 |
-| build_sequential_layers | 将排序后的层配置转换成顺序执行的神经网络主体        | 待填写 |
-| create_layer            | 根据一个可视化层配置创建对应的 PyTorch 层           | 待填写 |
-| order_layers            | 将画布中的模型节点排序为实际执行顺序                | 待填写 |
-| extract_model_summary   | 生成便于展示或调试的模型结构摘要                    | 待填写 |
+| 函数                  | 功能                                                                   | 编写者   |
+| --------------------- | ---------------------------------------------------------------------- | -------- |
+| build_model           | 将已经通过校验的可视化模型图转换成支持 DAG 前向传播的 PyTorch 模型对象 | 李汪洋待 |
+| GraphModel            | 支持有向无环图结构、拓扑执行和多输入合并的 PyTorch 模型类              | 李汪洋   |
+| create_layer          | 根据一个可视化层配置创建对应的 PyTorch 层                              | 李汪洋   |
+| order_layers          | 将画布中的模型节点排序为拓扑执行顺序                                   | 李汪洋   |
+| extract_model_summary | 生成便于展示或调试的模型结构摘要                                       | 待填写   |
 
 ### backend/validator.py
 
@@ -335,7 +337,7 @@ project/
 - 前端不直接执行深度学习训练，只负责模型编辑、接口调用和结果展示。
 - 后端负责模型校验、维度推导、PyTorch 模型构建、训练和代码导出。
 - 前后端之间统一使用 JSON 通信。
-- 第一版只支持顺序模型，不支持复杂分支、残差连接和自定义 Python 层。
+- 第一版模型构建器按有向无环图进行拓扑执行，支持顺序结构、基础分支汇合和多输入合并；暂不支持环形连接和自定义 Python 层。
 - 用户只能选择系统内置层类型，不能直接提交任意 Python 代码。
 - GPU 是否可用以后端检测结果为准，前端不能自行假设。
 - 新增接口时需要同步更新 backend/main.py 和本 README。

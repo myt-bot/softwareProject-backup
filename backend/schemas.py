@@ -52,10 +52,10 @@ class TrainConfig(BaseModel):
     """描述训练超参数以及用户选择的计算设备。
 
     字段：
-        dataset：训练数据集名称，例如 MNIST。
+        dataset_name：训练数据集名称，例如 MNIST。
         epochs：训练轮数，表示完整遍历训练集的次数。
         batch_size：批大小，表示每次参数更新使用多少条样本。
-        learning_rate：学习率，用于控制优化器每次更新参数的步长。
+        rate：学习率，用于控制优化器每次更新参数的步长。
         device：用户选择的计算设备，例如 cpu、cuda 或 auto。
     """
 
@@ -83,7 +83,7 @@ class TrainRequest(BaseModel):
 
     字段：
         model：用于训练的模型图结构。
-        train_config：训练配置，包含数据集、轮数、批大小、学习率和设备。
+        train_config：训练配置，包含数据集、轮数、批大小、学习率、设备、损失函数和优化器。
     """
 
     model: ModelGraph
