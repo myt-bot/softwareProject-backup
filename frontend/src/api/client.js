@@ -1,49 +1,103 @@
 const API_BASE_URL = "http://127.0.0.1:8000";
 
 
+class BackendNotImplementedError extends Error {
+  constructor(path) {
+    super(`后端接口 ${path} 暂未实现`);
+    this.name = "BackendNotImplementedError";
+    this.path = path;
+  }
+}
+
+
+async function request(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+      ...options,
+    });
+  } catch (error) {
+    throw new Error(`无法连接后端服务 ${API_BASE_URL}，请确认 FastAPI 已启动。`);
+  }
+
+  const text = await response.text();
+  let data = null;
+
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+  }
+
+  if (!response.ok) {
+    const detail = data?.detail || data || response.statusText;
+    throw new Error(`后端请求失败 (${response.status}): ${detail}`);
+  }
+
+  if (data === null || data === undefined || data === "") {
+    throw new BackendNotImplementedError(path);
+  }
+
+  return data;
+}
+
+
+export function isBackendNotImplemented(error) {
+  return error?.name === "BackendNotImplementedError";
+}
+
+
 export async function fetchHealth() {
-  // 参数：无。
-  // 返回：后续应返回后端健康检查结果，用于判断服务是否可访问。
+  return request("/health");
 }
 
 
 export async function fetchDevices() {
-  // 参数：无。
-  // 返回：后续应返回可用设备列表、默认设备和 GPU 摘要信息。
+  return request("/devices");
 }
 
 
 export async function validateModel(modelGraph) {
-  // 参数：
-  //   modelGraph：当前画布模型图，包含 layers 和 connections。
-  // 返回：后续应返回结构校验结果、错误信息和维度推导信息。
+  return request("/validate", {
+    method: "POST",
+    body: JSON.stringify({ model: modelGraph }),
+  });
 }
 
 
 export async function startTraining(modelGraph, trainConfig) {
-  // 参数：
-  //   modelGraph：当前画布模型图，用于后端构建训练模型。
-  //   trainConfig：训练配置，包含 dataset_name、epochs、batch_size、rate、device、loss_fn 和 optimizer。
-  // 返回：后续应返回训练任务编号和初始状态。
+  return request("/train", {
+    method: "POST",
+    body: JSON.stringify({
+      model: modelGraph,
+      train_config: trainConfig,
+    }),
+  });
 }
 
 
 export async function fetchTrainingStatus(jobId) {
-  // 参数：
-  //   jobId：训练任务编号，用于查询对应任务的实时状态。
-  // 返回：后续应返回任务状态、训练进度、日志和当前指标。
+  return request(`/train/${encodeURIComponent(jobId)}/status`);
 }
 
 
 export async function fetchTrainingResult(jobId) {
-  // 参数：
-  //   jobId：训练任务编号，用于查询对应任务的最终结果。
-  // 返回：后续应返回最终 loss、accuracy、模型文件路径和训练摘要。
+  return request(`/train/${encodeURIComponent(jobId)}/result`);
 }
 
 
 export async function exportPytorchCode(modelGraph) {
-  // 参数：
-  //   modelGraph：当前画布模型图，用于生成 PyTorch 模型代码。
-  // 返回：后续应返回生成的 PyTorch 源代码字符串。
+  return request("/export/pytorch", {
+    method: "POST",
+    body: JSON.stringify({
+      model: modelGraph,
+      class_name: "MNIST_CNN",
+    }),
+  });
 }

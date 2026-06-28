@@ -81,7 +81,7 @@ def run_training_job(job_id):
         )
         batch_size = _get_config_value(train_config, "batch_size", 64)
         epochs = _get_config_value(train_config, "epochs", 1)
-        learning_rate = _get_config_value(
+        rate = _get_config_value(
             train_config,
             "rate",
             0.001
@@ -96,7 +96,7 @@ def run_training_job(job_id):
         optimizer = _build_optimizer(
             optimizer_config=optimizer_config,
             model=model,
-            learning_rate=learning_rate,
+            rate=rate,
         )
 
         train_loader, test_loader = prepare_dataset(
@@ -174,7 +174,7 @@ def _build_loss_fn(loss_fn_config):
     raise ValueError(f"暂不支持的损失函数配置: {loss_fn_config}")
 
 
-def _build_optimizer(optimizer_config, model, learning_rate):
+def _build_optimizer(optimizer_config, model, rate):
     """根据训练配置创建优化器。"""
     if isinstance(optimizer_config, torch.optim.Optimizer):
         return optimizer_config
@@ -187,13 +187,13 @@ def _build_optimizer(optimizer_config, model, learning_rate):
         if optimizer_name == "sgd":
             return torch.optim.SGD(
                 model.parameters(),
-                lr=learning_rate,
+                lr=rate,
                 momentum=0.9,
             )
         if optimizer_name == "adam":
             return torch.optim.Adam(
                 model.parameters(),
-                lr=learning_rate,
+                lr=rate,
             )
 
     raise ValueError(f"暂不支持的优化器配置: {optimizer_config}")
