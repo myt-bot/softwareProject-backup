@@ -106,16 +106,19 @@ def validate_required_nodes(model_graph):
     返回：
         后续应返回缺失节点错误列表；没有错误时返回空列表。
     """
-    required_nodes_set = set(['Input', 'Output'])
-    layers = model_graph['layers']
+    required_node_types = ["Input", "Output"]
+    layers = model_graph.get("layers", [])
+    existing_node_types = {
+        layer.get("type")
+        for layer in layers
+        if isinstance(layer, dict)
+    }
 
-    layer_set = set()
-
-    for layer in layers:
-        if layer['type'] == 'Input' or layer['type'] == 'Output':
-            layer_set.add(layer['type'])
-
-    return list(required_nodes_set - layer_set)
+    return [
+        node_type
+        for node_type in required_node_types
+        if node_type not in existing_node_types
+    ]
     
 
 def validate_connections(model_graph):
@@ -403,17 +406,27 @@ def infer_conv2d_shape(input_shape, params):
     返回：
         后续应返回 Conv2D 输出形状 [out_channels, H_out, W_out]。
     """
-    if input_shape is None:
+    if not isinstance(input_shape, (list, tuple)) or len(input_shape) != 3:
         return None
-    
+
+    params = params or {}
     _, height, width = input_shape
-    kernel_size = params.get("kernel_size", 2)
-    stride = params.get("stride", kernel_size)
+    kernel_size = params.get("kernel_size", 3)
+    stride = params.get("stride", 1)
     padding = params.get("padding", 0)
-    out_channels = params.get("out_channels", 3)
+    out_channels = params.get("out_channels")
+
+    values = [height, width, kernel_size, stride, padding, out_channels]
+    if not all(isinstance(value, int) for value in values):
+        return None
+    if height <= 0 or width <= 0 or kernel_size <= 0 or stride <= 0 or padding < 0 or out_channels <= 0:
+        return None
 
     H_out = (height + 2 * padding - kernel_size) // stride + 1
     W_out = (width + 2 * padding - kernel_size) // stride + 1
+
+    if H_out <= 0 or W_out <= 0:
+        return None
 
     return [out_channels, H_out, W_out]
 
