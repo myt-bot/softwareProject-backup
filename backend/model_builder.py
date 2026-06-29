@@ -5,6 +5,11 @@ import json
 import torch
 import torch.nn as nn
 
+from .graph_utils import (
+    build_predecessor_map,
+    build_successor_map,
+    topological_sort_layers,
+)
 from .validator import infer_all_shapes
 
 
@@ -17,27 +22,22 @@ def build_model(model_graph):
     返回：
         GraphModel：支持 DAG 前向传播的 PyTorch 模型。
     """
-    normalized_graph = _normalize_model_graph(model_graph)
+    normalized_graph = json.loads(model_graph)
     ordered_layers = order_layers(normalized_graph)
     shape_info = infer_all_shapes(normalized_graph)
 
-    if shape_info is None:
-        raise ValueError("validator.infer_all_shapes() 尚未返回维度信息，无法构建模型")
-
     modules = {}
+    layer_shapes = shape_info["layers"]
     for layer_config in ordered_layers:
-        layer_id = _get_field(layer_config, "id")
-        layer_type = _get_field(layer_config, "type")
+        layer_id = layer_config["id"]
+        layer_type = layer_config["type"]
         input_shape = None
         if layer_type not in ("Input", "Output"):
-            input_shape = _get_layer_input_shape(shape_info, layer_id)
+            input_shape = layer_shapes[layer_id]["input_shape"]
 
         layer = create_layer(layer_config, input_shape)
         if layer is not None:
             modules[layer_id] = layer
-
-    if not modules:
-        raise ValueError("模型中没有可执行的 PyTorch 层")
 
     return GraphModel(
         model_graph=normalized_graph,
@@ -60,10 +60,10 @@ class GraphModel(nn.Module):
         self.model_graph = model_graph
         self.ordered_layers = ordered_layers
         self.layer_map = {
-            _get_field(layer, "id"): layer
-            for layer in _get_field(model_graph, "layers", [])
+            layer["id"]: layer
+            for layer in model_graph.get("layers", [])
         }
-        self.predecessors = _build_predecessor_map(model_graph)
+        self.predecessors = build_predecessor_map(model_graph)
         self.modules_by_id = nn.ModuleDict(modules)
 
     def forward(self, x):
@@ -78,8 +78,8 @@ class GraphModel(nn.Module):
         outputs = {}
 
         for layer_config in self.ordered_layers:
-            layer_id = _get_field(layer_config, "id")
-            layer_type = _get_field(layer_config, "type")
+            layer_id = layer_config["id"]
+            layer_type = layer_config["type"]
 
             if layer_type == "Input":
                 outputs[layer_id] = _resolve_input_tensor(x, layer_id)
@@ -106,8 +106,6 @@ class GraphModel(nn.Module):
     def _collect_node_input(self, layer_id, outputs):
         """收集并合并当前节点的所有前驱输出。"""
         predecessor_ids = self.predecessors[layer_id]
-        if not predecessor_ids:
-            raise ValueError(f"非 Input 节点缺少输入: {layer_id}")
 
         tensors = [
             outputs[predecessor_id]
@@ -122,21 +120,19 @@ class GraphModel(nn.Module):
     def _get_output_node_ids(self):
         """获取模型输出节点 id。"""
         explicit_output_ids = [
-            _get_field(layer, "id")
+            layer["id"]
             for layer in self.ordered_layers
-            if _get_field(layer, "type") == "Output"
+            if layer["type"] == "Output"
         ]
         if explicit_output_ids:
             return explicit_output_ids
 
-        successor_map = _build_successor_map(self.model_graph)
+        successor_map = build_successor_map(self.model_graph)
         terminal_ids = [
             layer_id
             for layer_id, successors in successor_map.items()
             if not successors
         ]
-        if not terminal_ids:
-            raise ValueError("模型没有可识别的输出节点")
 
         return terminal_ids
 
@@ -146,13 +142,13 @@ def create_layer(layer_config, input_shape=None):
 
     参数：
         layer_config：单个层节点配置，包含层类型、层名称和参数。
-        input_shape：该层输入张量的形状，用于推导某些层的构造参数；默认为 None。
+        input_shape：validator 已推导出的该层输入张量形状；默认为 None。
 
     返回：
         后续应返回对应的 PyTorch 层对象。
     """
-    layer_type = _get_field(layer_config, "type")
-    layer_params = _get_field(layer_config, "params", {})
+    layer_type = layer_config["type"]
+    layer_params = layer_config.get("params", {})
 
     if layer_type == "Input":
         return None
@@ -161,9 +157,6 @@ def create_layer(layer_config, input_shape=None):
         return None
 
     if layer_type == 'Conv2D':
-        if input_shape is None:
-            raise ValueError("Conv2D 层需要 input_shape 来确定 in_channels")
-     
         return nn.Conv2d(
             in_channels=input_shape[0],
             out_channels=layer_params['out_channels'],
@@ -180,11 +173,6 @@ def create_layer(layer_config, input_shape=None):
         return nn.Flatten()
     
     if layer_type == 'Linear':
-        if input_shape is None:
-            raise ValueError("Linear 层需要 input_shape 来确定 in_features")
-        if len(input_shape) != 1:
-            raise ValueError("Linear 层前需要先使用 Flatten 将输入展平成一维向量")
-        
         return nn.Linear(
             in_features=input_shape[0],
             out_features=layer_params["out_features"]
@@ -201,8 +189,6 @@ def create_layer(layer_config, input_shape=None):
         return nn.Dropout(
             p=layer_params.get("p", 0.5)
         )
-    
-    raise ValueError(f"暂不支持的层类型: {layer_type}")
 
 
 def order_layers(model_graph):
@@ -215,125 +201,7 @@ def order_layers(model_graph):
         返回按依赖关系排序后的层配置列表。该排序支持分支和汇合结构，
         但要求模型图必须是有向无环图。
     """
-    # DAG拓扑排序
-    if isinstance(model_graph, str):
-        model_graph = json.loads(model_graph)
-
-    layers = _get_field(model_graph, "layers", [])
-    connections = _get_field(model_graph, "connections", [])
-
-    if not layers:
-        raise ValueError("模型图中没有任何层节点")
-
-    layer_map = {}
-    for layer in layers:
-        layer_id = _get_field(layer, "id")
-        if layer_id in layer_map:
-            raise ValueError(f"存在重复的层节点 id: {layer_id}")
-        layer_map[layer_id] = layer
-
-    if not connections:
-        if len(layers) == 1:
-            return layers
-        raise ValueError("模型包含多个层节点时必须提供 connections 连接关系")
-
-    layer_ids = list(layer_map.keys())
-    adjacency = {layer_id: [] for layer_id in layer_ids}
-    in_degree = {layer_id: 0 for layer_id in layer_ids}
-    seen_connections = set()
-
-    for connection in connections:
-        source = _get_field(connection, "source")
-        target = _get_field(connection, "target")
-
-        if source not in layer_map:
-            raise ValueError(f"连接起点不存在: {source}")
-        if target not in layer_map:
-            raise ValueError(f"连接终点不存在: {target}")
-        if source == target:
-            raise ValueError(f"节点 {source} 不能连接到自身")
-
-        edge = (source, target)
-        if edge in seen_connections:
-            raise ValueError(f"存在重复连接: {source} -> {target}")
-
-        seen_connections.add(edge)
-        adjacency[source].append(target)
-        in_degree[target] += 1
-
-    ready_nodes = [
-        layer_id
-        for layer_id in layer_ids
-        if in_degree[layer_id] == 0
-    ]
-    ordered_ids = []
-
-    while ready_nodes:
-        current_id = ready_nodes.pop(0)
-        ordered_ids.append(current_id)
-
-        for target_id in adjacency[current_id]:
-            in_degree[target_id] -= 1
-            if in_degree[target_id] == 0:
-                ready_nodes.append(target_id)
-
-    if len(ordered_ids) != len(layer_ids):
-        cycle_ids = [
-            layer_id
-            for layer_id in layer_ids
-            if in_degree[layer_id] > 0
-        ]
-        raise ValueError(f"模型连接中存在环，无法排序: {cycle_ids}")
-
-    return [layer_map[layer_id] for layer_id in ordered_ids]
-
-
-def _get_field(obj, field_name, default=None):
-    """从 Pydantic 对象或 dict 中读取字段。"""
-    if isinstance(obj, dict):
-        return obj.get(field_name, default)
-
-    return getattr(obj, field_name, default)
-
-
-def _normalize_model_graph(model_graph):
-    """将 JSON 字符串、dict 或 Pydantic 对象统一为可读取的模型图对象。"""
-    if isinstance(model_graph, str):
-        return json.loads(model_graph)
-
-    return model_graph
-
-
-def _build_predecessor_map(model_graph):
-    """根据 connections 生成每个节点的前驱节点列表。"""
-    layers = _get_field(model_graph, "layers", [])
-    predecessors = {
-        _get_field(layer, "id"): []
-        for layer in layers
-    }
-
-    for connection in _get_field(model_graph, "connections", []):
-        source = _get_field(connection, "source")
-        target = _get_field(connection, "target")
-        predecessors[target].append(source)
-
-    return predecessors
-
-
-def _build_successor_map(model_graph):
-    """根据 connections 生成每个节点的后继节点列表。"""
-    layers = _get_field(model_graph, "layers", [])
-    successors = {
-        _get_field(layer, "id"): []
-        for layer in layers
-    }
-
-    for connection in _get_field(model_graph, "connections", []):
-        source = _get_field(connection, "source")
-        target = _get_field(connection, "target")
-        successors[source].append(target)
-
-    return successors
+    return topological_sort_layers(model_graph)
 
 
 def _resolve_input_tensor(x, layer_id):
@@ -353,7 +221,7 @@ def _merge_tensors(layer_config, tensors):
         concat：按 params.dim 或 params.concat_dim 指定维度拼接，默认 dim=1；
         add/sum：逐元素相加。
     """
-    params = _get_field(layer_config, "params", {})
+    params = layer_config.get("params", {})
     merge_mode = params.get("merge", "concat")
 
     if merge_mode == "concat":
@@ -365,38 +233,6 @@ def _merge_tensors(layer_config, tensors):
         for tensor in tensors[1:]:
             merged = merged + tensor
         return merged
-
-    raise ValueError(f"暂不支持的多输入合并方式: {merge_mode}")
-
-
-def _get_layer_input_shape(shape_info, layer_id):
-    """从 validator.infer_all_shapes() 的结果中读取某层输入维度。"""
-    if isinstance(shape_info, dict):
-        if layer_id in shape_info:
-            return _extract_input_shape(shape_info[layer_id])
-
-        layers_info = shape_info.get("layers")
-        if isinstance(layers_info, dict) and layer_id in layers_info:
-            return _extract_input_shape(layers_info[layer_id])
-
-        if isinstance(layers_info, list):
-            for item in layers_info:
-                if _get_field(item, "id") == layer_id or _get_field(item, "layer_id") == layer_id:
-                    return _extract_input_shape(item)
-
-    raise ValueError(f"无法从 validator.infer_all_shapes() 结果中读取 {layer_id} 的输入维度")
-
-
-def _extract_input_shape(layer_shape_info):
-    """从单层维度信息中提取 input_shape。"""
-    input_shape = _get_field(layer_shape_info, "input_shape")
-    if input_shape is None:
-        input_shape = _get_field(layer_shape_info, "input")
-
-    if input_shape is None:
-        raise ValueError(f"维度信息缺少 input_shape 字段: {layer_shape_info}")
-
-    return input_shape
 
 
 def extract_model_summary(model):

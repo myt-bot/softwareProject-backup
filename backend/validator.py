@@ -1,16 +1,100 @@
 """模型结构校验与张量维度推导。"""
 
+import json
+
+from .graph_utils import build_predecessor_map, topological_sort_layers
+
 
 def validate_model_graph(model_graph):
     """执行完整模型校验，并返回错误、警告和维度信息。
 
     参数：
-        model_graph：前端画布生成的模型图结构，包含层节点和连接关系。
+        model_graph：前端画布生成的模型图结构，包含层节点和连接关系。传入的model_graph已经从json中提取出来了
 
     返回：
         后续应返回校验结果字典，包括 valid、errors、warnings 和 shapes 等字段。
     """
-    pass
+    errors = []
+    warnings = []
+    shapes = {}
+
+    if not isinstance(model_graph, dict):
+        errors.append(build_error_message("INVALID_MODEL_GRAPH"))
+        return {
+            "valid": False,
+            "errors": errors,
+            "warnings": warnings,
+            "shapes": shapes,
+            "message": errors[0],
+        }
+
+    layers = model_graph.get("layers")
+    connections = model_graph.get("connections", [])
+
+    if not isinstance(layers, list):
+        errors.append(build_error_message("INVALID_MODEL_LAYERS"))
+    if not isinstance(connections, list):
+        errors.append(build_error_message("INVALID_MODEL_CONNECTIONS"))
+
+    if errors:
+        return {
+            "valid": False,
+            "errors": errors,
+            "warnings": warnings,
+            "shapes": shapes,
+            "message": errors[0],
+        }
+
+    for node_type in validate_required_nodes(model_graph):
+        errors.append(build_error_message(
+            "MISSING_REQUIRED_NODE",
+            {"node_type": node_type},
+        ))
+
+    errors.extend(validate_connections(model_graph))
+
+    for layer_config in layers:
+        errors.extend(validate_layer_params(layer_config))
+
+    if errors:
+        return {
+            "valid": False,
+            "errors": errors,
+            "warnings": warnings,
+            "shapes": shapes,
+            "message": errors[0],
+        }
+
+    try:
+        shape_info = infer_all_shapes(model_graph)
+    except Exception as exc:
+        errors.append(build_error_message(
+            "SHAPE_INFERENCE_FAILED",
+            {"reason": str(exc)},
+        ))
+        return {
+            "valid": False,
+            "errors": errors,
+            "warnings": warnings,
+            "shapes": shapes,
+            "message": errors[0],
+        }
+
+    shapes = shape_info.get("layers", {})
+    for layer_id, layer_shape in shapes.items():
+        if layer_shape.get("status") != "ok":
+            errors.append(build_error_message(
+                "UNKNOWN_LAYER_SHAPE",
+                {"layer_id": layer_id},
+            ))
+
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "shapes": shapes,
+        "message": "结构校验通过" if not errors else errors[0],
+    }
 
 
 def validate_required_nodes(model_graph):
@@ -22,8 +106,17 @@ def validate_required_nodes(model_graph):
     返回：
         后续应返回缺失节点错误列表；没有错误时返回空列表。
     """
-    pass
+    required_nodes_set = set(['Input', 'Output'])
+    layers = model_graph['layers']
 
+    layer_set = set()
+
+    for layer in layers:
+        if layer['type'] == 'Input' or layer['type'] == 'Output':
+            layer_set.add(layer['type'])
+
+    return list(required_nodes_set - layer_set)
+    
 
 def validate_connections(model_graph):
     """检查是否存在缺失、重复、非法或暂不支持的连接关系。
@@ -34,7 +127,89 @@ def validate_connections(model_graph):
     返回：
         后续应返回连接错误列表；没有错误时返回空列表。
     """
-    pass
+    # DAG拓扑排序
+    if isinstance(model_graph, str):
+        model_graph = json.loads(model_graph)
+
+    errors = []
+    layers = model_graph.get("layers", [])
+    connections = model_graph.get("connections", [])
+
+    if not layers:
+        return ["模型图中没有任何层节点"]
+
+    layer_map = {}
+    duplicate_layer_ids = set()
+    for layer in layers:
+        layer_id = layer["id"]
+        if layer_id in layer_map:
+            duplicate_layer_ids.add(layer_id)
+            continue
+        layer_map[layer_id] = layer
+
+    for layer_id in sorted(duplicate_layer_ids):
+        errors.append(f"存在重复的层节点 id: {layer_id}")
+
+    if not connections:
+        if len(layers) > 1:
+            errors.append("模型包含多个层节点时必须提供 connections 连接关系")
+        return errors
+
+    adjacency = {layer_id: [] for layer_id in layer_map}
+    in_degree = {layer_id: 0 for layer_id in layer_map}
+    seen_connections = set()
+
+    for connection in connections:
+        source = connection["source"]
+        target = connection["target"]
+
+        if source not in layer_map:
+            errors.append(f"连接起点不存在: {source}")
+            continue
+        if target not in layer_map:
+            errors.append(f"连接终点不存在: {target}")
+            continue
+        if source == target:
+            errors.append(f"节点 {source} 不能连接到自身")
+            continue
+
+        edge = (source, target)
+        if edge in seen_connections:
+            errors.append(f"存在重复连接: {source} -> {target}")
+            continue
+
+        seen_connections.add(edge)
+        adjacency[source].append(target)
+        in_degree[target] += 1
+
+    if errors:
+        return errors
+
+    ready_nodes = [
+        layer_id
+        for layer_id in layer_map
+        if in_degree[layer_id] == 0
+    ]
+    ordered_ids = []
+
+    while ready_nodes:
+        current_id = ready_nodes.pop(0)
+        ordered_ids.append(current_id)
+
+        for target_id in adjacency[current_id]:
+            in_degree[target_id] -= 1
+            if in_degree[target_id] == 0:
+                ready_nodes.append(target_id)
+
+    if len(ordered_ids) != len(layer_map):
+        cycle_ids = [
+            layer_id
+            for layer_id in layer_map
+            if in_degree[layer_id] > 0
+        ]
+        errors.append(f"模型连接中存在环，无法排序: {cycle_ids}")
+
+    return errors
 
 
 def validate_layer_params(layer_config):
@@ -46,19 +221,136 @@ def validate_layer_params(layer_config):
     返回：
         后续应返回该层的参数错误列表；没有错误时返回空列表。
     """
-    pass
+    errors = []
+
+    if not isinstance(layer_config, dict):
+        return [build_error_message("INVALID_LAYER_CONFIG")]
+
+    layer_id = layer_config.get("id", "<unknown>")
+    layer_type = layer_config.get("type")
+    params = layer_config.get("params", {})
+
+    if not layer_type:
+        return [build_error_message("MISSING_LAYER_TYPE", {"layer_id": layer_id})]
+
+    if not isinstance(params, dict):
+        return [build_error_message("INVALID_PARAMS", {
+            "layer_id": layer_id,
+            "layer_type": layer_type,
+        })]
+
+    def add_error(error_code, extra_context=None):
+        context = {
+            "layer_id": layer_id,
+            "layer_type": layer_type,
+        }
+        if extra_context:
+            context.update(extra_context)
+        errors.append(build_error_message(error_code, context))
+
+    def is_positive_int(value):
+        return isinstance(value, int) and value > 0
+
+    def is_non_negative_int(value):
+        return isinstance(value, int) and value >= 0
+
+    if layer_type == "Input":
+        shape = params.get("shape")
+        if not isinstance(shape, list) or not shape:
+            add_error("INVALID_INPUT_SHAPE")
+        elif not all(is_positive_int(dimension) for dimension in shape):
+            add_error("INVALID_INPUT_SHAPE_DIMENSION")
+
+    elif layer_type == "Conv2D":
+        if not is_positive_int(params.get("out_channels")):
+            add_error("INVALID_POSITIVE_INT", {"param": "out_channels"})
+        if "kernel_size" in params and not is_positive_int(params.get("kernel_size")):
+            add_error("INVALID_POSITIVE_INT", {"param": "kernel_size"})
+        if "stride" in params and not is_positive_int(params.get("stride")):
+            add_error("INVALID_POSITIVE_INT", {"param": "stride"})
+        if "padding" in params and not is_non_negative_int(params.get("padding")):
+            add_error("INVALID_NON_NEGATIVE_INT", {"param": "padding"})
+
+    elif layer_type == "Pooling":
+        if "kernel_size" in params and not is_positive_int(params.get("kernel_size")):
+            add_error("INVALID_POSITIVE_INT", {"param": "kernel_size"})
+        if "stride" in params and not is_positive_int(params.get("stride")):
+            add_error("INVALID_POSITIVE_INT", {"param": "stride"})
+        if "padding" in params and not is_non_negative_int(params.get("padding")):
+            add_error("INVALID_NON_NEGATIVE_INT", {"param": "padding"})
+
+    elif layer_type == "Linear":
+        if not is_positive_int(params.get("out_features")):
+            add_error("INVALID_POSITIVE_INT", {"param": "out_features"})
+
+    elif layer_type == "Dropout":
+        p = params.get("p", 0.5)
+        if not isinstance(p, (int, float)) or not 0 <= p <= 1:
+            add_error("INVALID_DROPOUT_P")
+
+    elif layer_type in ("ReLU", "Flatten", "Output"):
+        pass
+
+    else:
+        add_error("UNSUPPORTED_LAYER_TYPE")
+
+    return errors
 
 
 def infer_all_shapes(model_graph):
     """按执行顺序推导每一层的输入维度和输出维度。
 
     参数：
-        model_graph：已经按规则连接的模型图结构。
+        model_graph：已经按规则连接的模型图结构。传入的model_graph已经从json中提取出来了
 
     返回：
         后续应返回每一层的 input_shape、output_shape 和推导状态。
     """
-    pass
+
+    ordered_layers = topological_sort_layers(model_graph)
+    predecessors = build_predecessor_map(model_graph)
+    shape_by_layer = {}
+
+    for layer_config in ordered_layers:
+        layer_id = layer_config["id"]
+        predecessor_shapes = [
+            shape_by_layer[predecessor_id]["output_shape"]
+            for predecessor_id in predecessors[layer_id]
+        ]
+
+        if not predecessor_shapes:
+            input_shape = None
+        elif len(predecessor_shapes) == 1:
+            input_shape = predecessor_shapes[0]
+        else:
+            input_shape = _merge_shapes(layer_config, predecessor_shapes)
+
+        output_shape = infer_layer_shape(layer_config, input_shape)
+        shape_by_layer[layer_id] = {
+            "input_shape": input_shape,
+            "output_shape": output_shape,
+            "status": "ok" if output_shape is not None else "unknown",
+        }
+
+    return {
+        "layers": shape_by_layer
+    }
+
+
+def _merge_shapes(layer_config, shapes):
+    """根据节点合并方式推导多个前驱 shape 合并后的 shape。"""
+    params = layer_config.get("params", {})
+    merge_mode = params.get("merge", "concat")
+
+    if merge_mode in ("add", "sum"):
+        return shapes[0]
+
+    concat_dim = params.get("dim", params.get("concat_dim", 1))
+    shape_index = concat_dim - 1 if concat_dim > 0 else concat_dim
+    merged_shape = list(shapes[0])
+    merged_shape[shape_index] = sum(shape[shape_index] for shape in shapes)
+
+    return merged_shape
 
 
 def infer_layer_shape(layer_config, input_shape):
@@ -71,7 +363,34 @@ def infer_layer_shape(layer_config, input_shape):
     返回：
         后续应返回该层的输出张量形状。
     """
-    pass
+    if layer_config is None:
+        return None
+
+    layer_type = layer_config.get("type")
+    params = layer_config.get("params", {})
+
+    if layer_type == "Input":
+        return params.get("shape", input_shape)
+
+    if input_shape is None:
+        return None
+
+    if layer_type == "Conv2D":
+        return infer_conv2d_shape(input_shape, params)
+
+    if layer_type == "Pooling":
+        return infer_pooling_shape(input_shape, params)
+
+    if layer_type == "Flatten":
+        return infer_flatten_shape(input_shape)
+
+    if layer_type in ("ReLU", "Dropout", "Output"):
+        return input_shape
+
+    if layer_type == "Linear":
+        return [params.get("out_features")]
+
+    return None
 
 
 def infer_conv2d_shape(input_shape, params):
@@ -84,7 +403,19 @@ def infer_conv2d_shape(input_shape, params):
     返回：
         后续应返回 Conv2D 输出形状 [out_channels, H_out, W_out]。
     """
-    pass
+    if input_shape is None:
+        return None
+    
+    _, height, width = input_shape
+    kernel_size = params.get("kernel_size", 2)
+    stride = params.get("stride", kernel_size)
+    padding = params.get("padding", 0)
+    out_channels = params.get("out_channels", 3)
+
+    H_out = (height + 2 * padding - kernel_size) // stride + 1
+    W_out = (width + 2 * padding - kernel_size) // stride + 1
+
+    return [out_channels, H_out, W_out]
 
 
 def infer_pooling_shape(input_shape, params):
@@ -97,7 +428,18 @@ def infer_pooling_shape(input_shape, params):
     返回：
         后续应返回池化层输出形状 [C, H_out, W_out]。
     """
-    pass
+    if input_shape is None:
+        return None
+
+    channels, height, width = input_shape
+    kernel_size = params.get("kernel_size", 2)
+    stride = params.get("stride", kernel_size)
+    padding = params.get("padding", 0)
+
+    output_height = (height + 2 * padding - kernel_size) // stride + 1
+    output_width = (width + 2 * padding - kernel_size) // stride + 1
+
+    return [channels, output_height, output_width]
 
 
 def infer_flatten_shape(input_shape):
@@ -109,7 +451,14 @@ def infer_flatten_shape(input_shape):
     返回：
         后续应返回展平后的一维形状，例如 [C * H * W]。
     """
-    pass
+    if input_shape is None:
+        return None
+
+    flattened_size = 1
+    for dimension in input_shape:
+        flattened_size *= dimension
+
+    return [flattened_size]
 
 
 def build_error_message(error_code, context=None):
@@ -122,4 +471,32 @@ def build_error_message(error_code, context=None):
     返回：
         后续应返回面向用户的中文错误解释和修改建议。
     """
-    pass
+    context = context or {}
+    layer_id = context.get("layer_id", "<unknown>")
+    layer_type = context.get("layer_type")
+    param = context.get("param")
+
+    if layer_type:
+        prefix = f"层 {layer_id}({layer_type})"
+    else:
+        prefix = f"层 {layer_id}"
+
+    messages = {
+        "INVALID_MODEL_GRAPH": "模型图必须是字典结构",
+        "INVALID_MODEL_LAYERS": "模型图的 layers 字段必须是列表",
+        "INVALID_MODEL_CONNECTIONS": "模型图的 connections 字段必须是列表",
+        "MISSING_REQUIRED_NODE": f"模型缺少必要节点: {context.get('node_type')}",
+        "SHAPE_INFERENCE_FAILED": f"模型维度推导失败: {context.get('reason')}",
+        "UNKNOWN_LAYER_SHAPE": f"层 {layer_id}: 无法推导输出维度",
+        "INVALID_LAYER_CONFIG": "层配置必须是字典结构",
+        "MISSING_LAYER_TYPE": f"{prefix}: 缺少 type 字段",
+        "INVALID_PARAMS": f"{prefix}: params 必须是字典结构",
+        "INVALID_INPUT_SHAPE": f"{prefix}: shape 必须是非空列表，例如 [1, 28, 28]",
+        "INVALID_INPUT_SHAPE_DIMENSION": f"{prefix}: shape 中的每个维度都必须是正整数",
+        "INVALID_POSITIVE_INT": f"{prefix}: {param} 必须是正整数",
+        "INVALID_NON_NEGATIVE_INT": f"{prefix}: {param} 必须是非负整数",
+        "INVALID_DROPOUT_P": f"{prefix}: p 必须是 0 到 1 之间的数值",
+        "UNSUPPORTED_LAYER_TYPE": f"{prefix}: 暂不支持该层类型",
+    }
+
+    return messages.get(error_code, f"{prefix}: 未知校验错误 {error_code}")

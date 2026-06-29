@@ -35,7 +35,7 @@ def create_training_job(model_graph, train_config):
         "model_graph": model_graph,
         "train_config": train_config,
         "current_epoch": 0,
-        "total_epochs": train_config.epochs,
+        "total_epochs": train_config["epochs"],
         "metrics": [],
         "error": None
     }
@@ -44,7 +44,7 @@ def create_training_job(model_graph, train_config):
         "job_id": job_id,
         "status": "pending",
         "current_epoch": 0,
-        "total_epochs": train_config.epochs,
+        "total_epochs": train_config["epochs"],
     }
 
 
@@ -58,12 +58,6 @@ def run_training_job(job_id):
     返回：
         后续应返回训练结果摘要，或将结果写入任务状态存储中。
     """
-    def _get_config_value(config, key, default=None):
-        if isinstance(config, dict):
-            return config.get(key, default)
-
-        return getattr(config, key, default)
-
     if job_id not in TRANING_JOBS:
         raise ValueError(f"训练任务不存在: {job_id}")
 
@@ -74,21 +68,13 @@ def run_training_job(job_id):
         job["status"] = "running"
         job["error"] = None
 
-        dataset_name = _get_config_value(
-            train_config,
-            "dataset_name",
-            "MNIST"
-        )
-        batch_size = _get_config_value(train_config, "batch_size", 64)
-        epochs = _get_config_value(train_config, "epochs", 1)
-        rate = _get_config_value(
-            train_config,
-            "rate",
-            0.001
-        )
-        requested_device = _get_config_value(train_config, "device", "cpu")
-        loss_fn_config = _get_config_value(train_config, "loss_fn", None)
-        optimizer_config = _get_config_value(train_config, "optimizer", None)
+        dataset_name = train_config.get("dataset_name", "MNIST")
+        batch_size = train_config.get("batch_size", 64)
+        epochs = train_config.get("epochs", 1)
+        rate = train_config.get("rate", 0.001)
+        requested_device = train_config.get("device", "cpu")
+        loss_fn_config = train_config.get("loss_fn", None)
+        optimizer_config = train_config.get("optimizer", None)
 
         device = resolve_device(requested_device)
         model = build_model(job["model_graph"]).to(device)
