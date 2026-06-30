@@ -12,6 +12,8 @@ from .schemas import (
     TrainRequest,
 )
 
+from .validator import validate_model_graph
+
 
 app = FastAPI(title="Visual Deep Learning Model Builder")
 
@@ -63,7 +65,7 @@ def validate_model(request: ModelRequest):
     返回：
         后续应返回校验是否通过、错误节点、错误说明和每层维度信息。
     """
-    pass
+    return validate_model_graph(request.model.model_dump())
 
 
 @app.post("/train")

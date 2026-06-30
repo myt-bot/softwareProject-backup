@@ -1,0 +1,182 @@
+import unittest
+
+from backend.validator import (
+    infer_flatten_shape,
+    infer_layer_shape,
+    validate_model_graph,
+)
+
+
+def layer(layer_id, layer_type, params=None):
+    return {
+        "id": layer_id,
+        "type": layer_type,
+        "params": params or {},
+    }
+
+
+def connection(source, target):
+    return {
+        "source": source,
+        "target": target,
+    }
+
+
+def valid_cnn_graph():
+    layers = [
+        layer("input", "Input", {"shape": [1, 28, 28]}),
+        layer("conv", "Conv2D", {"out_channels": 8, "kernel_size": 3, "stride": 1, "padding": 1}),
+        layer("pool", "Pooling", {"kernel_size": 2, "stride": 2, "padding": 0}),
+        layer("flatten", "Flatten"),
+        layer("linear", "Linear", {"out_features": 10}),
+        layer("output", "Output"),
+    ]
+    connections = [
+        connection("input", "conv"),
+        connection("conv", "pool"),
+        connection("pool", "flatten"),
+        connection("flatten", "linear"),
+        connection("linear", "output"),
+    ]
+    return {"layers": layers, "connections": connections}
+
+
+class ValidatorShapeUnitTests(unittest.TestCase):
+    def test_validate_model_graph_accepts_valid_cnn_and_infers_shapes(self):
+        result = validate_model_graph(valid_cnn_graph())
+
+        self.assertTrue(result["valid"])
+        self.assertEqual([], result["errors"])
+        self.assertEqual([8, 28, 28], result["shapes"]["conv"]["output_shape"])
+        self.assertEqual([8, 14, 14], result["shapes"]["pool"]["output_shape"])
+        self.assertEqual([1568], result["shapes"]["flatten"]["output_shape"])
+        self.assertEqual([10], result["shapes"]["linear"]["output_shape"])
+
+    def test_missing_input_node_is_invalid(self):
+        graph = {
+            "layers": [
+                layer("linear", "Linear", {"out_features": 10}),
+                layer("output", "Output"),
+            ],
+            "connections": [connection("linear", "output")],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assertIn("模型缺少必要节点: Input", result["errors"])
+
+    def test_missing_output_node_is_invalid(self):
+        graph = {
+            "layers": [
+                layer("input", "Input", {"shape": [1, 28, 28]}),
+                layer("flatten", "Flatten"),
+            ],
+            "connections": [connection("input", "flatten")],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assertIn("模型缺少必要节点: Output", result["errors"])
+
+    def test_isolated_node_is_invalid(self):
+        graph = {
+            "layers": [
+                layer("input", "Input", {"shape": [1, 28, 28]}),
+                layer("relu", "ReLU"),
+                layer("output", "Output"),
+            ],
+            "connections": [connection("input", "output")],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("孤立" in error or "连接" in error for error in result["errors"]))
+
+    def test_broken_connection_is_invalid(self):
+        graph = {
+            "layers": [
+                layer("input", "Input", {"shape": [1, 28, 28]}),
+                layer("output", "Output"),
+            ],
+            "connections": [connection("input", "missing_output")],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assertIn("连接终点不存在: missing_output", result["errors"])
+
+    def test_cycle_connection_is_invalid(self):
+        graph = {
+            "layers": [
+                layer("input", "Input", {"shape": [1, 28, 28]}),
+                layer("relu", "ReLU"),
+                layer("output", "Output"),
+            ],
+            "connections": [
+                connection("input", "relu"),
+                connection("relu", "output"),
+                connection("output", "relu"),
+            ],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("存在环" in error for error in result["errors"]))
+
+    def test_missing_conv2d_required_parameter_is_invalid(self):
+        graph = {
+            "layers": [
+                layer("input", "Input", {"shape": [1, 28, 28]}),
+                layer("conv", "Conv2D", {"kernel_size": 3}),
+                layer("output", "Output"),
+            ],
+            "connections": [connection("input", "conv"), connection("conv", "output")],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("out_channels 必须是正整数" in error for error in result["errors"]))
+
+    def test_conv2d_shape_inference(self):
+        output_shape = infer_layer_shape(
+            layer("conv", "Conv2D", {"out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 0}),
+            [3, 32, 32],
+        )
+
+        self.assertEqual([16, 28, 28], output_shape)
+
+    def test_pooling_shape_inference(self):
+        output_shape = infer_layer_shape(
+            layer("pool", "Pooling", {"kernel_size": 2, "stride": 2, "padding": 0}),
+            [16, 28, 28],
+        )
+
+        self.assertEqual([16, 14, 14], output_shape)
+
+    def test_flatten_shape_inference(self):
+        self.assertEqual([1568], infer_flatten_shape([8, 14, 14]))
+
+    def test_linear_input_dimension_mismatch_is_invalid(self):
+        graph = {
+            "layers": [
+                layer("input", "Input", {"shape": [1, 28, 28]}),
+                layer("linear", "Linear", {"in_features": 10, "out_features": 3}),
+                layer("output", "Output"),
+            ],
+            "connections": [connection("input", "linear"), connection("linear", "output")],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("Linear" in error and ("维度" in error or "in_features" in error) for error in result["errors"]))
+
+
+if __name__ == "__main__":
+    unittest.main()
