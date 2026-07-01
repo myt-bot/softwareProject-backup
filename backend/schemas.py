@@ -100,3 +100,66 @@ class CodeExportRequest(BaseModel):
 
     model: ModelGraph
     class_name: str = "GeneratedModel"
+
+
+# ============================================================
+# M1 用户与项目管理模块 —— 数据结构
+# 编写者：甘淞文
+# ============================================================
+
+class UserCreateRequest(BaseModel):
+    """创建用户接口的请求体。
+
+    字段：
+        username：用户名，2-20 个字符，支持中英文、数字和下划线。
+        email：用户邮箱，需符合基本邮箱格式。
+    """
+
+    username: str
+    email: str
+
+
+class UserUpdateRequest(BaseModel):
+    """更新用户接口的请求体。所有字段可选，至少提供一个。
+
+    字段：
+        username：新的用户名（可选）。
+        email：新的邮箱（可选）。
+    """
+
+    username: Optional[str] = None
+    email: Optional[str] = None
+
+
+class ProjectCreateRequest(BaseModel):
+    """创建项目（保存模型）接口的请求体。
+
+    字段：
+        user_id：所属用户 id。
+        name：项目名称，不能超过 100 个字符。
+        model_graph：模型图结构，包含 layers 和 connections。
+        description：项目描述（可选），不能超过 500 个字符。
+    """
+
+    user_id: str
+    name: str
+    model_graph: ModelGraph
+    description: Optional[str] = None
+
+
+class ProjectUpdateRequest(BaseModel):
+    """更新项目接口的请求体。所有字段可选，至少提供一个。
+
+    字段：
+        name：新的项目名称（可选）。
+        model_graph：新的模型图结构（可选）。
+        description：新的项目描述（可选）。
+    """
+
+    name: Optional[str] = None
+    model_graph: Optional[ModelGraph] = None
+    description: Optional[str] = None
+
+# ============================================================
+# M1 用户与项目管理模块 —— 数据结构
+# ============================================================
