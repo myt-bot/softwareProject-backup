@@ -83,9 +83,26 @@ def validate_model_graph(model_graph):
     shapes = shape_info.get("layers", {})
     for layer_id, layer_shape in shapes.items():
         if layer_shape.get("status") != "ok":
+            layer_type = layer_shape.get("layer_type")
+            if layer_type == "Linear":
+                errors.append(build_error_message(
+                    "LINEAR_IN_FEATURES_MISMATCH",
+                    {
+                        "layer_id": layer_id,
+                        "layer_type": layer_type,
+                        "input_shape": layer_shape.get("input_shape"),
+                        "expected_in_features": layer_shape.get("expected_in_features"),
+                        "actual_in_features": layer_shape.get("actual_in_features"),
+                    },
+                ))
+                continue
+
             errors.append(build_error_message(
                 "UNKNOWN_LAYER_SHAPE",
-                {"layer_id": layer_id},
+                {
+                    "layer_id": layer_id,
+                    "layer_type": layer_type,
+                },
             ))
 
     return {
@@ -187,6 +204,15 @@ def validate_connections(model_graph):
 
     if errors:
         return errors
+    
+    isolated_nodes = [
+        layer_id
+        for layer_id in layer_map
+        if not adjacency[layer_id] and in_degree[layer_id] == 0
+    ]
+
+    for layer_id in isolated_nodes:
+        errors.append(f"存在孤立节点或连接异常: {layer_id}")
 
     ready_nodes = [
         layer_id
@@ -330,10 +356,18 @@ def infer_all_shapes(model_graph):
 
         output_shape = infer_layer_shape(layer_config, input_shape)
         shape_by_layer[layer_id] = {
+            "layer_type": layer_config.get("type"),
             "input_shape": input_shape,
             "output_shape": output_shape,
             "status": "ok" if output_shape is not None else "unknown",
         }
+
+        if layer_config.get("type") == "Linear":
+            actual_in_features = _flattened_size(input_shape)
+            if actual_in_features is not None:
+                shape_by_layer[layer_id]["actual_in_features"] = actual_in_features
+            if layer_config.get("params", {}).get("in_features") is not None:
+                shape_by_layer[layer_id]["expected_in_features"] = layer_config.get("params", {}).get("in_features")
 
     return {
         "layers": shape_by_layer
@@ -391,9 +425,36 @@ def infer_layer_shape(layer_config, input_shape):
         return input_shape
 
     if layer_type == "Linear":
-        return [params.get("out_features")]
+        return infer_linear_shape(input_shape, params)
 
     return None
+
+
+def infer_linear_shape(input_shape, params):
+    """根据输入维度和 Linear 参数推导输出维度。"""
+    params = params or {}
+    out_features = params.get("out_features")
+    in_features = params.get("in_features")
+
+    actual_in_features = _flattened_size(input_shape)
+    if actual_in_features is None:
+        return None
+
+    if in_features is not None and in_features != actual_in_features:
+        return None
+
+    return [out_features]
+
+
+def _flattened_size(input_shape):
+    """返回输入 shape 展平后的元素数量；无法计算时返回 None。"""
+    flattened_size = 1
+    for dimension in input_shape:
+        if dimension <= 0:
+            return None
+        flattened_size *= dimension
+
+    return flattened_size
 
 
 def infer_conv2d_shape(input_shape, params):
@@ -510,6 +571,12 @@ def build_error_message(error_code, context=None):
         "INVALID_NON_NEGATIVE_INT": f"{prefix}: {param} 必须是非负整数",
         "INVALID_DROPOUT_P": f"{prefix}: p 必须是 0 到 1 之间的数值",
         "UNSUPPORTED_LAYER_TYPE": f"{prefix}: 暂不支持该层类型",
+        "LINEAR_IN_FEATURES_MISMATCH": (
+            f"{prefix}: Linear 输入维度与 in_features 不匹配，"
+            f"当前输入 shape 为 {context.get('input_shape')}，"
+            f"展平后维度为 {context.get('actual_in_features')}，"
+            f"in_features 为 {context.get('expected_in_features')}"
+        ),
     }
 
     return messages.get(error_code, f"{prefix}: 未知校验错误 {error_code}")
