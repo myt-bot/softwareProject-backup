@@ -276,7 +276,25 @@ class CodeExportRequest(BaseModel):
     model: ModelGraph
     class_name: str = "GeneratedModel"
 
-<<<<<<< HEAD
+    def check_model(self) -> List[str]:
+        """检查代码导出请求中的模型图。"""
+        if not isinstance(self.model, ModelGraph):
+            return ["model 必须是 ModelGraph"]
+        return self.model.check_all()
+
+    def check_class_name(self) -> List[str]:
+        """检查导出类名是否为非空字符串。"""
+        if not isinstance(self.class_name, str) or not self.class_name.strip():
+            return ["class_name 必须是非空字符串"]
+        return []
+
+    def check_all(self) -> List[str]:
+        """汇总检查代码导出请求。"""
+        errors = []
+        errors.extend(self.check_model())
+        errors.extend(self.check_class_name())
+        return errors
+
 
 # ============================================================
 # M1 用户与项目管理模块 —— 数据结构
@@ -336,26 +354,3 @@ class ProjectUpdateRequest(BaseModel):
     model_graph: Optional[ModelGraph] = None
     description: Optional[str] = None
 
-# ============================================================
-# M1 用户与项目管理模块 —— 数据结构
-# ============================================================
-=======
-    def check_model(self) -> List[str]:
-        """检查代码导出请求中的模型图。"""
-        if not isinstance(self.model, ModelGraph):
-            return ["model 必须是 ModelGraph"]
-        return self.model.check_all()
-
-    def check_class_name(self) -> List[str]:
-        """检查导出类名是否为非空字符串。"""
-        if not isinstance(self.class_name, str) or not self.class_name.strip():
-            return ["class_name 必须是非空字符串"]
-        return []
-
-    def check_all(self) -> List[str]:
-        """汇总检查代码导出请求。"""
-        errors = []
-        errors.extend(self.check_model())
-        errors.extend(self.check_class_name())
-        return errors
->>>>>>> 778d884361f0ecefb0f0b9490eae6e24633b97f1
