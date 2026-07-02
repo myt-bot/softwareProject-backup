@@ -1498,68 +1498,96 @@ function updateNodeDisplay(node) {
 }
 
 
-function renderConvInspector() {
+function renderConvInspector(node) {
   document.getElementById("inspector-content").innerHTML = `
     <div class="inspector-scroll">
       <div class="inspector-title">
         <iconify-icon class="text-blue" icon="mdi:grid-large"></iconify-icon>
         <h2>Conv2D 参数</h2>
       </div>
+
       <div class="field-stack">
-        ${stepperField("Out Channels (输出通道)", "16")}
-        ${stepperField("Kernel Size (卷积核大小)", "3")}
+        ${editableNumberField("Out Channels (输出通道)", "out_channels", node.params.out_channels)}
+        ${editableNumberField("Kernel Size (卷积核大小)", "kernel_size", node.params.kernel_size)}
         <div class="field-grid">
-          ${numberField("Stride", "1")}
-          ${numberField("Padding", "0")}
+          ${editableNumberField("Stride", "stride", node.params.stride)}
+          ${editableNumberField("Padding", "padding", node.params.padding)}
         </div>
       </div>
+
       <section class="info-card blue-card">
-        <h4><iconify-icon icon="mdi:information-outline"></iconify-icon> 卷积层 (Conv2D)</h4>
+        <h4><iconify-icon icon="mdi:information-outline"></iconify-icon> 卷积层 Conv2D</h4>
         <p>卷积层用于提取局部特征，out_channels 越大，学习到的特征映射越丰富，但计算开销也会增加。</p>
-      </section>
-      <section class="shape-panel">
-        <h3>Tensor Shape Inference</h3>
-        <div class="shape-box"><span>Input</span><strong>28x28x1</strong></div>
-        <iconify-icon class="shape-arrow" icon="mdi:chevron-down"></iconify-icon>
-        <div class="shape-box active"><span>Conv2D (16, 3x3)</span><strong>26x26x16</strong></div>
       </section>
     </div>
   `;
+
+  bindInspectorNumberInputs(node.id);
 }
 
+function editableNumberField(label, key, value) {
+  return `
+    <label class="form-field">
+      <span>${label}</span>
+      <input class="param-input" data-param-key="${key}" type="number" value="${value ?? ""}">
+    </label>
+  `;
+}
 
-function renderLinearInspector() {
+function bindInspectorNumberInputs(nodeId) {
+  document.querySelectorAll(".param-input").forEach(input => {
+    input.addEventListener("change", event => {
+      const key = event.target.dataset.paramKey;
+      const rawValue = event.target.value;
+
+      if (rawValue === "") {
+        showToast("warning", "参数不能为空。");
+        return;
+      }
+
+      const value = Number(rawValue);
+
+      if (Number.isNaN(value)) {
+        showToast("warning", "参数必须是数字。");
+        return;
+      }
+
+      updateNodeParam(nodeId, key, value);
+    });
+  });
+}
+
+function renderLinearInspector(node) {
   const isError = state.validationStatus === "failed" && state.inFeatures !== 2704;
+
   document.getElementById("inspector-content").innerHTML = `
     <div class="inspector-scroll">
       <div class="inspector-title">
         <iconify-icon class="text-cyan" icon="mdi:ray-start-end"></iconify-icon>
         <h2>Linear 参数</h2>
       </div>
+
       ${isError ? `
         <section class="error-card">
-          <h4><iconify-icon icon="mdi:alert-circle"></iconify-icon> Shape mismatch (维度不匹配)</h4>
-          <p>前一层 (Flatten) 输出维度为 2704，而当前 Linear.in_features 设为 ${state.inFeatures}。</p>
-          <button id="btn-autofix">一键修复 (Auto-fix to 2704)</button>
+          <h4><iconify-icon icon="mdi:alert-circle"></iconify-icon> Shape mismatch</h4>
+          <p>前一层 Flatten 输出维度为 2704，而当前 Linear.in_features 设为 ${state.inFeatures}。</p>
+          <button id="btn-autofix">一键修复</button>
         </section>
       ` : ""}
+
       <div class="field-stack">
         <label class="form-field muted-field">
-          <span>In Features (输入特征数)</span>
+          <span>In Features 输入特征数</span>
           <input type="text" value="${state.inFeatures}" readonly>
           <small>由前一层自动推导</small>
         </label>
-        ${stepperField("Out Features (输出神经元)", "128")}
+
+        ${editableNumberField("Out Features 输出神经元", "out_features", node.params.out_features)}
       </div>
-      <section class="shape-panel">
-        <h3>Tensor Shape Timeline</h3>
-        <div class="shape-chips">
-          <span>28x28x1</span><b>→</b><span>26x26x16</span><b>→</b><span>13x13x16</span><b>→</b>
-          <span class="chip-active">2704</span><b>→</b><span class="${isError ? "chip-error" : ""}">${state.inFeatures}</span>
-        </div>
-      </section>
     </div>
   `;
+
+  bindInspectorNumberInputs(node.id);
 
   const fixButton = document.getElementById("btn-autofix");
   if (fixButton) {
@@ -1567,6 +1595,77 @@ function renderLinearInspector() {
   }
 }
 
+function renderPoolingInspector(node) {
+  document.getElementById("inspector-content").innerHTML = `
+    <div class="inspector-scroll">
+      <div class="inspector-title">
+        <iconify-icon class="text-purple" icon="mdi:resize"></iconify-icon>
+        <h2>Pooling 参数</h2>
+      </div>
+
+      <div class="field-stack">
+        ${editableNumberField("Kernel Size 池化核大小", "kernel_size", node.params.kernel_size)}
+        ${editableNumberField("Stride 步长", "stride", node.params.stride)}
+        ${editableNumberField("Padding 填充", "padding", node.params.padding)}
+      </div>
+    </div>
+  `;
+
+  bindInspectorNumberInputs(node.id);
+}
+
+
+function renderDropoutInspector(node) {
+  document.getElementById("inspector-content").innerHTML = `
+    <div class="inspector-scroll">
+      <div class="inspector-title">
+        <iconify-icon class="text-amber" icon="mdi:filter-off-outline"></iconify-icon>
+        <h2>Dropout 参数</h2>
+      </div>
+
+      <div class="field-stack">
+        ${editableNumberField("Dropout Rate 随机失活比例", "p", node.params.p)}
+      </div>
+
+      <section class="info-card">
+        <p>p 一般取 0 到 1 之间的小数，例如 0.5。</p>
+      </section>
+    </div>
+  `;
+
+  bindInspectorNumberInputs(node.id);
+}
+
+function renderInputInspector(node) {
+  document.getElementById("inspector-content").innerHTML = `
+    <div class="inspector-scroll">
+      <div class="inspector-title">
+        <iconify-icon class="text-emerald" icon="mdi:login-variant"></iconify-icon>
+        <h2>Input 参数</h2>
+      </div>
+
+      <label class="form-field">
+        <span>Input Shape 输入形状</span>
+        <input id="input-shape-field" type="text" value="${node.params.shape.join(",")}">
+        <small>格式示例：1,28,28</small>
+      </label>
+    </div>
+  `;
+
+  document.getElementById("input-shape-field").addEventListener("change", event => {
+    const shape = event.target.value
+      .split(",")
+      .map(item => Number(item.trim()))
+      .filter(item => !Number.isNaN(item));
+
+    if (shape.length === 0) {
+      showToast("warning", "Input shape 不能为空。");
+      return;
+    }
+
+    updateNodeParam(node.id, "shape", shape);
+  });
+}
 
 function stepperField(label, value) {
   return `
