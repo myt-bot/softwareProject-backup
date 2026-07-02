@@ -10,6 +10,7 @@ from .schemas import (
     CodeExportRequest,
     ModelRequest,
     ProjectCreateRequest,
+    ProjectTemplateCreateRequest,
     ProjectUpdateRequest,
     TrainRequest,
     UserCreateRequest,
@@ -301,6 +302,75 @@ def create_project(request: ProjectCreateRequest):
             description=request.description,
         )
         return {"status": "ok", "data": project}
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": str(exc)},
+        )
+
+
+@app.get("/projects/templates")
+def list_project_templates():
+    """获取可用于创建项目的内置模型模板列表。"""
+    from .templates import get_available_templates
+
+    templates = get_available_templates()
+    return {"status": "ok", "data": templates, "count": len(templates)}
+
+
+@app.get("/projects/templates/{template_name}")
+def get_project_template(template_name: str):
+    """获取指定模板的完整模型图。"""
+    from .templates import apply_template
+    from fastapi.responses import JSONResponse
+
+    result = apply_template(template_name)
+    if result.get("status") != "ok":
+        return JSONResponse(
+            status_code=404,
+            content=result,
+        )
+
+    return result
+
+
+@app.post("/projects/from-template")
+def create_project_from_template(request: ProjectTemplateCreateRequest):
+    """基于内置模板创建项目，并复用 /projects 的项目存储逻辑。"""
+    from .projects import create_project as _create_project
+    from .templates import apply_template, get_available_templates
+    from fastapi.responses import JSONResponse
+
+    template_result = apply_template(request.template_name)
+    if template_result.get("status") != "ok":
+        return JSONResponse(
+            status_code=404,
+            content=template_result,
+        )
+
+    template_meta = next(
+        (
+            template
+            for template in get_available_templates()
+            if template["key"] == template_result["template"]
+        ),
+        None,
+    )
+    project_name = request.name or (
+        f"{template_meta['name']} Project" if template_meta else f"{request.template_name} Project"
+    )
+    description = request.description
+    if description is None and template_meta:
+        description = template_meta.get("description")
+
+    try:
+        project = _create_project(
+            user_id=request.user_id,
+            name=project_name,
+            model_graph=template_result["model"],
+            description=description,
+        )
+        return {"status": "ok", "data": project, "template": template_result["template"]}
     except ValueError as exc:
         return JSONResponse(
             status_code=400,

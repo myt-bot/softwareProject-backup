@@ -341,6 +341,22 @@ class ProjectCreateRequest(BaseModel):
     description: Optional[str] = None
 
 
+class ProjectTemplateCreateRequest(BaseModel):
+    """基于内置模板创建项目的请求体。
+
+    字段：
+        user_id：所属用户 id。
+        template_name：模板 key 或别名，例如 mlp、lenet、transformer_encoder_tiny。
+        name：项目名称；为空时使用模板名称生成默认项目名。
+        description：项目描述（可选）。
+    """
+
+    user_id: str
+    template_name: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
 class ProjectUpdateRequest(BaseModel):
     """更新项目接口的请求体。所有字段可选，至少提供一个。
 

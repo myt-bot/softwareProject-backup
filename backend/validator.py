@@ -283,6 +283,9 @@ def validate_layer_params(layer_config):
     def is_non_negative_int(value):
         return isinstance(value, int) and value >= 0
 
+    def is_bool(value):
+        return isinstance(value, bool)
+
     if layer_type == "Input":
         shape = params.get("shape")
         if not isinstance(shape, list) or not shape:
@@ -316,6 +319,50 @@ def validate_layer_params(layer_config):
         p = params.get("p", 0.5)
         if not isinstance(p, (int, float)) or not 0 <= p <= 1:
             add_error("INVALID_DROPOUT_P")
+
+    elif layer_type in ("SelfAttention", "TransformerEncoder"):
+        embed_param = "embed_dim" if layer_type == "SelfAttention" else "d_model"
+        if not is_positive_int(params.get(embed_param)):
+            add_error("INVALID_POSITIVE_INT", {"param": embed_param})
+        if not is_positive_int(params.get("num_heads")):
+            add_error("INVALID_POSITIVE_INT", {"param": "num_heads"})
+        elif is_positive_int(params.get(embed_param)) and params.get(embed_param) % params.get("num_heads") != 0:
+            add_error("INVALID_ATTENTION_HEADS", {"param": "num_heads"})
+        if layer_type == "TransformerEncoder":
+            if not is_positive_int(params.get("num_layers", 1)):
+                add_error("INVALID_POSITIVE_INT", {"param": "num_layers"})
+            if not is_positive_int(params.get("dim_feedforward", params.get("d_model", 1) * 4)):
+                add_error("INVALID_POSITIVE_INT", {"param": "dim_feedforward"})
+
+    elif layer_type == "LSTM":
+        if not is_positive_int(params.get("hidden_size")):
+            add_error("INVALID_POSITIVE_INT", {"param": "hidden_size"})
+        if not is_positive_int(params.get("num_layers", 1)):
+            add_error("INVALID_POSITIVE_INT", {"param": "num_layers"})
+        if "bidirectional" in params and not is_bool(params.get("bidirectional")):
+            add_error("INVALID_BOOL", {"param": "bidirectional"})
+        if "return_sequences" in params and not is_bool(params.get("return_sequences")):
+            add_error("INVALID_BOOL", {"param": "return_sequences"})
+
+    elif layer_type == "Seq2Seq":
+        if not is_positive_int(params.get("hidden_size")):
+            add_error("INVALID_POSITIVE_INT", {"param": "hidden_size"})
+        if not is_positive_int(params.get("output_size")):
+            add_error("INVALID_POSITIVE_INT", {"param": "output_size"})
+        if not is_positive_int(params.get("target_length")):
+            add_error("INVALID_POSITIVE_INT", {"param": "target_length"})
+        if not is_positive_int(params.get("num_layers", 1)):
+            add_error("INVALID_POSITIVE_INT", {"param": "num_layers"})
+
+    elif layer_type == "VAE":
+        if not is_positive_int(params.get("latent_dim")):
+            add_error("INVALID_POSITIVE_INT", {"param": "latent_dim"})
+        if "output_features" in params and not is_positive_int(params.get("output_features")):
+            add_error("INVALID_POSITIVE_INT", {"param": "output_features"})
+
+    elif layer_type == "GraphConv":
+        if not is_positive_int(params.get("out_features")):
+            add_error("INVALID_POSITIVE_INT", {"param": "out_features"})
 
     elif layer_type in ("ReLU", "Flatten", "Output"):
         pass
@@ -427,6 +474,24 @@ def infer_layer_shape(layer_config, input_shape):
     if layer_type == "Linear":
         return infer_linear_shape(input_shape, params)
 
+    if layer_type == "SelfAttention":
+        return infer_self_attention_shape(input_shape, params)
+
+    if layer_type == "TransformerEncoder":
+        return infer_transformer_encoder_shape(input_shape, params)
+
+    if layer_type == "LSTM":
+        return infer_lstm_shape(input_shape, params)
+
+    if layer_type == "Seq2Seq":
+        return infer_seq2seq_shape(input_shape, params)
+
+    if layer_type == "VAE":
+        return infer_vae_shape(input_shape, params)
+
+    if layer_type == "GraphConv":
+        return infer_graph_conv_shape(input_shape, params)
+
     return None
 
 
@@ -444,6 +509,72 @@ def infer_linear_shape(input_shape, params):
         return None
 
     return [out_features]
+
+
+def infer_self_attention_shape(input_shape, params):
+    """推导自注意力层输出维度，输出 shape 与输入保持一致。"""
+    if not isinstance(input_shape, (list, tuple)) or len(input_shape) < 2:
+        return None
+
+    embed_dim = params.get("embed_dim")
+    if input_shape[-1] != embed_dim:
+        return None
+
+    return list(input_shape)
+
+
+def infer_transformer_encoder_shape(input_shape, params):
+    """推导 Transformer Encoder 输出维度，输出 shape 与输入保持一致。"""
+    if not isinstance(input_shape, (list, tuple)) or len(input_shape) < 2:
+        return None
+
+    d_model = params.get("d_model")
+    if input_shape[-1] != d_model:
+        return None
+
+    return list(input_shape)
+
+
+def infer_lstm_shape(input_shape, params):
+    """推导 LSTM 输出维度。输入约定为 [seq_len, input_size]。"""
+    if not isinstance(input_shape, (list, tuple)) or len(input_shape) != 2:
+        return None
+
+    seq_len, _ = input_shape
+    hidden_size = params.get("hidden_size")
+    directions = 2 if params.get("bidirectional", False) else 1
+    output_features = hidden_size * directions
+
+    if params.get("return_sequences", False):
+        return [seq_len, output_features]
+
+    return [output_features]
+
+
+def infer_seq2seq_shape(input_shape, params):
+    """推导 Seq2Seq 输出维度。输入约定为 [source_length, input_size]。"""
+    if not isinstance(input_shape, (list, tuple)) or len(input_shape) != 2:
+        return None
+
+    return [params.get("target_length"), params.get("output_size")]
+
+
+def infer_vae_shape(input_shape, params):
+    """推导 VAE 重建输出维度，默认重建为展平后的输入长度。"""
+    flattened_size = _flattened_size(input_shape)
+    if flattened_size is None:
+        return None
+
+    return [params.get("output_features", flattened_size)]
+
+
+def infer_graph_conv_shape(input_shape, params):
+    """推导图卷积输出维度。输入约定为 [num_nodes, in_features]。"""
+    if not isinstance(input_shape, (list, tuple)) or len(input_shape) != 2:
+        return None
+
+    num_nodes, _ = input_shape
+    return [num_nodes, params.get("out_features")]
 
 
 def _flattened_size(input_shape):
@@ -570,6 +701,8 @@ def build_error_message(error_code, context=None):
         "INVALID_POSITIVE_INT": f"{prefix}: {param} 必须是正整数",
         "INVALID_NON_NEGATIVE_INT": f"{prefix}: {param} 必须是非负整数",
         "INVALID_DROPOUT_P": f"{prefix}: p 必须是 0 到 1 之间的数值",
+        "INVALID_BOOL": f"{prefix}: {param} 必须是布尔值 true 或 false",
+        "INVALID_ATTENTION_HEADS": f"{prefix}: 注意力维度必须能被 num_heads 整除",
         "UNSUPPORTED_LAYER_TYPE": f"{prefix}: 暂不支持该层类型",
         "LINEAR_IN_FEATURES_MISMATCH": (
             f"{prefix}: Linear 输入维度与 in_features 不匹配，"

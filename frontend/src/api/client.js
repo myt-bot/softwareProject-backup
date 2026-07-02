@@ -71,6 +71,32 @@ export async function validateModel(modelGraph) {
 }
 
 
+export async function fetchProjectTemplates() {
+  return request("/projects/templates");
+}
+
+
+export async function fetchProjectTemplate(templateName) {
+  return request(`/projects/templates/${encodeURIComponent(templateName)}`);
+}
+
+
+export async function createProject(project) {
+  return request("/projects", {
+    method: "POST",
+    body: JSON.stringify(project),
+  });
+}
+
+
+export async function createProjectFromTemplate(templateProject) {
+  return request("/projects/from-template", {
+    method: "POST",
+    body: JSON.stringify(templateProject),
+  });
+}
+
+
 export async function startTraining(modelGraph, trainConfig) {
   return request("/train", {
     method: "POST",

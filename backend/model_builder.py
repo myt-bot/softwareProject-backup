@@ -22,7 +22,7 @@ def build_model(model_graph):
     返回：
         GraphModel：支持 DAG 前向传播的 PyTorch 模型。
     """
-    normalized_graph = json.loads(model_graph)
+    normalized_graph = json.loads(model_graph) if isinstance(model_graph, str) else model_graph
     ordered_layers = order_layers(normalized_graph)
     shape_info = infer_all_shapes(normalized_graph)
 
@@ -190,6 +190,57 @@ def create_layer(layer_config, input_shape=None):
             p=layer_params.get("p", 0.5)
         )
 
+    if layer_type == "SelfAttention":
+        return SelfAttentionBlock(
+            embed_dim=layer_params["embed_dim"],
+            num_heads=layer_params["num_heads"],
+            dropout=layer_params.get("dropout", 0.0),
+        )
+
+    if layer_type == "TransformerEncoder":
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=layer_params["d_model"],
+            nhead=layer_params["num_heads"],
+            dim_feedforward=layer_params.get("dim_feedforward", layer_params["d_model"] * 4),
+            dropout=layer_params.get("dropout", 0.1),
+            batch_first=True,
+        )
+        return nn.TransformerEncoder(
+            encoder_layer=encoder_layer,
+            num_layers=layer_params.get("num_layers", 1),
+        )
+
+    if layer_type == "LSTM":
+        return LSTMLayer(
+            input_size=input_shape[-1],
+            hidden_size=layer_params["hidden_size"],
+            num_layers=layer_params.get("num_layers", 1),
+            bidirectional=layer_params.get("bidirectional", False),
+            return_sequences=layer_params.get("return_sequences", False),
+        )
+
+    if layer_type == "Seq2Seq":
+        return Seq2SeqLayer(
+            input_size=input_shape[-1],
+            hidden_size=layer_params["hidden_size"],
+            output_size=layer_params["output_size"],
+            target_length=layer_params["target_length"],
+            num_layers=layer_params.get("num_layers", 1),
+        )
+
+    if layer_type == "VAE":
+        return VAELayer(
+            input_features=_flattened_size(input_shape),
+            latent_dim=layer_params["latent_dim"],
+            output_features=layer_params.get("output_features", _flattened_size(input_shape)),
+        )
+
+    if layer_type == "GraphConv":
+        return GraphConvLayer(
+            in_features=input_shape[-1],
+            out_features=layer_params["out_features"],
+        )
+
 
 def order_layers(model_graph):
     """将画布中的模型节点排序为拓扑执行顺序。
@@ -233,6 +284,120 @@ def _merge_tensors(layer_config, tensors):
         for tensor in tensors[1:]:
             merged = merged + tensor
         return merged
+
+
+def _flattened_size(shape):
+    """计算不含 batch 维度的展平特征数。"""
+    flattened_size = 1
+    for dimension in shape:
+        flattened_size *= dimension
+    return flattened_size
+
+
+class SelfAttentionBlock(nn.Module):
+    """面向教学的单层多头自注意力模块。"""
+
+    def __init__(self, embed_dim, num_heads, dropout=0.0):
+        super().__init__()
+        self.attention = nn.MultiheadAttention(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True,
+        )
+
+    def forward(self, x):
+        output, _ = self.attention(x, x, x)
+        return output
+
+
+class LSTMLayer(nn.Module):
+    """包装 PyTorch LSTM，默认返回最后一个时间步。"""
+
+    def __init__(self, input_size, hidden_size, num_layers=1, bidirectional=False, return_sequences=False):
+        super().__init__()
+        self.return_sequences = return_sequences
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            bidirectional=bidirectional,
+            batch_first=True,
+        )
+
+    def forward(self, x):
+        output, _ = self.lstm(x)
+        if self.return_sequences:
+            return output
+        return output[:, -1, :]
+
+
+class Seq2SeqLayer(nn.Module):
+    """简化版编码器-解码器层，用于展示 Seq2Seq 的数据流。"""
+
+    def __init__(self, input_size, hidden_size, output_size, target_length, num_layers=1):
+        super().__init__()
+        self.target_length = target_length
+        self.encoder = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+        )
+        self.decoder_cell = nn.LSTM(
+            input_size=output_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+        )
+        self.initial_decoder_input = nn.Parameter(torch.zeros(1, 1, output_size))
+        self.output_projection = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x):
+        batch_size = x.size(0)
+        _, hidden = self.encoder(x)
+        decoder_input = self.initial_decoder_input.expand(batch_size, self.target_length, -1)
+        decoder_output, _ = self.decoder_cell(decoder_input, hidden)
+        return self.output_projection(decoder_output)
+
+
+class VAELayer(nn.Module):
+    """简化版 VAE 层，返回重建结果。"""
+
+    def __init__(self, input_features, latent_dim, output_features):
+        super().__init__()
+        self.encoder_mu = nn.Linear(input_features, latent_dim)
+        self.encoder_logvar = nn.Linear(input_features, latent_dim)
+        self.decoder = nn.Linear(latent_dim, output_features)
+
+    def forward(self, x):
+        x = torch.flatten(x, start_dim=1)
+        mu = self.encoder_mu(x)
+        logvar = self.encoder_logvar(x)
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        z = mu + eps * std
+        return self.decoder(z)
+
+
+class GraphConvLayer(nn.Module):
+    """简化 GCN 层，支持直接传节点特征或 {"x": features, "adj": adjacency}。"""
+
+    def __init__(self, in_features, out_features):
+        super().__init__()
+        self.projection = nn.Linear(in_features, out_features)
+
+    def forward(self, x):
+        adjacency = None
+        if isinstance(x, dict):
+            adjacency = x.get("adj")
+            x = x.get("x")
+
+        support = self.projection(x)
+        if adjacency is None:
+            return support
+
+        return torch.matmul(adjacency, support)
 
 
 def extract_model_summary(model):

@@ -1,6 +1,9 @@
 import {
+  createProject,
   exportPytorchCode,
   fetchDevices,
+  fetchProjectTemplate,
+  fetchProjectTemplates,
   fetchTrainingResult,
   fetchTrainingStatus,
   isBackendNotImplemented,
@@ -146,6 +149,7 @@ function initializeApp() {
   initializeInspector();
   bindEvents();
   loadDevices();
+  loadProjectTemplates();
   setTimeout(() => {
     drawLines();
     centerGraphInCanvas();
@@ -285,9 +289,7 @@ function bindEvents() {
   canvas.addEventListener("drop", handleCanvasDrop);
 
   document.querySelectorAll("[data-template]").forEach(button => {
-    button.addEventListener("click", () => {
-      showToast("warning", "模板加载接口暂未实现，当前展示 MNIST-CNN 原型结构。");
-    });
+    button.addEventListener("click", () => loadTemplateToCanvas(button.dataset.template));
   });
 
   ["zoom-out", "zoom-in", "zoom-fit"].forEach(id => {
@@ -1289,9 +1291,123 @@ function getLayerConfig(layerType) {
       note: "p=0.5",
       params: { p: 0.5 },
     },
+    LSTM: {
+      type: "LSTM",
+      title: "LSTM",
+      badge: "LSTM",
+      color: "cyan",
+      params: { hidden_size: 32, num_layers: 1, return_sequences: false },
+    },
+    Seq2Seq: {
+      type: "Seq2Seq",
+      title: "Seq2Seq",
+      badge: "Seq2Seq",
+      color: "indigo",
+      params: { hidden_size: 32, output_size: 12, target_length: 6, num_layers: 1 },
+    },
+    TransformerEncoder: {
+      type: "TransformerEncoder",
+      title: "Transformer",
+      badge: "Transformer",
+      color: "purple",
+      params: { d_model: 32, num_heads: 4, num_layers: 1, dim_feedforward: 64, dropout: 0.1 },
+    },
+    SelfAttention: {
+      type: "SelfAttention",
+      title: "Self Attention",
+      badge: "Attention",
+      color: "blue",
+      params: { embed_dim: 32, num_heads: 4, dropout: 0 },
+    },
+    VAE: {
+      type: "VAE",
+      title: "VAE",
+      badge: "VAE",
+      color: "rose",
+      params: { latent_dim: 32, output_features: 784 },
+    },
+    GraphConv: {
+      type: "GraphConv",
+      title: "GraphConv",
+      badge: "GCN",
+      color: "emerald",
+      params: { out_features: 32 },
+    },
   };
 
   return configs[layerType] || configs.Linear;
+}
+
+
+async function loadProjectTemplates() {
+  try {
+    const result = await fetchProjectTemplates();
+    if (result?.count) {
+      showToast("info", `已连接模板库: ${result.count} 个模板`);
+    }
+  } catch (error) {
+    showBackendError(error, "模板列表接口暂未实现。");
+  }
+}
+
+
+async function loadTemplateToCanvas(templateName) {
+  try {
+    const result = await fetchProjectTemplate(templateName);
+    const graph = result?.model;
+    if (!graph) {
+      showToast("error", "模板数据为空，无法加载。");
+      return;
+    }
+
+    applyTemplateGraph(graph);
+    showToast("success", `已加载模板: ${templateName}`);
+  } catch (error) {
+    showBackendError(error, "模板加载接口暂未实现。");
+  }
+}
+
+
+function applyTemplateGraph(modelGraph) {
+  const canvas = document.getElementById("canvas-container");
+  const centeredX = Math.max(40, (canvas.clientWidth - 224) / 2);
+
+  nodes = modelGraph.layers.map((layer, index) => {
+    const config = getLayerConfig(layer.type);
+    return {
+      id: layer.id,
+      type: layer.type,
+      title: layer.name || config.title || layer.type,
+      badge: config.badge || layer.type,
+      color: config.color || "cyan",
+      note: formatLayerNote(layer),
+      hint: "?",
+      x: centeredX,
+      y: 60 + index * 205,
+      params: { ...(layer.params || {}) },
+    };
+  });
+  connections = modelGraph.connections.map(connection => [connection.source, connection.target]);
+  state.selectedNodeId = null;
+  state.edgeControls = {};
+  state.selectedConnectionKey = null;
+  state.hasCenteredInitialGraph = true;
+  initializeInspector();
+  updateCanvasSize();
+  renderCanvasNodes();
+  resetValidationAfterGraphChange();
+  centerGraphInCanvas();
+}
+
+
+function formatLayerNote(layer) {
+  const params = layer.params || {};
+  const entries = Object.entries(params)
+    .filter(([, value]) => typeof value !== "object")
+    .slice(0, 3)
+    .map(([key, value]) => `${key}=${value}`);
+
+  return entries.join(", ");
 }
 
 
@@ -1707,8 +1823,30 @@ function autoFix() {
 }
 
 
-function handleSaveProject() {
-  showToast("warning", "保存模型接口暂未实现。");
+async function handleSaveProject() {
+  const userId = window.prompt("请输入 user_id，用于保存到 /projects：");
+  if (!userId) {
+    showToast("warning", "已取消保存。");
+    return;
+  }
+
+  const name = window.prompt("请输入项目名称：", "Untitled Model");
+  if (!name) {
+    showToast("warning", "已取消保存。");
+    return;
+  }
+
+  try {
+    const result = await createProject({
+      user_id: userId,
+      name,
+      model_graph: getCurrentModelGraph(),
+      description: "Created from visual model editor",
+    });
+    showToast("success", `项目已保存: ${result?.data?.name || name}`);
+  } catch (error) {
+    showBackendError(error, "保存项目失败，请确认用户已创建。");
+  }
 }
 
 
