@@ -1,6 +1,14 @@
 """请求和响应数据结构。
 
 这里维护前后端之间的数据约定。后续项目细化后，可以继续增加更严格的字段校验规则。
+
+check_*() 方法用于手动二次校验（主要在测试中使用 model_construct() 绕过 Pydantic
+内置校验后进行验证）；生产路径中 Pydantic 类型系统已保证基本类型正确。
+
+M1 用户与项目管理（编写者：甘淞文）：
+- UserCreateRequest / UserRegisterRequest / UserLoginRequest / TokenResponse：用户与认证相关模型
+- ProjectCreateRequest / ProjectUpdateRequest：项目管理相关模型
+- UserRegisterRequest.check_password()：密码强度校验
 """
 
 from typing import Any, Dict, List, Optional
@@ -307,10 +315,12 @@ class UserCreateRequest(BaseModel):
     字段：
         username：用户名，2-20 个字符，支持中英文、数字和下划线。
         email：用户邮箱，需符合基本邮箱格式。
+        password：登录密码，8-128 字符，至少含一个字母和一个数字。
     """
 
     username: str
     email: str
+    password: str
 
 
 class UserUpdateRequest(BaseModel):
@@ -319,10 +329,76 @@ class UserUpdateRequest(BaseModel):
     字段：
         username：新的用户名（可选）。
         email：新的邮箱（可选）。
+        password：新的密码（可选）。
     """
 
     username: Optional[str] = None
     email: Optional[str] = None
+    password: Optional[str] = None
+
+
+# ============================================================
+# M1 认证模块 —— 数据结构
+# 编写者：甘淞文
+# ============================================================
+
+class UserRegisterRequest(BaseModel):
+    """用户注册接口的请求体。
+
+    字段：
+        username：用户名，2-20 个字符，支持中英文、数字和下划线。
+        email：用户邮箱，需符合基本邮箱格式。
+        password：登录密码，8-128 字符，至少含一个字母和一个数字。
+    """
+
+    username: str
+    email: str
+    password: str
+
+    def check_password(self) -> List[str]:
+        """检查密码强度：8-128 字符，至少含一个字母和一个数字。"""
+        errors = []
+        if not isinstance(self.password, str):
+            return ["password 必须是字符串"]
+        if len(self.password) < 8:
+            errors.append("密码不能少于 8 个字符")
+        if len(self.password) > 128:
+            errors.append("密码不能超过 128 个字符")
+        if not any(c.isalpha() for c in self.password):
+            errors.append("密码必须包含至少一个字母")
+        if not any(c.isdigit() for c in self.password):
+            errors.append("密码必须包含至少一个数字")
+        return errors
+
+    def check_all(self) -> List[str]:
+        """汇总检查注册请求。"""
+        return self.check_password()
+
+
+class UserLoginRequest(BaseModel):
+    """用户登录接口的请求体。
+
+    字段：
+        email：用户邮箱（唯一标识，用于查找账号）。
+        password：明文密码。
+    """
+
+    email: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    """认证成功后的令牌响应。
+
+    字段：
+        access_token：JWT 访问令牌字符串。
+        token_type：令牌类型，固定为 "bearer"。
+        user：当前登录用户的公开信息。
+    """
+
+    access_token: str
+    token_type: str = "bearer"
+    user: Dict[str, Any]
 
 
 class ProjectCreateRequest(BaseModel):
@@ -353,4 +429,3 @@ class ProjectUpdateRequest(BaseModel):
     name: Optional[str] = None
     model_graph: Optional[ModelGraph] = None
     description: Optional[str] = None
-

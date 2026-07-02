@@ -2,12 +2,13 @@
 
 提供基于 JSON 文件的持久化存储能力，为后续切换为数据库存储预留统一接口。
 所有写操作自动创建目录和文件，保证首次运行无需手动初始化。
+
+已知限制：当前未实现分页，list_users() 和 list_projects() 一次性加载全部数据。
 """
 
 import json
 import os
 import threading
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -20,7 +21,7 @@ _STORAGE_DIR = Path(__file__).resolve().parent.parent / "data"
 _USERS_FILE = _STORAGE_DIR / "users.json"
 _PROJECTS_FILE = _STORAGE_DIR / "projects.json"
 
-# 可重入锁，防止并发写入导致数据损坏
+# 可重入锁，保护所有读写操作，防止并发导致数据损坏
 _lock = threading.RLock()
 
 
@@ -37,25 +38,37 @@ def _ensure_storage() -> None:
                 _write_json_unsafe(file_path, [])
 
 
-def _read_json(file_path: Path) -> List[Dict[str, Any]]:
-    """从 JSON 文件读取数据列表，文件不存在时返回空列表。"""
+def _read_json_unsafe(file_path: Path) -> List[Dict[str, Any]]:
+    """从 JSON 文件读取数据列表（调用方需持有 _lock）。
+
+    返回：
+        数据列表；文件不存在或 JSON 格式异常时返回空列表。
+        注意：PermissionError 等非文件不存在的 I/O 错误会向上抛出。
+    """
     if not file_path.exists():
         return []
     try:
         with open(file_path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
             return data if isinstance(data, list) else []
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError:
+        # JSON 格式损坏时返回空列表，后续写操作会覆盖修复
         return []
 
 
-def _write_json_unsafe(file_path: Path, data: List[Dict[str, Any]]) -> None:
-    """将数据列表写入 JSON 文件（调用方需持有 _lock）。
+def _read_json(file_path: Path) -> List[Dict[str, Any]]:
+    """从 JSON 文件读取数据列表（线程安全）。"""
+    with _lock:
+        return _read_json_unsafe(file_path)
 
-    由于已持有锁保证互斥，直接写入即可，避免 os.replace 在 Windows 下的并发问题。
-    """
-    with open(file_path, "w", encoding="utf-8") as fh:
+
+def _write_json_unsafe(file_path: Path, data: List[Dict[str, Any]]) -> None:
+    """原子写入：先写临时文件，再原子替换，防止崩溃损坏数据（调用方需持有 _lock）。"""
+    tmp_path = file_path.with_suffix(".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, ensure_ascii=False, indent=2, default=str)
+    # os.replace 在 Windows 和 POSIX 上均为原子操作
+    os.replace(tmp_path, file_path)
 
 
 def _write_json(file_path: Path, data: List[Dict[str, Any]]) -> None:
@@ -76,9 +89,9 @@ def _create_item(
     """通用创建：向 JSON 文件中追加一条记录。"""
     _ensure_storage()
     with _lock:
-        data = _read_json(file_path)
+        data = _read_json_unsafe(file_path)
         data.append(item)
-        _write_json(file_path, data)
+        _write_json_unsafe(file_path, data)
     return item
 
 
@@ -87,7 +100,7 @@ def _get_item(
     item_id: str,
     item_type: str,
 ) -> Optional[Dict[str, Any]]:
-    """通用查询：按 id 获取单条记录。"""
+    """通用查询：按 id 获取单条记录（线程安全）。"""
     _ensure_storage()
     data = _read_json(file_path)
     for item in data:
@@ -100,7 +113,7 @@ def _list_items(
     file_path: Path,
     filters: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
-    """通用列表：获取全部记录，支持简单字段过滤。"""
+    """通用列表：获取全部记录，支持简单字段过滤（线程安全）。"""
     _ensure_storage()
     data = _read_json(file_path)
     if not filters:
@@ -127,11 +140,11 @@ def _update_item(
     """通用更新：按 id 更新记录的部分字段。"""
     _ensure_storage()
     with _lock:
-        data = _read_json(file_path)
+        data = _read_json_unsafe(file_path)
         for item in data:
             if item.get("id") == item_id:
                 item.update(updates)
-                _write_json(file_path, data)
+                _write_json_unsafe(file_path, data)
                 return item
     return None
 
@@ -144,16 +157,16 @@ def _delete_item(
     """通用删除：按 id 删除记录。"""
     _ensure_storage()
     with _lock:
-        data = _read_json(file_path)
+        data = _read_json_unsafe(file_path)
         new_data = [item for item in data if item.get("id") != item_id]
         if len(new_data) == len(data):
             return False
-        _write_json(file_path, new_data)
+        _write_json_unsafe(file_path, new_data)
         return True
 
 
 def _exists(file_path: Path, item_id: str) -> bool:
-    """检查指定 id 的记录是否存在。"""
+    """检查指定 id 的记录是否存在（线程安全）。"""
     _ensure_storage()
     data = _read_json(file_path)
     return any(item.get("id") == item_id for item in data)
@@ -231,9 +244,9 @@ def delete_projects_by_user(user_id: str) -> int:
     """删除某个用户的所有项目，返回删除数量。"""
     _ensure_storage()
     with _lock:
-        data = _read_json(_PROJECTS_FILE)
+        data = _read_json_unsafe(_PROJECTS_FILE)
         new_data = [p for p in data if p.get("user_id") != user_id]
         deleted_count = len(data) - len(new_data)
         if deleted_count > 0:
-            _write_json(_PROJECTS_FILE, new_data)
+            _write_json_unsafe(_PROJECTS_FILE, new_data)
         return deleted_count

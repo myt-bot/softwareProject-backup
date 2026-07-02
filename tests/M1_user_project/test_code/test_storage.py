@@ -34,7 +34,7 @@ class TestStorageCRUD(unittest.TestCase):
         """每个测试后清理临时目录。"""
         self._tmp_dir.cleanup()
         # 恢复默认路径
-        storage._STORAGE_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+        storage._STORAGE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
         storage._USERS_FILE = storage._STORAGE_DIR / "users.json"
         storage._PROJECTS_FILE = storage._STORAGE_DIR / "projects.json"
 
@@ -181,6 +181,14 @@ class TestStorageCRUD(unittest.TestCase):
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["username"], "alice")
 
+    # --- 原子写入测试 ---
+
+    def test_atomic_write_does_not_leave_tmp_file(self):
+        """测试原子写入后不残留 .tmp 文件。"""
+        storage.save_user({"id": "u1", "username": "alice", "email": "a@a.com"})
+        tmp_file = storage._USERS_FILE.with_suffix(".tmp")
+        self.assertFalse(tmp_file.exists(), "原子写入后不应残留 .tmp 文件")
+
     # --- 并发安全测试 ---
 
     def test_concurrent_writes(self):
@@ -202,6 +210,55 @@ class TestStorageCRUD(unittest.TestCase):
 
         users = storage.list_users()
         self.assertEqual(len(users), 20)
+
+    def test_concurrent_read_write(self):
+        """测试并发读+写混合操作不会损坏数据。"""
+        import threading
+
+        # 预写入一些数据
+        for i in range(10):
+            storage.save_user({
+                "id": f"u{i}",
+                "username": f"user_{i}",
+                "email": f"user{i}@test.com",
+            })
+
+        errors = []
+
+        def reader():
+            try:
+                for _ in range(50):
+                    data = storage.list_users()
+                    # 读取到的数据应该都是合法列表
+                    if not isinstance(data, list):
+                        errors.append("读取到非列表数据")
+            except Exception as e:
+                errors.append(f"读取异常: {e}")
+
+        def writer():
+            try:
+                for i in range(10, 30):
+                    storage.save_user({
+                        "id": f"u{i}",
+                        "username": f"user_{i}",
+                        "email": f"user{i}@test.com",
+                    })
+            except Exception as e:
+                errors.append(f"写入异常: {e}")
+
+        threads = []
+        for _ in range(4):
+            threads.append(threading.Thread(target=reader))
+            threads.append(threading.Thread(target=writer))
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(len(errors), 0, f"并发读写出现异常: {errors}")
+        users = storage.list_users()
+        self.assertGreaterEqual(len(users), 10)
 
 
 if __name__ == "__main__":
