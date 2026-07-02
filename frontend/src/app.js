@@ -1415,24 +1415,86 @@ function deselectNode() {
 
 
 function renderInspector() {
-  if (state.selectedNodeId === "conv") {
-    renderConvInspector();
-    return;
-  }
-
-  if (state.selectedNodeId === "linear") {
-    renderLinearInspector();
-    return;
-  }
-
   const node = nodes.find(item => item.id === state.selectedNodeId);
+
+  if (!node) {
+    initializeInspector();
+    return;
+  }
+
+  if (node.type === "Conv2D") {
+    renderConvInspector(node);
+    return;
+  }
+
+  if (node.type === "Linear") {
+    renderLinearInspector(node);
+    return;
+  }
+
+  if (node.type === "Pooling") {
+    renderPoolingInspector(node);
+    return;
+  }
+
+  if (node.type === "Dropout") {
+    renderDropoutInspector(node);
+    return;
+  }
+
+  if (node.type === "Input") {
+    renderInputInspector(node);
+    return;
+  }
+
+  renderSimpleInspector(node);
+}
+
+function renderSimpleInspector(node) {
   document.getElementById("inspector-content").innerHTML = `
     <div class="simple-inspector">
       <iconify-icon icon="mdi:layers-outline"></iconify-icon>
-      <h2>${node?.badge || "节点"} 节点</h2>
-      <p>此节点参数当前使用默认设置。</p>
+      <h2>${node.badge || node.type} 节点</h2>
+      <p>该节点无可编辑参数，当前使用默认设置。</p>
     </div>
   `;
+}
+
+function updateNodeParam(nodeId, key, value) {
+  const node = nodes.find(item => item.id === nodeId);
+  if (!node) return;
+
+  node.params = {
+    ...node.params,
+    [key]: value,
+  };
+
+  updateNodeDisplay(node);
+  resetValidationAfterGraphChange();
+}
+
+function updateNodeDisplay(node) {
+  if (node.type === "Conv2D") {
+    node.note = `out=${node.params.out_channels}, k=${node.params.kernel_size}, s=${node.params.stride}, p=${node.params.padding}`;
+  }
+
+  if (node.type === "Pooling") {
+    node.note = `k=${node.params.kernel_size}, s=${node.params.stride}, p=${node.params.padding}`;
+  }
+
+  if (node.type === "Linear") {
+    node.note = `out=${node.params.out_features}`;
+  }
+
+  if (node.type === "Dropout") {
+    node.note = `p=${node.params.p}`;
+  }
+
+  renderCanvasNodes();
+
+  if (state.selectedNodeId === node.id) {
+    document.getElementById(`node-${node.id}`)?.classList.add("node-selected");
+  }
 }
 
 
