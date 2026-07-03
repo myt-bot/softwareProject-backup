@@ -12,6 +12,8 @@ from fastapi import BackgroundTasks, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from backend.device import get_device_summary
+
 from . import auth as auth_mgr
 from . import projects as project_mgr
 from .schemas import (
@@ -64,10 +66,10 @@ def health_check():
 @app.get("/devices")
 def list_devices():
     """返回当前本机可用的计算设备（尚未实现）。"""
-    return JSONResponse(
-        status_code=501,
-        content={"status": "error", "message": "设备检测功能尚未实现"},
-    )
+    return {
+        "status": "ok",
+        **get_device_summary()
+    }
 
 
 @app.post("/validate")
