@@ -1,8 +1,11 @@
 """本地 PyTorch 训练流程。"""
 
+import json
+import os
+
 import torch
 import torch.nn as nn
-import torchvision 
+import torchvision
 import torch.utils.data
 
 from datetime import datetime
@@ -12,6 +15,18 @@ from .device import resolve_device
 from .model_builder import build_model
 
 TRANING_JOBS = {} #后续改为数据库存储
+
+# 训练产物（模型权重、指标）默认保存目录。
+ARTIFACTS_ROOT = os.path.join(os.path.dirname(__file__), "..", "training_artifacts")
+
+# 训练任务状态对应的中文提示，用于前端状态可见性（NFR4）。
+STATUS_MESSAGES = {
+    "pending": "训练任务已创建，等待开始",
+    "running": "正在训练",
+    "completed": "训练完成",
+    "failed": "训练失败",
+    "cancelled": "训练已取消",
+}
 
 def create_training_job(model_graph, train_config):
     """在训练开始前创建并登记一个训练任务。
@@ -64,6 +79,12 @@ def run_training_job(job_id):
     job = TRANING_JOBS[job_id]
     train_config = job["train_config"]
 
+    # 连通性测试用的演示模式：设置环境变量 TRAINER_DEMO=1 时，跳过真实
+    # PyTorch 训练，改为逐轮生成合成指标（每轮之间 sleep 让出 GIL），
+    # 使前端轮询 /status 能观察到曲线逐轮增长。不设置时走真实训练流程。
+    if os.environ.get("TRAINER_DEMO") == "1":
+        return _run_demo_job(job_id)
+
     try:
         job["status"] = "running"
         job["error"] = None
@@ -77,6 +98,7 @@ def run_training_job(job_id):
         optimizer_config = train_config.get("optimizer", None)
 
         device = resolve_device(requested_device)
+        job["device"] = str(device)
         model = build_model(job["model_graph"]).to(device)
         loss_fn = _build_loss_fn(loss_fn_config)
         optimizer = _build_optimizer(
@@ -120,26 +142,100 @@ def run_training_job(job_id):
             job["metrics"] = metrics
 
         if job["status"] == "cancelled":
-            return {
+            cancelled_result = {
                 "job_id": job_id,
                 "status": "cancelled",
                 "metrics": metrics,
             }
+            job["result"] = cancelled_result
+            return cancelled_result
 
         artifacts = save_training_artifacts(job_id, model, metrics)
         job["status"] = "completed"
-        return {
+        completed_result = {
             "job_id": job_id,
             "status": "completed",
             "device": str(device),
             "metrics": metrics,
             "artifacts": artifacts,
         }
+        job["result"] = completed_result
+        return completed_result
 
     except Exception as exc:
         job["status"] = "failed"
         job["error"] = str(exc)
+        job["result"] = {
+            "job_id": job_id,
+            "status": "failed",
+            "error": str(exc),
+            "metrics": job.get("metrics", []),
+        }
         raise
+
+
+def _run_demo_job(job_id):
+    """连通性测试用的演示训练（不依赖真实数据集和 PyTorch 训练）。
+
+    逐轮生成趋势合理的合成指标（loss 下降、accuracy 上升，val 略低于
+    train），每轮之间 sleep 一秒并更新 job 状态，使前端轮询 /status 能
+    观察到 current_epoch、metrics 逐轮增长，曲线一条条长出来。
+
+    产出的数据结构与真实训练完全一致，因此 /status、/result 接口和前端
+    无需任何改动即可复用。
+    """
+    import time
+
+    job = TRANING_JOBS[job_id]
+    train_config = job["train_config"]
+    epochs = train_config.get("epochs", 1)
+
+    job["status"] = "running"
+    job["error"] = None
+    job["device"] = "cpu (demo)"
+
+    metrics = []
+    for epoch in range(1, epochs + 1):
+        if job["status"] == "cancelled":
+            break
+
+        # 模拟每轮训练耗时，给前端留出观察逐轮进度的时间窗口。
+        time.sleep(1.0)
+
+        progress = epoch / epochs if epochs else 1.0
+        train_loss = round(1.2 * (1.0 - 0.7 * progress), 4)
+        train_acc = round(0.35 + 0.6 * progress, 4)
+        val_loss = round(train_loss + 0.08, 4)
+        val_acc = round(train_acc - 0.03, 4)
+
+        metrics.append({
+            "epoch": epoch,
+            "train": {"loss": train_loss, "accuracy": train_acc},
+            "eval": {"loss": val_loss, "accuracy": val_acc},
+        })
+
+        job["current_epoch"] = epoch
+        job["metrics"] = metrics
+
+    if job["status"] == "cancelled":
+        cancelled_result = {
+            "job_id": job_id,
+            "status": "cancelled",
+            "metrics": metrics,
+        }
+        job["result"] = cancelled_result
+        return cancelled_result
+
+    job["status"] = "completed"
+    completed_result = {
+        "job_id": job_id,
+        "status": "completed",
+        "device": "cpu (demo)",
+        "metrics": metrics,
+        "artifacts": None,
+    }
+    job["result"] = completed_result
+    return completed_result
 
 
 def _build_loss_fn(loss_fn_config):
@@ -333,9 +429,22 @@ def save_training_artifacts(job_id, model, metrics):
         metrics：训练过程产生的指标数据，例如每轮 loss 和 accuracy。
 
     返回：
-        后续应返回保存文件路径或产物信息字典。
+        dict：保存产物信息，包含模型权重文件路径和指标文件路径。
     """
-    pass
+    artifact_dir = os.path.join(ARTIFACTS_ROOT, job_id)
+    os.makedirs(artifact_dir, exist_ok=True)
+
+    model_path = os.path.join(artifact_dir, "model.pt")
+    metrics_path = os.path.join(artifact_dir, "metrics.json")
+
+    torch.save(model.state_dict(), model_path)
+    with open(metrics_path, "w", encoding="utf-8") as metrics_file:
+        json.dump(metrics, metrics_file, ensure_ascii=False, indent=2)
+
+    return {
+        "model_path": model_path,
+        "metrics_path": metrics_path,
+    }
 
 
 def get_job_status(job_id):
@@ -345,9 +454,32 @@ def get_job_status(job_id):
         job_id：训练任务编号，用于查询对应任务的运行状态。
 
     返回：
-        后续应返回任务状态、当前 epoch、进度和日志信息。
+        dict：任务状态、当前 epoch、总轮数、进度百分比和已产生的指标。
+
+    异常：
+        当 job_id 不存在时抛出 ValueError。
     """
-    pass
+    if job_id not in TRANING_JOBS:
+        raise ValueError(f"训练任务不存在: {job_id}")
+
+    job = TRANING_JOBS[job_id]
+    total_epochs = job.get("total_epochs") or 0
+    current_epoch = job.get("current_epoch", 0)
+
+    if total_epochs > 0:
+        progress = round(current_epoch / total_epochs, 4)
+    else:
+        progress = 0.0
+
+    return {
+        "job_id": job_id,
+        "status": job.get("status"),
+        "current_epoch": current_epoch,
+        "total_epochs": total_epochs,
+        "progress": progress,
+        "metrics": job.get("metrics", []),
+        "error": job.get("error"),
+    }
 
 
 def get_job_result(job_id):
@@ -357,9 +489,38 @@ def get_job_result(job_id):
         job_id：训练任务编号，用于查询对应任务的最终结果。
 
     返回：
-        后续应返回最终 loss、accuracy、模型保存路径和训练摘要。
+        dict：任务状态、最终 loss、accuracy、逐轮指标、设备和模型保存路径。
+        当任务尚未完成时，loss/accuracy 为 None。
+
+    异常：
+        当 job_id 不存在时抛出 ValueError。
     """
-    pass
+    if job_id not in TRANING_JOBS:
+        raise ValueError(f"训练任务不存在: {job_id}")
+
+    job = TRANING_JOBS[job_id]
+    metrics = job.get("metrics", [])
+
+    final_loss = None
+    final_accuracy = None
+    if metrics:
+        last_epoch = metrics[-1]
+        eval_metrics = last_epoch.get("eval", {})
+        final_loss = eval_metrics.get("loss")
+        final_accuracy = eval_metrics.get("accuracy")
+
+    result = job.get("result", {})
+
+    return {
+        "job_id": job_id,
+        "status": job.get("status"),
+        "loss": final_loss,
+        "accuracy": final_accuracy,
+        "metrics": metrics,
+        "device": job.get("device"),
+        "artifacts": result.get("artifacts"),
+        "error": job.get("error"),
+    }
 
 
 def stop_training_job(job_id):
@@ -369,6 +530,27 @@ def stop_training_job(job_id):
         job_id：训练任务编号，用于定位需要取消的训练任务。
 
     返回：
-        后续应返回取消请求是否成功以及任务的新状态。
+        dict：取消请求是否被接受以及任务的新状态。
+
+    异常：
+        当 job_id 不存在时抛出 ValueError。
     """
-    pass
+    if job_id not in TRANING_JOBS:
+        raise ValueError(f"训练任务不存在: {job_id}")
+
+    job = TRANING_JOBS[job_id]
+    current_status = job.get("status")
+
+    if current_status in ("completed", "failed", "cancelled"):
+        return {
+            "job_id": job_id,
+            "cancelled": False,
+            "status": current_status,
+        }
+
+    job["status"] = "cancelled"
+    return {
+        "job_id": job_id,
+        "cancelled": True,
+        "status": "cancelled",
+    }

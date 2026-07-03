@@ -239,9 +239,43 @@ def extract_model_summary(model):
     """生成便于展示或调试的模型结构摘要。
 
     参数：
-        model：已经构建好的 PyTorch 模型对象。
+        model：已经构建好的 GraphModel 模型对象。
 
     返回：
-        后续应返回模型层级、参数数量和输入输出信息等摘要数据。
+        dict：模型摘要，包含逐层信息（id、类型、名称、参数量）、
+        总参数量和可训练参数量。
     """
-    pass
+    layers = []
+    total_params = 0
+    trainable_params = 0
+
+    for layer_config in getattr(model, "ordered_layers", []):
+        layer_id = layer_config["id"]
+        layer_type = layer_config.get("type")
+        module = model.modules_by_id.get(layer_id) if hasattr(model, "modules_by_id") else None
+
+        layer_param_count = 0
+        if module is not None:
+            layer_param_count = sum(
+                parameter.numel()
+                for parameter in module.parameters()
+            )
+
+        layers.append({
+            "id": layer_id,
+            "type": layer_type,
+            "name": layer_config.get("name"),
+            "params": layer_config.get("params", {}),
+            "num_parameters": layer_param_count,
+        })
+
+    for parameter in model.parameters():
+        total_params += parameter.numel()
+        if parameter.requires_grad:
+            trainable_params += parameter.numel()
+
+    return {
+        "layers": layers,
+        "total_parameters": total_params,
+        "trainable_parameters": trainable_params,
+    }

@@ -7,6 +7,7 @@ import {
   startTraining,
   validateModel,
 } from "./api/client.js";
+import { openTrainingMonitor } from "./training.js";
 
 
 const layerGroups = [
@@ -1707,7 +1708,7 @@ function getCurrentModelGraph() {
 function getTrainConfig() {
   return {
     dataset_name: "MNIST",
-    epochs: 1,
+    epochs: 5,
     batch_size: 64,
     rate: 0.001,
     device: "cpu",
@@ -1831,19 +1832,29 @@ async function handleExportCode() {
 
 
 async function handleStartTraining() {
+  // 对应系统约束 C5：未通过结构校验（Validate）的模型不允许开始训练。
+  if (state.validationStatus !== "passing") {
+    showToast("warning", "请先通过结构检查 (Validate) 再开始训练。");
+    return;
+  }
+
   const button = document.getElementById("btn-train");
   const originalHtml = button.innerHTML;
   setButtonLoading(button, "启动训练...");
 
   try {
     const result = await startTraining(getCurrentModelGraph(), getTrainConfig());
-    state.jobId = result?.job_id;
+    state.jobId = result?.job_id || null;
     showToast("success", `训练任务已创建: ${state.jobId || "未知任务"}`);
-    if (state.jobId) {
-      pollTrainingStatus(state.jobId);
-    }
+    openMonitor(state.jobId);
   } catch (error) {
-    showBackendError(error, "训练接口暂未实现。");
+    if (isBackendNotImplemented(error)) {
+      // 后端训练接口未实现时，仍打开监控页做原型演示（预设曲线）。
+      showToast("warning", "训练接口暂未实现，已进入原型演示模式。");
+      openMonitor(null);
+    } else {
+      showBackendError(error, "训练接口暂未实现。");
+    }
   } finally {
     button.innerHTML = originalHtml;
     button.disabled = state.validationStatus !== "passing";
@@ -1851,17 +1862,50 @@ async function handleStartTraining() {
 }
 
 
-async function pollTrainingStatus(jobId) {
-  try {
-    const status = await fetchTrainingStatus(jobId);
-    showToast("info", `训练状态: ${status?.status || "未知"}`);
-    if (status?.status === "completed") {
-      const result = await fetchTrainingResult(jobId);
-      showToast("success", `训练完成，accuracy=${result?.accuracy ?? "未知"}`);
-    }
-  } catch (error) {
-    showBackendError(error, "训练状态接口暂未实现。");
-  }
+// 打开训练监控页。传入 jobId 时进入 live 模式（真实轮询后端），
+// 否则回退到预设指标曲线的原型演示模式。
+function openMonitor(jobId) {
+  openTrainingMonitor({
+    live: Boolean(jobId),
+    jobId,
+    fetchStatus: fetchTrainingStatus,
+    fetchResult: fetchTrainingResult,
+    hyperparams: buildMonitorHyperparams(),
+    layers: buildMonitorLayers(),
+    onBackToBuilder: () => {
+      showToast("info", "已返回模型搭建页。");
+    },
+    onRerun: async () => {
+      // “重新训练 Re-run”：重新提交一次训练任务，返回新的 jobId 供监控页轮询。
+      const result = await startTraining(getCurrentModelGraph(), getTrainConfig());
+      const newJobId = result?.job_id || null;
+      state.jobId = newJobId;
+      return { jobId: newJobId };
+    },
+  });
+}
+
+
+// 将画布节点映射为监控页缩略图所需的层列表（保留类型与配色）。
+function buildMonitorLayers() {
+  return nodes.map(node => ({
+    type: node.badge || node.type,
+    color: node.color || "indigo",
+  }));
+}
+
+
+// 汇总当前训练超参数，供监控页侧栏展示。
+function buildMonitorHyperparams() {
+  const config = getTrainConfig();
+  return {
+    epochs: config.epochs,
+    batch_size: config.batch_size,
+    rate: config.rate,
+    optimizer: config.optimizer === "sgd" ? "SGD" : config.optimizer,
+    loss_fn: config.loss_fn === "cross_entropy" ? "CrossEntropyLoss" : config.loss_fn,
+    device: config.device ? config.device.toUpperCase() : "CPU",
+  };
 }
 
 

@@ -6,7 +6,9 @@ M1（甘淞文）：用户 CRUD + 项目 CRUD + /auth/* 认证路由 + JWT 令�
 M3：模型校验、形状推导
 """
 
-from fastapi import Depends, FastAPI
+import json
+
+from fastapi import BackgroundTasks, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -26,6 +28,12 @@ from .schemas import (
 )
 from .security import create_access_token, get_current_user
 from .validator import validate_model_graph
+from .trainer import (
+    create_training_job,
+    get_job_result,
+    get_job_status,
+    run_training_job,
+)
 
 
 app = FastAPI(title="Visual Deep Learning Model Builder")
@@ -75,30 +83,85 @@ def validate_model(request: ModelRequest):
 
 
 @app.post("/train")
-def start_training(request: TrainRequest):
-    """启动本地训练任务（尚未实现）。"""
-    return JSONResponse(
-        status_code=501,
-        content={"status": "error", "message": "训练功能尚未实现"},
+def start_training(request: TrainRequest, background_tasks: BackgroundTasks):
+    """根据用户选择的 CPU 或 GPU 启动本地训练任务。
+
+    在创建训练任务前，先执行结构校验（对应系统约束 C5：未通过 Validate 的
+    模型不允许进入训练）。只有结构合法的模型才会创建任务并在后台开始训练。
+
+    参数：
+        request：训练请求体，包含模型图结构和训练配置。
+        background_tasks：FastAPI 后台任务，用于异步执行训练流程。
+
+    返回：
+        训练任务编号、初始状态和总轮数；结构校验失败时返回 400。
+    """
+    model_graph = request.model.model_dump()
+
+    validation = validate_model_graph(model_graph)
+    if not validation["valid"]:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "message": "结构校验未通过，无法开始训练",
+                "errors": validation["errors"],
+            },
+        )
+
+    train_config = request.train_config.model_dump()
+    job = create_training_job(
+        model_graph=json.dumps(model_graph),
+        train_config=train_config,
     )
+
+    background_tasks.add_task(run_training_job, job["job_id"])
+
+    return {
+        "status": "ok",
+        "job_id": job["job_id"],
+        "job_status": job["status"],
+        "current_epoch": job["current_epoch"],
+        "total_epochs": job["total_epochs"],
+    }
 
 
 @app.get("/train/{job_id}/status")
 def get_training_status(job_id: str):
-    """返回训练任务状态（尚未实现）。"""
-    return JSONResponse(
-        status_code=501,
-        content={"status": "error", "message": "训练功能尚未实现"},
-    )
+    """返回指定训练任务的当前状态、日志和进度。
+
+    参数：
+        job_id：训练任务编号，用于定位某一次本地训练任务。
+
+    返回：
+        任务状态、当前 epoch、进度百分比和逐轮指标；任务不存在时返回 404。
+    """
+    try:
+        return get_job_status(job_id)
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "error", "message": str(exc)},
+        )
 
 
 @app.get("/train/{job_id}/result")
 def get_training_result(job_id: str):
-    """返回训练结果（尚未实现）。"""
-    return JSONResponse(
-        status_code=501,
-        content={"status": "error", "message": "训练功能尚未实现"},
-    )
+    """返回训练完成后的最终指标和相关产物信息。
+
+    参数：
+        job_id：训练任务编号，用于查询对应训练任务的最终结果。
+
+    返回：
+        loss、accuracy、模型文件路径和训练摘要；任务不存在时返回 404。
+    """
+    try:
+        return get_job_result(job_id)
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "error", "message": str(exc)},
+        )
 
 
 @app.post("/export/pytorch")
