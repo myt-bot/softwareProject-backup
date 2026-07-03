@@ -18,6 +18,7 @@ const layerGroups = [
     layers: [
       { type: "Input", desc: "输入张量定义", icon: "mdi:login-variant", color: "emerald" },
       { type: "Output", desc: "分类输出节点", icon: "mdi:logout-variant", color: "rose" },
+      { type: "Add", desc: "多分支逐元素相加", icon: "mdi:plus-circle-outline", color: "cyan" },
     ],
   },
   {
@@ -1245,6 +1246,14 @@ function getLayerConfig(layerType) {
       color: "rose",
       params: {},
     },
+    Add: {
+      type: "Add",
+      title: "Add",
+      badge: "Add",
+      color: "cyan",
+      note: "merge=add",
+      params: {},
+    },
     Conv2D: {
       type: "Conv2D",
       title: "Conv2D",
@@ -1567,6 +1576,21 @@ function renderInspector() {
 }
 
 function renderSimpleInspector(node) {
+  if (node.type === "Add") {
+    document.getElementById("inspector-content").innerHTML = `
+      <div class="inspector-scroll">
+        <div class="inspector-title">
+          <iconify-icon class="text-cyan" icon="mdi:plus-circle-outline"></iconify-icon>
+          <h2>Add 节点</h2>
+        </div>
+        <section class="info-card">
+          <p>Add 节点会在导出给后端时折叠为目标节点的 add 合并方式。</p>
+        </section>
+      </div>
+    `;
+    return;
+  }
+
   document.getElementById("inspector-content").innerHTML = `
     <div class="simple-inspector">
       <iconify-icon icon="mdi:layers-outline"></iconify-icon>
@@ -1819,15 +1843,82 @@ function numberField(label, value) {
 }
 
 
-function getCurrentModelGraph() {
+function getExportParams(node, exportConnections, addTargetIds) {
+  const params = { ...node.params };
+  delete params.merge;
+  delete params.dim;
+  delete params.concat_dim;
+
+  const incomingCount = exportConnections.filter(connection => connection.target === node.id).length;
+  if (incomingCount <= 1) {
+    return params;
+  }
+
+  params.merge = addTargetIds.has(node.id) ? "add" : "concat";
+  if (params.merge === "concat" && params.dim === undefined) {
+    params.dim = 1;
+  }
+
+  return params;
+}
+
+function buildBackendModelGraph() {
+  const addNodeIds = new Set(nodes.filter(node => node.type === "Add").map(node => node.id));
+  const addTargetIds = new Set();
+  const exportConnections = [];
+  const seenConnections = new Set();
+
+  function addExportConnection(source, target) {
+    if (!source || !target || source === target) return;
+
+    const key = `${source}->${target}`;
+    if (seenConnections.has(key)) return;
+
+    seenConnections.add(key);
+    exportConnections.push({ source, target });
+  }
+
+  connections.forEach(([source, target]) => {
+    if (!addNodeIds.has(source) && !addNodeIds.has(target)) {
+      addExportConnection(source, target);
+    }
+  });
+
+  addNodeIds.forEach(addNodeId => {
+    const sources = connections
+      .filter(([, target]) => target === addNodeId)
+      .map(([source]) => source)
+      .filter(source => !addNodeIds.has(source));
+    const targets = connections
+      .filter(([source]) => source === addNodeId)
+      .map(([, target]) => target)
+      .filter(target => !addNodeIds.has(target));
+
+    targets.forEach(target => {
+      addTargetIds.add(target);
+      sources.forEach(source => addExportConnection(source, target));
+    });
+  });
+
   return {
-    layers: nodes.map(node => ({
-      id: node.id,
-      type: node.type,
-      name: node.title,
-      params: { ...node.params },
-    })),
-    connections: connections.map(([source, target]) => ({ source, target })),
+    addTargetIds,
+    connections: exportConnections,
+  };
+}
+
+function getCurrentModelGraph() {
+  const backendGraph = buildBackendModelGraph();
+
+  return {
+    layers: nodes
+      .filter(node => node.type !== "Add")
+      .map(node => ({
+        id: node.id,
+        type: node.type,
+        name: node.title,
+        params: getExportParams(node, backendGraph.connections, backendGraph.addTargetIds),
+      })),
+    connections: backendGraph.connections,
   };
 }
 
