@@ -44,9 +44,9 @@ tests/M1_user_project/
 │   ├── __init__.py              # 包声明
 │   ├── run_all.py               # 测试运行入口
 │   ├── test_storage.py          # 存储层单元测试（19 用例）
-│   ├── test_auth.py     # 用户与认证模块单元测试（42 用例）
-│   ├── test_projects.py  # 项目管理单元测试（34 用例）
-│   └── test_api.py              # API 集成测试（40 用例）
+│   ├── test_auth.py     # 用户与认证模块单元测试（40 用例）
+│   ├── test_projects.py  # 项目管理单元测试（31 用例）
+│   └── test_api.py              # API 集成测试（39 用例）
 └── test_design/
     └── 测试设计文档.md           # 本文档
 ```
@@ -95,7 +95,6 @@ tests/M1_user_project/
 | U10 | test_update_user_password | 仅更新密码 |
 | U11 | test_update_user_both | 同时更新用户名和邮箱 |
 | U12 | test_delete_user_success | 正常删除用户 |
-| U13 | test_get_users_by_ids | 批量获取用户 |
 | U14 | test_register_user_success | register_user 正常注册 |
 | U15 | test_authenticate_user_success | 邮箱+密码正确登录成功 |
 | U16 | test_authenticate_user_wrong_password | 错误密码登录失败 |
@@ -134,7 +133,6 @@ tests/M1_user_project/
 | U39 | test_update_user_duplicate_email | 更新为已存在邮箱 → ValueError |
 | U40 | test_delete_nonexistent_user | 删除不存在用户 → ValueError |
 | U41 | test_delete_user_empty_id | 空 id 删除 → ValueError |
-| U42 | test_get_users_by_ids_not_list | 非列表参数 → ValueError |
 
 ### 3.3 项目管理测试（test_projects.py）
 
@@ -152,7 +150,6 @@ tests/M1_user_project/
 | P08 | test_update_project_model_graph | 更新模型图 |
 | P09 | test_update_project_description | 更新描述 |
 | P10 | test_delete_project_success | 正常删除 |
-| P11 | test_get_user_projects | 获取用户的项目列表 |
 
 #### 异常路径 —— 创建
 
@@ -180,8 +177,6 @@ tests/M1_user_project/
 | P26 | test_update_project_duplicate_name | 重名冲突 |
 | P27 | test_delete_nonexistent_project | 删除不存在项目 |
 | P28 | test_delete_project_empty_id | 空 id 删除 |
-| P29 | test_get_user_projects_nonexistent_user | 获取不存在用户的项目 |
-| P30 | test_get_user_projects_empty_id | 空 user_id |
 
 ### 3.4 API 集成测试（test_api.py）
 
@@ -235,15 +230,13 @@ tests/M1_user_project/
 | DELETE | /projects/{id} | A34 | test_delete_project_success |
 | DELETE | /projects/{id} | A35 | test_delete_project_not_found |
 | DELETE | /projects/{id} | A36 | test_delete_project_wrong_owner_rejected |
-| GET | /users/{id}/projects | A37 | test_get_user_projects |
-
 #### 基础设施路由
 
 | 方法 | 路径 | 编号 | 测试用例 |
 |------|------|------|----------|
 | GET | /health | A38 | test_health_returns_ok |
-| GET | /devices | A39 | test_devices_returns_501 |
-| POST | /train | A40 | test_train_returns_501 |
+| GET | /devices | A39 | test_devices_returns_device_info |
+| POST | /train | A40 | test_train_creates_job |
 
 ---
 
@@ -252,10 +245,10 @@ tests/M1_user_project/
 | 模块 | 测试文件 | 用例数 | 全部通过 |
 |------|----------|--------|----------|
 | storage.py | test_storage.py | 19 | ✅ |
-| auth.py | test_auth.py | 42 | ✅ |
-| projects.py | test_projects.py | 34 | ✅ |
-| main.py (M1 API) | test_api.py | 40 | ✅ |
-| **合计** | | **135** | ✅ |
+| auth.py | test_auth.py | 40 | ✅ |
+| projects.py | test_projects.py | 31 | ✅ |
+| main.py (M1 API) | test_api.py | 39 | ✅ |
+| **合计** | | **129** | ✅ |
 
 ---
 

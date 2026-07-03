@@ -58,11 +58,11 @@ class TestProjectManager(unittest.TestCase):
         storage._PROJECTS_FILE = self._data_dir / "projects.json"
 
         # 创建测试用户
-        self._user = auth_mgr.create_user("testuser", "test@example.com", "testpass123")
+        self._user = auth_mgr.register_user("testuser", "test@example.com", "testpass123")
         self._user_id = self._user["id"]
 
         # 创建第二个用户（用于权限测试）
-        self._other_user = auth_mgr.create_user("otheruser", "other@example.com", "testpass123")
+        self._other_user = auth_mgr.register_user("otheruser", "other@example.com", "testpass123")
         self._other_user_id = self._other_user["id"]
 
     def tearDown(self):
@@ -163,13 +163,6 @@ class TestProjectManager(unittest.TestCase):
         )
         self.assertTrue(result)
         self.assertIsNone(project_mgr.get_project(created["id"]))
-
-    def test_get_user_projects(self):
-        """测试获取用户的所有项目。"""
-        project_mgr.create_project(self._user_id, "p1", VALID_MODEL_GRAPH)
-        project_mgr.create_project(self._user_id, "p2", VALID_MODEL_GRAPH)
-        projects = project_mgr.get_user_projects(self._user_id)
-        self.assertEqual(len(projects), 2)
 
     # ========== 权限控制测试（M1） ==========
 
@@ -300,18 +293,6 @@ class TestProjectManager(unittest.TestCase):
         """测试空 id 删除抛出异常。"""
         with self.assertRaises(ValueError):
             project_mgr.delete_project("")
-
-    # ========== 异常路径 —— 获取用户项目 ==========
-
-    def test_get_user_projects_nonexistent_user(self):
-        """测试获取不存在用户的 project 抛出异常。"""
-        with self.assertRaises(ValueError):
-            project_mgr.get_user_projects("user_nonexistent")
-
-    def test_get_user_projects_empty_id(self):
-        """测试空 user_id 抛出异常。"""
-        with self.assertRaises(ValueError):
-            project_mgr.get_user_projects("")
 
 
 if __name__ == "__main__":

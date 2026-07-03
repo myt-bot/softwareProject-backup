@@ -503,14 +503,6 @@ class TestProjectAPI(unittest.TestCase):
                                   headers=self._auth_headers(self._other_token))
         self.assertEqual(resp.status_code, 403)
 
-    # ========== 获取用户的项目 ==========
-
-    def test_get_user_projects(self):
-        """GET /users/{id}/projects 获取用户的项目列表。"""
-        resp = self.client.get(f"/users/{self._user_id}/projects")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn("data", resp.json())
-
 
 class TestInfraRoutes(unittest.TestCase):
     """基础设施路由测试。"""
@@ -528,16 +520,32 @@ class TestInfraRoutes(unittest.TestCase):
         data = resp.json()
         self.assertEqual(data["status"], "ok")
 
-    def test_devices_returns_501(self):
-        """GET /devices 返回 501（尚未实现）。"""
+    def test_devices_returns_device_info(self):
+        """GET /devices 返回 200 和设备摘要信息。"""
         resp = self.client.get("/devices")
-        self.assertEqual(resp.status_code, 501)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["status"], "ok")
+        self.assertIn("available_devices", data)
+        self.assertIn("default_device", data)
+        self.assertIn("cuda_available", data)
+        self.assertIsInstance(data["available_devices"], list)
+        self.assertIn("cpu", data["available_devices"])
 
-    def test_train_returns_501(self):
-        """POST /train 返回 501（尚未实现）。"""
+    def test_train_creates_job(self):
+        """POST /train 传入合法模型结构返回 200 和训练任务信息。"""
         valid_model = {
-            "layers": [{"id": "in", "type": "Input", "params": {"shape": [1,28,28]}}],
-            "connections": [],
+            "layers": [
+                {"id": "in", "type": "Input", "params": {"shape": [1, 28, 28]}},
+                {"id": "flat", "type": "Flatten", "params": {}},
+                {"id": "fc", "type": "Linear", "params": {"out_features": 10}},
+                {"id": "out", "type": "Output", "params": {}},
+            ],
+            "connections": [
+                {"source": "in", "target": "flat"},
+                {"source": "flat", "target": "fc"},
+                {"source": "fc", "target": "out"},
+            ],
         }
         resp = self.client.post("/train", json={
             "model": valid_model,
@@ -551,7 +559,13 @@ class TestInfraRoutes(unittest.TestCase):
                 "optimizer": "sgd",
             },
         })
-        self.assertEqual(resp.status_code, 501)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["status"], "ok")
+        self.assertIn("job_id", data)
+        self.assertTrue(data["job_id"].startswith("train_"))
+        self.assertEqual(data["job_status"], "pending")
+        self.assertGreater(data["total_epochs"], 0)
 
 
 if __name__ == "__main__":

@@ -14,8 +14,6 @@
 - 登录时若邮箱未注册，提示用户先注册
 
 已知限制：当前未实现分页，list_users() 一次性返回全部用户数据。
-
-编写者：甘淞文
 """
 
 import re
@@ -161,19 +159,6 @@ def register_user(username: str, email: str, password: str) -> Dict[str, Any]:
     saved = _storage_save_user(user)
     return _sanitize_user(saved)
 
-
-def create_user(username: str, email: str, password: str) -> Dict[str, Any]:
-    """创建新用户（M1 用户管理接口，内部委托给 register_user）。
-
-    参数：
-        username：用户名。
-        email：邮箱。
-        password：密码。
-
-    返回：
-        创建成功的用户字典（不含敏感字段）。
-    """
-    return register_user(username, email, password)
 
 
 def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
@@ -348,21 +333,3 @@ def delete_user(user_id: str) -> bool:
     return _storage_delete_user(user_id)
 
 
-# ============================================================
-# 批量查询
-# ============================================================
-
-def get_users_by_ids(user_ids: List[str]) -> Dict[str, Dict[str, Any]]:
-    """批量按 id 获取用户信息。
-
-    参数：
-        user_ids：用户 id 列表。
-
-    返回：
-        {user_id: user_dict} 映射，不存在的 id 不会出现在结果中。
-    """
-    if not isinstance(user_ids, list):
-        raise ValueError("user_ids 必须是列表")
-    all_users = _storage_list_users()
-    user_map = {u["id"]: u for u in all_users}
-    return {uid: _sanitize_user(user_map[uid]) for uid in user_ids if uid in user_map}

@@ -40,7 +40,7 @@ class TestUserManager(unittest.TestCase):
 
     def test_create_user_success(self):
         """测试正常创建用户。"""
-        user = auth_mgr.create_user("testuser", "test@example.com", VALID_PASSWORD)
+        user = auth_mgr.register_user("testuser", "test@example.com", VALID_PASSWORD)
         self.assertIn("id", user)
         self.assertTrue(user["id"].startswith("user_"))
         self.assertEqual(user["username"], "testuser")
@@ -51,18 +51,18 @@ class TestUserManager(unittest.TestCase):
 
     def test_create_user_with_chinese_name(self):
         """测试中文用户名。"""
-        user = auth_mgr.create_user("测试用户", "test@example.com", VALID_PASSWORD)
+        user = auth_mgr.register_user("测试用户", "test@example.com", VALID_PASSWORD)
         self.assertEqual(user["username"], "测试用户")
 
     def test_create_user_trims_whitespace(self):
         """测试用户名和邮箱自动去除首尾空格。"""
-        user = auth_mgr.create_user("  alice  ", "  Alice@Example.COM  ", VALID_PASSWORD)
+        user = auth_mgr.register_user("  alice  ", "  Alice@Example.COM  ", VALID_PASSWORD)
         self.assertEqual(user["username"], "alice")
         self.assertEqual(user["email"], "alice@example.com")
 
     def test_get_user_exists(self):
         """测试获取存在的用户。"""
-        created = auth_mgr.create_user("alice", "alice@test.com", VALID_PASSWORD)
+        created = auth_mgr.register_user("alice", "alice@test.com", VALID_PASSWORD)
         fetched = auth_mgr.get_user(created["id"])
         self.assertEqual(fetched["username"], "alice")
 
@@ -73,8 +73,8 @@ class TestUserManager(unittest.TestCase):
 
     def test_list_users(self):
         """测试列出所有用户。"""
-        auth_mgr.create_user("alice", "a@a.com", VALID_PASSWORD)
-        auth_mgr.create_user("bob", "b@b.com", VALID_PASSWORD)
+        auth_mgr.register_user("alice", "a@a.com", VALID_PASSWORD)
+        auth_mgr.register_user("bob", "b@b.com", VALID_PASSWORD)
         users = auth_mgr.list_users()
         self.assertEqual(len(users), 2)
 
@@ -85,46 +85,37 @@ class TestUserManager(unittest.TestCase):
 
     def test_update_user_username(self):
         """测试更新用户名。"""
-        created = auth_mgr.create_user("oldname", "old@test.com", VALID_PASSWORD)
+        created = auth_mgr.register_user("oldname", "old@test.com", VALID_PASSWORD)
         updated = auth_mgr.update_user(created["id"], username="newname")
         self.assertEqual(updated["username"], "newname")
         self.assertEqual(updated["email"], "old@test.com")
 
     def test_update_user_email(self):
         """测试更新邮箱。"""
-        created = auth_mgr.create_user("alice", "old@test.com", VALID_PASSWORD)
+        created = auth_mgr.register_user("alice", "old@test.com", VALID_PASSWORD)
         updated = auth_mgr.update_user(created["id"], email="new@test.com")
         self.assertEqual(updated["email"], "new@test.com")
 
     def test_update_user_password(self):
         """测试更新密码。"""
-        created = auth_mgr.create_user("alice", "old@test.com", VALID_PASSWORD)
+        created = auth_mgr.register_user("alice", "old@test.com", VALID_PASSWORD)
         updated = auth_mgr.update_user(created["id"], password="newpass456")
         self.assertIsNotNone(updated)
         self.assertNotIn("password_hash", updated)
 
     def test_update_user_both(self):
         """测试同时更新用户名和邮箱。"""
-        created = auth_mgr.create_user("oldname", "old@test.com", VALID_PASSWORD)
+        created = auth_mgr.register_user("oldname", "old@test.com", VALID_PASSWORD)
         updated = auth_mgr.update_user(created["id"], username="newname", email="new@test.com")
         self.assertEqual(updated["username"], "newname")
         self.assertEqual(updated["email"], "new@test.com")
 
     def test_delete_user_success(self):
         """测试删除用户。"""
-        created = auth_mgr.create_user("alice", "a@a.com", VALID_PASSWORD)
+        created = auth_mgr.register_user("alice", "a@a.com", VALID_PASSWORD)
         result = auth_mgr.delete_user(created["id"])
         self.assertTrue(result)
         self.assertIsNone(auth_mgr.get_user(created["id"]))
-
-    def test_get_users_by_ids(self):
-        """测试批量获取用户。"""
-        u1 = auth_mgr.create_user("alice", "a@a.com", VALID_PASSWORD)
-        u2 = auth_mgr.create_user("bob", "b@b.com", VALID_PASSWORD)
-        result = auth_mgr.get_users_by_ids([u1["id"], u2["id"], "nonexistent"])
-        self.assertEqual(len(result), 2)
-        self.assertIn(u1["id"], result)
-        self.assertIn(u2["id"], result)
 
     def test_register_user_success(self):
         """测试 register_user 正常注册。"""
@@ -170,84 +161,84 @@ class TestUserManager(unittest.TestCase):
     def test_create_user_empty_username(self):
         """测试空用户名抛出异常。"""
         with self.assertRaises(ValueError):
-            auth_mgr.create_user("", "test@test.com", VALID_PASSWORD)
+            auth_mgr.register_user("", "test@test.com", VALID_PASSWORD)
 
     def test_create_user_none_username(self):
         """测试 None 用户名抛出异常。"""
         with self.assertRaises(ValueError):
-            auth_mgr.create_user(None, "test@test.com", VALID_PASSWORD)
+            auth_mgr.register_user(None, "test@test.com", VALID_PASSWORD)
 
     def test_create_user_too_short_username(self):
         """测试过短的用户名抛出异常。"""
         with self.assertRaises(ValueError):
-            auth_mgr.create_user("a", "test@test.com", VALID_PASSWORD)
+            auth_mgr.register_user("a", "test@test.com", VALID_PASSWORD)
 
     def test_create_user_too_long_username(self):
         """测试过长的用户名抛出异常。"""
         with self.assertRaises(ValueError):
-            auth_mgr.create_user("a" * 21, "test@test.com", VALID_PASSWORD)
+            auth_mgr.register_user("a" * 21, "test@test.com", VALID_PASSWORD)
 
     def test_create_user_special_char_username(self):
         """测试含特殊字符的用户名抛出异常。"""
         with self.assertRaises(ValueError):
-            auth_mgr.create_user("user@name", "test@test.com", VALID_PASSWORD)
+            auth_mgr.register_user("user@name", "test@test.com", VALID_PASSWORD)
 
     def test_create_user_invalid_email(self):
         """测试非法邮箱抛出异常。"""
         with self.assertRaises(ValueError):
-            auth_mgr.create_user("validname", "not-an-email", VALID_PASSWORD)
+            auth_mgr.register_user("validname", "not-an-email", VALID_PASSWORD)
 
     def test_create_user_empty_email(self):
         """测试空邮箱抛出异常。"""
         with self.assertRaises(ValueError):
-            auth_mgr.create_user("validname", "", VALID_PASSWORD)
+            auth_mgr.register_user("validname", "", VALID_PASSWORD)
 
     def test_create_user_duplicate_email(self):
         """测试重复邮箱抛出异常（邮箱必须唯一）。"""
-        auth_mgr.create_user("alice", "same@test.com", VALID_PASSWORD)
+        auth_mgr.register_user("alice", "same@test.com", VALID_PASSWORD)
         with self.assertRaises(ValueError):
-            auth_mgr.create_user("bob", "same@test.com", VALID_PASSWORD)
+            auth_mgr.register_user("bob", "same@test.com", VALID_PASSWORD)
 
     def test_create_user_duplicate_username_allowed(self):
         """测试相同用户名可以使用不同邮箱注册（用户名可重复）。"""
-        u1 = auth_mgr.create_user("alice", "a1@test.com", VALID_PASSWORD)
-        u2 = auth_mgr.create_user("alice", "a2@test.com", VALID_PASSWORD)
+        u1 = auth_mgr.register_user("alice", "a1@test.com", VALID_PASSWORD)
+        u2 = auth_mgr.register_user("alice", "a2@test.com", VALID_PASSWORD)
         self.assertEqual(u1["username"], "alice")
         self.assertEqual(u2["username"], "alice")
         self.assertNotEqual(u1["id"], u2["id"])
 
     def test_create_user_duplicate_email_whitespace_bypass(self):
         """测试邮箱空格绕过唯一性检查。"""
-        auth_mgr.create_user("alice", "same@test.com", VALID_PASSWORD)
+        auth_mgr.register_user("alice", "same@test.com", VALID_PASSWORD)
         with self.assertRaises(ValueError):
-            auth_mgr.create_user("bob", "  same@test.com  ", VALID_PASSWORD)
+            auth_mgr.register_user("bob", "  same@test.com  ", VALID_PASSWORD)
 
     # --- 密码校验 ---
 
     def test_create_user_empty_password(self):
         """测试空密码抛出异常。"""
         with self.assertRaises(ValueError):
-            auth_mgr.create_user("validname", "test@test.com", "")
+            auth_mgr.register_user("validname", "test@test.com", "")
 
     def test_create_user_none_password(self):
         """测试 None 密码抛出异常。"""
         with self.assertRaises(ValueError):
-            auth_mgr.create_user("validname", "test@test.com", None)
+            auth_mgr.register_user("validname", "test@test.com", None)
 
     def test_create_user_short_password(self):
         """测试过短密码抛出异常。"""
         with self.assertRaises(ValueError):
-            auth_mgr.create_user("validname", "test@test.com", "ab1")
+            auth_mgr.register_user("validname", "test@test.com", "ab1")
 
     def test_create_user_password_no_letter(self):
         """测试无字母密码抛出异常。"""
         with self.assertRaises(ValueError):
-            auth_mgr.create_user("validname", "test@test.com", "12345678")
+            auth_mgr.register_user("validname", "test@test.com", "12345678")
 
     def test_create_user_password_no_digit(self):
         """测试无数字密码抛出异常。"""
         with self.assertRaises(ValueError):
-            auth_mgr.create_user("validname", "test@test.com", "abcdefgh")
+            auth_mgr.register_user("validname", "test@test.com", "abcdefgh")
 
     # ========== 异常路径 —— 获取 ==========
 
@@ -270,14 +261,14 @@ class TestUserManager(unittest.TestCase):
 
     def test_update_user_no_fields(self):
         """测试更新时不提供任何字段抛出异常。"""
-        created = auth_mgr.create_user("alice", "a@a.com", VALID_PASSWORD)
+        created = auth_mgr.register_user("alice", "a@a.com", VALID_PASSWORD)
         with self.assertRaises(ValueError):
             auth_mgr.update_user(created["id"])
 
     def test_update_user_duplicate_email(self):
         """测试更新为已存在的邮箱抛出异常。"""
-        auth_mgr.create_user("alice", "a@a.com", VALID_PASSWORD)
-        bob = auth_mgr.create_user("bob", "b@b.com", VALID_PASSWORD)
+        auth_mgr.register_user("alice", "a@a.com", VALID_PASSWORD)
+        bob = auth_mgr.register_user("bob", "b@b.com", VALID_PASSWORD)
         with self.assertRaises(ValueError):
             auth_mgr.update_user(bob["id"], email="a@a.com")
 
@@ -292,13 +283,6 @@ class TestUserManager(unittest.TestCase):
         """测试空 user_id 删除抛出异常。"""
         with self.assertRaises(ValueError):
             auth_mgr.delete_user("")
-
-    # ========== 异常路径 —— 批量获取 ==========
-
-    def test_get_users_by_ids_not_list(self):
-        """测试传入非列表抛出异常。"""
-        with self.assertRaises(ValueError):
-            auth_mgr.get_users_by_ids("not_a_list")
 
 
 if __name__ == "__main__":

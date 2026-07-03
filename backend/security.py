@@ -4,8 +4,6 @@
 - bcrypt 密码哈希与验证
 - JWT 访问令牌的生成与验证
 - FastAPI Depends 依赖：从 Authorization Header 提取当前登录用户
-
-编写者：甘淞文
 """
 
 import os

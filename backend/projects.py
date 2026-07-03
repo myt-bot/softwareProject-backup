@@ -9,8 +9,6 @@
 - 更新/删除项目：需要登录，且当前用户必须是项目所有者
 
 已知限制：当前未实现分页，list_projects() 一次性返回全部项目数据。
-
-编写者：甘淞文
 """
 
 from typing import Any, Dict, List, Optional
@@ -302,20 +300,3 @@ def delete_project(project_id: str, current_user_id: Optional[str] = None) -> bo
     return _storage_delete_project(project_id)
 
 
-def get_user_projects(user_id: str) -> List[Dict[str, Any]]:
-    """获取指定用户的所有项目。
-
-    参数：
-        user_id：用户唯一标识。
-
-    返回：
-        项目字典列表。
-
-    异常：
-        ValueError：user_id 为空或用户不存在。
-    """
-    if not user_id or not isinstance(user_id, str):
-        raise ValueError("user_id 不能为空")
-    if not user_exists(user_id):
-        raise ValueError(f"用户 '{user_id}' 不存在")
-    return _storage_list_projects({"user_id": user_id})

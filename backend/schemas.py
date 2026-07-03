@@ -5,7 +5,6 @@
 check_*() 方法用于手动二次校验（主要在测试中使用 model_construct() 绕过 Pydantic
 内置校验后进行验证）；生产路径中 Pydantic 类型系统已保证基本类型正确。
 
-M1 用户与项目管理（编写者：甘淞文）：
 - UserCreateRequest / UserRegisterRequest / UserLoginRequest / TokenResponse：用户与认证相关模型
 - ProjectCreateRequest / ProjectUpdateRequest：项目管理相关模型
 - UserRegisterRequest.check_password()：密码强度校验
@@ -306,7 +305,6 @@ class CodeExportRequest(BaseModel):
 
 # ============================================================
 # M1 用户与项目管理模块 —— 数据结构
-# 编写者：甘淞文
 # ============================================================
 
 class UserCreateRequest(BaseModel):
@@ -336,11 +334,6 @@ class UserUpdateRequest(BaseModel):
     email: Optional[str] = None
     password: Optional[str] = None
 
-
-# ============================================================
-# M1 认证模块 —— 数据结构
-# 编写者：甘淞文
-# ============================================================
 
 class UserRegisterRequest(BaseModel):
     """用户注册接口的请求体。

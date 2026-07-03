@@ -270,7 +270,7 @@ def create_user(request: UserCreateRequest):
         request：创建用户请求体，包含 username、email、password。
     """
     try:
-        user = auth_mgr.create_user(
+        user = auth_mgr.register_user(
             username=request.username,
             email=request.email,
             password=request.password,
@@ -339,19 +339,6 @@ def delete_user(user_id: str):
     try:
         auth_mgr.delete_user(user_id)
         return {"status": "ok", "message": f"用户 '{user_id}' 已删除"}
-    except ValueError as exc:
-        return JSONResponse(
-            status_code=400,
-            content={"status": "error", "message": str(exc)},
-        )
-
-
-@app.get("/users/{user_id}/projects")
-def get_user_projects(user_id: str):
-    """获取指定用户的所有项目。"""
-    try:
-        projects = project_mgr.get_user_projects(user_id)
-        return {"status": "ok", "data": projects, "count": len(projects)}
     except ValueError as exc:
         return JSONResponse(
             status_code=400,
