@@ -7,7 +7,6 @@ import {
   startTraining,
   validateModel,
 } from "./api/client.js";
-import { openTrainingMonitor } from "./training.js";
 
 
 const layerGroups = [
@@ -1219,7 +1218,7 @@ function createNodeConfig(layerType, x, y) {
     badge: config.badge,
     color: config.color,
     note: config.note,
-    hint: "?",
+    hint: config.hint || "?",
     x: canvasX,
     y: canvasY,
     params: { ...config.params },
@@ -1475,6 +1474,10 @@ function updateNodeParam(nodeId, key, value) {
 }
 
 function updateNodeDisplay(node) {
+  if (node.type === "Input" && Array.isArray(node.params.shape)) {
+    node.hint = node.params.shape.join("x");
+  }
+
   if (node.type === "Conv2D") {
     node.note = `out=${node.params.out_channels}, k=${node.params.kernel_size}, s=${node.params.stride}, p=${node.params.padding}`;
   }
@@ -1638,6 +1641,10 @@ function renderDropoutInspector(node) {
 }
 
 function renderInputInspector(node) {
+  const shapeValue = Array.isArray(node.params?.shape)
+    ? node.params.shape.join(",")
+    : "";
+
   document.getElementById("inspector-content").innerHTML = `
     <div class="inspector-scroll">
       <div class="inspector-title">
@@ -1647,20 +1654,24 @@ function renderInputInspector(node) {
 
       <label class="form-field">
         <span>Input Shape 输入形状</span>
-        <input id="input-shape-field" type="text" value="${node.params.shape.join(",")}">
+        <input id="input-shape-field" type="text" value="${shapeValue}">
         <small>格式示例：1,28,28</small>
       </label>
     </div>
   `;
 
   document.getElementById("input-shape-field").addEventListener("change", event => {
-    const shape = event.target.value
-      .split(",")
-      .map(item => Number(item.trim()))
-      .filter(item => !Number.isNaN(item));
+    const rawItems = event.target.value.split(",").map(item => item.trim());
 
-    if (shape.length === 0) {
-      showToast("warning", "Input shape 不能为空。");
+    if (rawItems.length === 0 || rawItems.some(item => item === "")) {
+      showToast("warning", "Input shape 不能为空，格式示例：1,28,28。");
+      return;
+    }
+
+    const shape = rawItems.map(item => Number(item));
+
+    if (shape.some(item => Number.isNaN(item) || item <= 0)) {
+      showToast("warning", "Input shape 必须是正数，格式示例：1,28,28。");
       return;
     }
 
@@ -1708,7 +1719,7 @@ function getCurrentModelGraph() {
 function getTrainConfig() {
   return {
     dataset_name: "MNIST",
-    epochs: 5,
+    epochs: 1,
     batch_size: 64,
     rate: 0.001,
     device: "cpu",
@@ -1780,7 +1791,7 @@ function applyValidationUI(isPass, message) {
 
   if (isPass) {
     updateShapeHints();
-    document.getElementById("node-linear").classList.remove("node-error");
+    document.getElementById("node-linear")?.classList.remove("node-error");
   }
 }
 
@@ -1795,7 +1806,10 @@ function updateShapeHints() {
   };
 
   Object.entries(hints).forEach(([id, value]) => {
-    document.querySelector(`#node-${id} .shape-value`).innerText = value;
+    const element = document.querySelector(`#node-${id} .shape-value`);
+    if (element) {
+      element.innerText = value;
+    }
   });
 }
 
@@ -1803,7 +1817,11 @@ function updateShapeHints() {
 function autoFix() {
   state.inFeatures = 2704;
   showToast("success", "参数已自动修复为 2704。");
-  renderLinearInspector();
+
+  const node = nodes.find(item => item.id === state.selectedNodeId);
+  if (node && node.type === "Linear") {
+    renderLinearInspector(node);
+  }
 }
 
 
@@ -1832,29 +1850,19 @@ async function handleExportCode() {
 
 
 async function handleStartTraining() {
-  // 对应系统约束 C5：未通过结构校验（Validate）的模型不允许开始训练。
-  if (state.validationStatus !== "passing") {
-    showToast("warning", "请先通过结构检查 (Validate) 再开始训练。");
-    return;
-  }
-
   const button = document.getElementById("btn-train");
   const originalHtml = button.innerHTML;
   setButtonLoading(button, "启动训练...");
 
   try {
     const result = await startTraining(getCurrentModelGraph(), getTrainConfig());
-    state.jobId = result?.job_id || null;
+    state.jobId = result?.job_id;
     showToast("success", `训练任务已创建: ${state.jobId || "未知任务"}`);
-    openMonitor(state.jobId);
-  } catch (error) {
-    if (isBackendNotImplemented(error)) {
-      // 后端训练接口未实现时，仍打开监控页做原型演示（预设曲线）。
-      showToast("warning", "训练接口暂未实现，已进入原型演示模式。");
-      openMonitor(null);
-    } else {
-      showBackendError(error, "训练接口暂未实现。");
+    if (state.jobId) {
+      pollTrainingStatus(state.jobId);
     }
+  } catch (error) {
+    showBackendError(error, "训练接口暂未实现。");
   } finally {
     button.innerHTML = originalHtml;
     button.disabled = state.validationStatus !== "passing";
@@ -1862,50 +1870,17 @@ async function handleStartTraining() {
 }
 
 
-// 打开训练监控页。传入 jobId 时进入 live 模式（真实轮询后端），
-// 否则回退到预设指标曲线的原型演示模式。
-function openMonitor(jobId) {
-  openTrainingMonitor({
-    live: Boolean(jobId),
-    jobId,
-    fetchStatus: fetchTrainingStatus,
-    fetchResult: fetchTrainingResult,
-    hyperparams: buildMonitorHyperparams(),
-    layers: buildMonitorLayers(),
-    onBackToBuilder: () => {
-      showToast("info", "已返回模型搭建页。");
-    },
-    onRerun: async () => {
-      // “重新训练 Re-run”：重新提交一次训练任务，返回新的 jobId 供监控页轮询。
-      const result = await startTraining(getCurrentModelGraph(), getTrainConfig());
-      const newJobId = result?.job_id || null;
-      state.jobId = newJobId;
-      return { jobId: newJobId };
-    },
-  });
-}
-
-
-// 将画布节点映射为监控页缩略图所需的层列表（保留类型与配色）。
-function buildMonitorLayers() {
-  return nodes.map(node => ({
-    type: node.badge || node.type,
-    color: node.color || "indigo",
-  }));
-}
-
-
-// 汇总当前训练超参数，供监控页侧栏展示。
-function buildMonitorHyperparams() {
-  const config = getTrainConfig();
-  return {
-    epochs: config.epochs,
-    batch_size: config.batch_size,
-    rate: config.rate,
-    optimizer: config.optimizer === "sgd" ? "SGD" : config.optimizer,
-    loss_fn: config.loss_fn === "cross_entropy" ? "CrossEntropyLoss" : config.loss_fn,
-    device: config.device ? config.device.toUpperCase() : "CPU",
-  };
+async function pollTrainingStatus(jobId) {
+  try {
+    const status = await fetchTrainingStatus(jobId);
+    showToast("info", `训练状态: ${status?.status || "未知"}`);
+    if (status?.status === "completed") {
+      const result = await fetchTrainingResult(jobId);
+      showToast("success", `训练完成，accuracy=${result?.accuracy ?? "未知"}`);
+    }
+  } catch (error) {
+    showBackendError(error, "训练状态接口暂未实现。");
+  }
 }
 
 
