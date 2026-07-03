@@ -87,8 +87,9 @@ project/
     templates.py        # 内置模型模板
     graph_utils.py      # 模型图拓扑排序与前驱/后继映射
     storage.py          # 本地 JSON 文件存储层（M1）
-    auth.py             # 认证模块（M1）
+    auth.py             # 用户管理与认证模块（M1）
     projects.py         # 项目管理模块（M1）
+    security.py         # 密码哈希与 JWT 令牌（M1）
   frontend/
     index.html          # 前端页面入口
     src/
@@ -198,6 +199,9 @@ project/
 | GET  | /train/{job_id}/status | 查询训练状态           | - |
 | GET  | /train/{job_id}/result | 查询训练结果           | - |
 | POST | /export/pytorch        | 导出 PyTorch 代码      | - |
+| POST | /auth/register         | 注册新用户（自动登录） | M1 |
+| POST | /auth/login            | 用户登录（邮箱+密码）   | M1 |
+| GET  | /auth/me               | 获取当前登录用户信息   | M1 |
 | POST | /users                 | 创建用户               | M1 |
 | GET  | /users                 | 获取所有用户列表       | M1 |
 | GET  | /users/{user_id}       | 获取指定用户信息       | M1 |
@@ -225,6 +229,9 @@ project/
 | get_training_status | 返回指定训练任务的当前状态、日志和进度     | 待填写 |
 | get_training_result | 返回训练完成后的最终指标和相关产物信息     | 待填写 |
 | export_pytorch_code | 根据可视化模型结构生成 PyTorch 源代码      | 待填写 |
+| register            | 注册新用户并返回 JWT 令牌（M1）            | 甘淞文 |
+| login               | 验证凭据后返回 JWT 令牌（M1）              | 甘淞文 |
+| get_current_user_info | 获取当前登录用户信息（M1）               | 甘淞文 |
 | create_user         | 创建新用户（M1）                           | 甘淞文 |
 | list_users          | 获取所有用户列表（M1）                     | 甘淞文 |
 | get_user            | 获取指定用户信息（M1）                     | 甘淞文 |
@@ -250,6 +257,9 @@ project/
 | CodeExportRequest | 导出 PyTorch 代码接口的请求体                | 待填写 |
 | UserCreateRequest | 创建用户接口的请求体（M1）                   | 甘淞文 |
 | UserUpdateRequest | 更新用户接口的请求体（M1）                   | 甘淞文 |
+| UserRegisterRequest | 用户注册接口的请求体（M1）                | 甘淞文 |
+| UserLoginRequest | 用户登录接口的请求体（M1）                    | 甘淞文 |
+| TokenResponse    | 认证成功后的 JWT 令牌响应（M1）               | 甘淞文 |
 | ProjectCreateRequest | 创建项目接口的请求体（M1）                | 甘淞文 |
 | ProjectUpdateRequest | 更新项目接口的请求体（M1）                | 甘淞文 |
 
@@ -352,12 +362,25 @@ project/
 
 | 函数              | 功能                                      | 编写者 |
 | ----------------- | ----------------------------------------- | ------ |
-| create_user       | 创建新用户，校验用户名和邮箱唯一性        | 甘淞文 |
+| register_user     | 注册新用户，校验邮箱唯一性并哈希密码      | 甘淞文 |
+| create_user       | 创建新用户（委托给 register_user）        | 甘淞文 |
+| authenticate_user | 验证用户凭据（邮箱+密码）                  | 甘淞文 |
+| get_user_by_email | 按邮箱查找用户                            | 甘淞文 |
 | get_user          | 按 id 获取用户信息                        | 甘淞文 |
 | list_users        | 获取所有用户列表                           | 甘淞文 |
-| update_user       | 更新用户信息（用户名/邮箱）               | 甘淞文 |
+| update_user       | 更新用户信息（用户名/邮箱/密码）          | 甘淞文 |
 | delete_user       | 删除用户及关联的所有项目                   | 甘淞文 |
 | get_users_by_ids  | 批量按 id 获取用户信息                    | 甘淞文 |
+
+### backend/security.py（M1）
+
+| 函数              | 功能                                      | 编写者 |
+| ----------------- | ----------------------------------------- | ------ |
+| hash_password     | 对明文密码进行 bcrypt 哈希                | 甘淞文 |
+| verify_password   | 验证明文密码与 bcrypt 哈希是否匹配        | 甘淞文 |
+| create_access_token | 为用户生成 JWT 访问令牌                 | 甘淞文 |
+| verify_access_token | 验证 JWT 令牌并返回解码 payload         | 甘淞文 |
+| get_current_user  | FastAPI 依赖：从请求头提取当前登录用户   | 甘淞文 |
 
 ### backend/projects.py（M1）
 

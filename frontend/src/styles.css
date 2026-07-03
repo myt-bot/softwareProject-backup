@@ -336,7 +336,7 @@ button:disabled {
   inset: 0;
   width: 1200px;
   height: 1460px;
-  pointer-events: none;
+  pointer-events: auto;
   transform-origin: 0 0;
   z-index: 1;
 }
@@ -504,10 +504,10 @@ button:disabled {
 }
 
 .line-hit-area {
-  stroke: transparent;
-  stroke-width: 10;
+  stroke: rgba(255, 255, 255, 0.01);
+  stroke-width: 28;
   fill: none;
-  cursor: context-menu;
+  cursor: pointer;
   pointer-events: stroke;
 }
 

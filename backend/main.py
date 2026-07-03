@@ -1,11 +1,19 @@
 """FastAPI 后端入口。
 
-本文件只声明课设项目需要的接口结构，具体业务逻辑后续在对应模块中实现。
+本文件声明课设项目需要的接口结构，具体业务逻辑在对应模块中实现。
+
+M1（甘淞文）：用户 CRUD + 项目 CRUD + /auth/* 认证路由 + JWT 令牌 + 权限控制
+M3：模型校验、形状推导
 """
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+import json
 
+from fastapi import BackgroundTasks, Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from . import auth as auth_mgr
+from . import projects as project_mgr
 from .schemas import (
     CodeExportRequest,
     ModelRequest,
@@ -13,11 +21,20 @@ from .schemas import (
     ProjectTemplateCreateRequest,
     ProjectUpdateRequest,
     TrainRequest,
+    TokenResponse,
     UserCreateRequest,
+    UserLoginRequest,
+    UserRegisterRequest,
     UserUpdateRequest,
 )
-
+from .security import create_access_token, get_current_user
 from .validator import validate_model_graph
+from .trainer import (
+    create_training_job,
+    get_job_result,
+    get_job_status,
+    run_training_job,
+)
 
 
 app = FastAPI(title="Visual Deep Learning Model Builder")
@@ -34,56 +51,80 @@ app.add_middleware(
 )
 
 
+# ============================================================
+# 基础设施路由
+# ============================================================
+
 @app.get("/health")
 def health_check():
-    """检查后端服务是否正常运行。
-
-    参数：
-        无。
-
-    返回：
-        后续应返回服务状态信息，例如 {"status": "ok"}。
-    """
-    pass
+    """返回后端服务健康状态。"""
+    return {"status": "ok", "service": "Visual Deep Learning Model Builder"}
 
 
 @app.get("/devices")
 def list_devices():
-    """返回当前本机可用的计算设备，例如 CPU 和 CUDA GPU。
-
-    参数：
-        无。
-
-    返回：
-        后续应返回设备列表和默认设备信息，供前端渲染设备选择器。
-    """
-    pass
+    """返回当前本机可用的计算设备（尚未实现）。"""
+    return JSONResponse(
+        status_code=501,
+        content={"status": "error", "message": "设备检测功能尚未实现"},
+    )
 
 
 @app.post("/validate")
 def validate_model(request: ModelRequest):
-    """校验模型结构，并推导每一层的张量维度变化。
-
-    参数：
-        request：模型校验请求体，包含前端画布生成的模型图结构。
-
-    返回：
-        后续应返回校验是否通过、错误节点、错误说明和每层维度信息。
-    """
-    return validate_model_graph(request.model.model_dump())
+    """校验模型结构，并推导每一层的张量维度变化。"""
+    try:
+        result = validate_model_graph(request.model.model_dump())
+        return result
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": str(exc)},
+        )
 
 
 @app.post("/train")
-def start_training(request: TrainRequest):
+def start_training(request: TrainRequest, background_tasks: BackgroundTasks):
     """根据用户选择的 CPU 或 GPU 启动本地训练任务。
+
+    在创建训练任务前，先执行结构校验（对应系统约束 C5：未通过 Validate 的
+    模型不允许进入训练）。只有结构合法的模型才会创建任务并在后台开始训练。
 
     参数：
         request：训练请求体，包含模型图结构和训练配置。
+        background_tasks：FastAPI 后台任务，用于异步执行训练流程。
 
     返回：
-        后续应返回训练任务编号、初始状态和必要的提示信息。
+        训练任务编号、初始状态和总轮数；结构校验失败时返回 400。
     """
-    pass
+    model_graph = request.model.model_dump()
+
+    validation = validate_model_graph(model_graph)
+    if not validation["valid"]:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "message": "结构校验未通过，无法开始训练",
+                "errors": validation["errors"],
+            },
+        )
+
+    train_config = request.train_config.model_dump()
+    job = create_training_job(
+        model_graph=json.dumps(model_graph),
+        train_config=train_config,
+    )
+
+    background_tasks.add_task(run_training_job, job["job_id"])
+
+    return {
+        "status": "ok",
+        "job_id": job["job_id"],
+        "job_status": job["status"],
+        "current_epoch": job["current_epoch"],
+        "total_epochs": job["total_epochs"],
+    }
 
 
 @app.get("/train/{job_id}/status")
@@ -94,9 +135,15 @@ def get_training_status(job_id: str):
         job_id：训练任务编号，用于定位某一次本地训练任务。
 
     返回：
-        后续应返回任务状态、当前 epoch、进度百分比和训练日志。
+        任务状态、当前 epoch、进度百分比和逐轮指标；任务不存在时返回 404。
     """
-    pass
+    try:
+        return get_job_status(job_id)
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "error", "message": str(exc)},
+        )
 
 
 @app.get("/train/{job_id}/result")
@@ -107,27 +154,110 @@ def get_training_result(job_id: str):
         job_id：训练任务编号，用于查询对应训练任务的最终结果。
 
     返回：
-        后续应返回 loss、accuracy、模型文件路径和训练摘要。
+        loss、accuracy、模型文件路径和训练摘要；任务不存在时返回 404。
     """
-    pass
+    try:
+        return get_job_result(job_id)
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "error", "message": str(exc)},
+        )
 
 
 @app.post("/export/pytorch")
 def export_pytorch_code(request: CodeExportRequest):
-    """根据可视化模型结构生成 PyTorch 源代码。
-
-    参数：
-        request：代码导出请求体，包含模型图结构和导出类名。
-
-    返回：
-        后续应返回生成的 PyTorch 源代码字符串。
-    """
-    pass
+    """导出 PyTorch 代码（尚未实现）。"""
+    return JSONResponse(
+        status_code=501,
+        content={"status": "error", "message": "代码导出功能尚未实现"},
+    )
 
 
 # ============================================================
-# M1 用户与项目管理模块
-# 编写者：甘淞文
+# M1 认证路由（编写者：甘淞文）
+# ============================================================
+
+@app.post("/auth/register", response_model=TokenResponse)
+def register(request: UserRegisterRequest):
+    """注册新用户，返回 JWT 令牌和用户信息。
+
+    参数：
+        request：注册请求体，包含 username、email、password。
+    """
+    try:
+        user = auth_mgr.register_user(
+            username=request.username,
+            email=request.email,
+            password=request.password,
+        )
+        token = create_access_token(user["id"])
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "user": user,
+        }
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": str(exc)},
+        )
+
+
+@app.post("/auth/login", response_model=TokenResponse)
+def login(request: UserLoginRequest):
+    """用户登录，验证凭据后返回 JWT 令牌。
+
+    参数：
+        request：登录请求体，包含 email、password。
+
+    流程：
+        1. 先检查邮箱是否已注册，未注册则提示用户先注册。
+        2. 邮箱已注册则校验密码，匹配成功返回令牌（含用户名等信息）。
+    """
+    # 先检查邮箱是否已注册
+    email_user = auth_mgr.get_user_by_email(request.email)
+    if email_user is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "status": "error",
+                "message": f"邮箱 '{request.email}' 未注册，请先注册账号",
+                "code": "NOT_REGISTERED",
+            },
+        )
+
+    # 邮箱存在，校验密码
+    user = auth_mgr.authenticate_user(
+        email=request.email,
+        password=request.password,
+    )
+    if user is None:
+        return JSONResponse(
+            status_code=401,
+            content={"status": "error", "message": "邮箱或密码错误"},
+        )
+
+    token = create_access_token(user["id"])
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": user,
+    }
+
+
+@app.get("/auth/me")
+def get_current_user_info(current_user: dict = Depends(get_current_user)):
+    """获取当前登录用户的详细信息（需 Bearer Token）。
+
+    请求头：
+        Authorization: Bearer <token>
+    """
+    return {"status": "ok", "data": current_user}
+
+
+# ============================================================
+# M1 用户管理路由（编写者：甘淞文）
 # ============================================================
 
 @app.post("/users")
@@ -135,21 +265,16 @@ def create_user(request: UserCreateRequest):
     """创建新用户。
 
     参数：
-        request：创建用户请求体，包含 username 和 email。
-
-    返回：
-        创建成功的用户信息，包含 id、username、email、created_at。
+        request：创建用户请求体，包含 username、email、password。
     """
-    from .auth import create_user as _create_user
-
     try:
-        user = _create_user(
+        user = auth_mgr.create_user(
             username=request.username,
             email=request.email,
+            password=request.password,
         )
         return {"status": "ok", "data": user}
     except ValueError as exc:
-        from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=400,
             content={"status": "error", "message": str(exc)},
@@ -158,35 +283,16 @@ def create_user(request: UserCreateRequest):
 
 @app.get("/users")
 def list_users():
-    """获取所有用户列表。
-
-    参数：
-        无。
-
-    返回：
-        用户字典列表。
-    """
-    from .auth import list_users as _list_users
-
-    users = _list_users()
+    """获取所有用户列表。"""
+    users = auth_mgr.list_users()
     return {"status": "ok", "data": users, "count": len(users)}
 
 
 @app.get("/users/{user_id}")
 def get_user(user_id: str):
-    """获取指定用户信息。
-
-    参数：
-        user_id：用户唯一标识。
-
-    返回：
-        用户详情字典；不存在时返回 404。
-    """
-    from .auth import get_user as _get_user
-    from fastapi.responses import JSONResponse
-
+    """获取指定用户信息。"""
     try:
-        user = _get_user(user_id)
+        user = auth_mgr.get_user(user_id)
     except ValueError as exc:
         return JSONResponse(
             status_code=400,
@@ -204,23 +310,13 @@ def get_user(user_id: str):
 
 @app.put("/users/{user_id}")
 def update_user(user_id: str, request: UserUpdateRequest):
-    """更新用户信息。
-
-    参数：
-        user_id：用户唯一标识。
-        request：更新请求体，包含可选的 username 和 email。
-
-    返回：
-        更新后的用户信息。
-    """
-    from .auth import update_user as _update_user
-    from fastapi.responses import JSONResponse
-
+    """更新用户信息（支持修改密码）。"""
     try:
-        user = _update_user(
+        user = auth_mgr.update_user(
             user_id=user_id,
             username=request.username,
             email=request.email,
+            password=request.password,
         )
         return {"status": "ok", "data": user}
     except ValueError as exc:
@@ -237,19 +333,9 @@ def update_user(user_id: str, request: UserUpdateRequest):
 
 @app.delete("/users/{user_id}")
 def delete_user(user_id: str):
-    """删除用户及其所有项目。
-
-    参数：
-        user_id：用户唯一标识。
-
-    返回：
-        删除结果。
-    """
-    from .auth import delete_user as _delete_user
-    from fastapi.responses import JSONResponse
-
+    """删除用户及其所有项目。"""
     try:
-        _delete_user(user_id)
+        auth_mgr.delete_user(user_id)
         return {"status": "ok", "message": f"用户 '{user_id}' 已删除"}
     except ValueError as exc:
         return JSONResponse(
@@ -260,19 +346,9 @@ def delete_user(user_id: str):
 
 @app.get("/users/{user_id}/projects")
 def get_user_projects(user_id: str):
-    """获取指定用户的所有项目。
-
-    参数：
-        user_id：用户唯一标识。
-
-    返回：
-        项目列表。
-    """
-    from .projects import get_user_projects as _get_user_projects
-    from fastapi.responses import JSONResponse
-
+    """获取指定用户的所有项目。"""
     try:
-        projects = _get_user_projects(user_id)
+        projects = project_mgr.get_user_projects(user_id)
         return {"status": "ok", "data": projects, "count": len(projects)}
     except ValueError as exc:
         return JSONResponse(
@@ -281,30 +357,37 @@ def get_user_projects(user_id: str):
         )
 
 
+# ============================================================
+# M1 项目管理路由（编写者：甘淞文）
+# ============================================================
+
 @app.post("/projects")
-def create_project(request: ProjectCreateRequest):
-    """创建新项目（保存模型）。
+def create_project(
+    request: ProjectCreateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """创建新项目（需要登录）。
 
-    参数：
-        request：创建项目请求体，包含 user_id、name、model_graph 和可选的 description。
-
-    返回：
-        创建成功的项目信息。
+    请求头：
+        Authorization: Bearer <token>
     """
-    from .projects import create_project as _create_project
-    from fastapi.responses import JSONResponse
-
     try:
-        project = _create_project(
+        project = project_mgr.create_project(
             user_id=request.user_id,
             name=request.name,
             model_graph=request.model_graph.model_dump(),
             description=request.description,
+            current_user_id=current_user["id"],
         )
         return {"status": "ok", "data": project}
     except ValueError as exc:
         return JSONResponse(
             status_code=400,
+            content={"status": "error", "message": str(exc)},
+        )
+    except PermissionError as exc:
+        return JSONResponse(
+            status_code=403,
             content={"status": "error", "message": str(exc)},
         )
 
@@ -380,35 +463,22 @@ def create_project_from_template(request: ProjectTemplateCreateRequest):
 
 @app.get("/projects")
 def list_projects(user_id: str | None = None):
-    """获取项目列表，可按用户过滤。
-
-    参数：
-        user_id：可选，按所属用户过滤。
-
-    返回：
-        项目列表。
-    """
-    from .projects import list_projects as _list_projects
-
-    projects = _list_projects(user_id=user_id)
-    return {"status": "ok", "data": projects, "count": len(projects)}
+    """获取项目列表，可按用户过滤。"""
+    try:
+        projects = project_mgr.list_projects(user_id=user_id)
+        return {"status": "ok", "data": projects, "count": len(projects)}
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": str(exc)},
+        )
 
 
 @app.get("/projects/{project_id}")
 def get_project(project_id: str):
-    """获取指定项目详情。
-
-    参数：
-        project_id：项目唯一标识。
-
-    返回：
-        项目详情字典；不存在时返回 404。
-    """
-    from .projects import get_project as _get_project
-    from fastapi.responses import JSONResponse
-
+    """获取指定项目详情。"""
     try:
-        project = _get_project(project_id)
+        project = project_mgr.get_project(project_id)
     except ValueError as exc:
         return JSONResponse(
             status_code=400,
@@ -425,30 +495,29 @@ def get_project(project_id: str):
 
 
 @app.put("/projects/{project_id}")
-def update_project(project_id: str, request: ProjectUpdateRequest):
-    """更新项目信息。
-
-    参数：
-        project_id：项目唯一标识。
-        request：更新请求体，包含可选的 name、model_graph 和 description。
-
-    返回：
-        更新后的项目信息。
-    """
-    from .projects import update_project as _update_project
-    from fastapi.responses import JSONResponse
-
+def update_project(
+    project_id: str,
+    request: ProjectUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """更新项目信息（需要登录，且是项目所有者）。"""
     try:
-        project = _update_project(
+        project = project_mgr.update_project(
             project_id=project_id,
             name=request.name,
             model_graph=request.model_graph.model_dump() if request.model_graph else None,
             description=request.description,
+            current_user_id=current_user["id"],
         )
         return {"status": "ok", "data": project}
     except ValueError as exc:
         return JSONResponse(
             status_code=400,
+            content={"status": "error", "message": str(exc)},
+        )
+    except PermissionError as exc:
+        return JSONResponse(
+            status_code=403,
             content={"status": "error", "message": str(exc)},
         )
     except RuntimeError as exc:
@@ -459,23 +528,24 @@ def update_project(project_id: str, request: ProjectUpdateRequest):
 
 
 @app.delete("/projects/{project_id}")
-def delete_project(project_id: str):
-    """删除项目。
-
-    参数：
-        project_id：项目唯一标识。
-
-    返回：
-        删除结果。
-    """
-    from .projects import delete_project as _delete_project
-    from fastapi.responses import JSONResponse
-
+def delete_project(
+    project_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """删除项目（需要登录，且是项目所有者）。"""
     try:
-        _delete_project(project_id)
+        project_mgr.delete_project(
+            project_id=project_id,
+            current_user_id=current_user["id"],
+        )
         return {"status": "ok", "message": f"项目 '{project_id}' 已删除"}
     except ValueError as exc:
         return JSONResponse(
             status_code=400,
+            content={"status": "error", "message": str(exc)},
+        )
+    except PermissionError as exc:
+        return JSONResponse(
+            status_code=403,
             content={"status": "error", "message": str(exc)},
         )

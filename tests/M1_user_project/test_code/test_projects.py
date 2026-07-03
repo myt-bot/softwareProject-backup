@@ -1,6 +1,7 @@
-"""项目管理模块单元测试。
+"""项目管理模块单元测试（M1）。
 
 测试 backend/projects.py 中所有业务逻辑的正常路径和异常路径。
+覆盖：项目 CRUD、权限控制测试（current_user_id 参数）。
 编写者：甘淞文
 """
 
@@ -57,8 +58,12 @@ class TestProjectManager(unittest.TestCase):
         storage._PROJECTS_FILE = self._data_dir / "projects.json"
 
         # 创建测试用户
-        self._user = auth_mgr.create_user("testuser", "test@example.com")
+        self._user = auth_mgr.create_user("testuser", "test@example.com", "testpass123")
         self._user_id = self._user["id"]
+
+        # 创建第二个用户（用于权限测试）
+        self._other_user = auth_mgr.create_user("otheruser", "other@example.com", "testpass123")
+        self._other_user_id = self._other_user["id"]
 
     def tearDown(self):
         self._tmp_dir.cleanup()
@@ -89,6 +94,14 @@ class TestProjectManager(unittest.TestCase):
         )
         self.assertEqual(project["description"], "")
 
+    def test_create_project_with_current_user_id(self):
+        """测试带 current_user_id 的权限校验 — 自己创建自己的项目。"""
+        project = project_mgr.create_project(
+            self._user_id, "my_proj", VALID_MODEL_GRAPH,
+            current_user_id=self._user_id,
+        )
+        self.assertEqual(project["user_id"], self._user_id)
+
     def test_get_project_exists(self):
         """测试获取存在的项目。"""
         created = project_mgr.create_project(
@@ -111,36 +124,43 @@ class TestProjectManager(unittest.TestCase):
 
     def test_list_projects_by_user(self):
         """测试按用户过滤项目。"""
-        u2 = auth_mgr.create_user("other", "other@test.com")
         project_mgr.create_project(self._user_id, "p1", VALID_MODEL_GRAPH)
-        project_mgr.create_project(u2["id"], "p2", VALID_MODEL_GRAPH)
+        project_mgr.create_project(self._other_user_id, "p2", VALID_MODEL_GRAPH)
         result = project_mgr.list_projects(user_id=self._user_id)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["name"], "p1")
 
     def test_update_project_name(self):
-        """测试更新项目名称。"""
+        """测试更新项目名称（有权限）。"""
         created = project_mgr.create_project(self._user_id, "old", VALID_MODEL_GRAPH)
-        updated = project_mgr.update_project(created["id"], name="new")
+        updated = project_mgr.update_project(
+            created["id"], name="new", current_user_id=self._user_id
+        )
         self.assertEqual(updated["name"], "new")
 
     def test_update_project_model_graph(self):
         """测试更新模型图。"""
         created = project_mgr.create_project(self._user_id, "p1", VALID_MODEL_GRAPH)
         new_graph = {"layers": [VALID_MODEL_GRAPH["layers"][0]], "connections": []}
-        updated = project_mgr.update_project(created["id"], model_graph=new_graph)
+        updated = project_mgr.update_project(
+            created["id"], model_graph=new_graph, current_user_id=self._user_id
+        )
         self.assertEqual(len(updated["model_graph"]["layers"]), 1)
 
     def test_update_project_description(self):
         """测试更新项目描述。"""
         created = project_mgr.create_project(self._user_id, "p1", VALID_MODEL_GRAPH)
-        updated = project_mgr.update_project(created["id"], description="新描述")
+        updated = project_mgr.update_project(
+            created["id"], description="新描述", current_user_id=self._user_id
+        )
         self.assertEqual(updated["description"], "新描述")
 
     def test_delete_project_success(self):
-        """测试删除项目。"""
+        """测试删除项目（有权限）。"""
         created = project_mgr.create_project(self._user_id, "p1", VALID_MODEL_GRAPH)
-        result = project_mgr.delete_project(created["id"])
+        result = project_mgr.delete_project(
+            created["id"], current_user_id=self._user_id
+        )
         self.assertTrue(result)
         self.assertIsNone(project_mgr.get_project(created["id"]))
 
@@ -150,6 +170,33 @@ class TestProjectManager(unittest.TestCase):
         project_mgr.create_project(self._user_id, "p2", VALID_MODEL_GRAPH)
         projects = project_mgr.get_user_projects(self._user_id)
         self.assertEqual(len(projects), 2)
+
+    # ========== 权限控制测试（M1） ==========
+
+    def test_create_project_cross_user_rejected(self):
+        """测试用户 A 不能以用户 B 的身份创建项目。"""
+        with self.assertRaises(PermissionError):
+            project_mgr.create_project(
+                self._other_user_id, "stolen", VALID_MODEL_GRAPH,
+                current_user_id=self._user_id,
+            )
+
+    def test_update_project_wrong_owner_rejected(self):
+        """测试非所有者不能修改项目。"""
+        created = project_mgr.create_project(self._user_id, "my_proj", VALID_MODEL_GRAPH)
+        with self.assertRaises(PermissionError):
+            project_mgr.update_project(
+                created["id"], name="hacked",
+                current_user_id=self._other_user_id,
+            )
+
+    def test_delete_project_wrong_owner_rejected(self):
+        """测试非所有者不能删除项目。"""
+        created = project_mgr.create_project(self._user_id, "my_proj", VALID_MODEL_GRAPH)
+        with self.assertRaises(PermissionError):
+            project_mgr.delete_project(
+                created["id"], current_user_id=self._other_user_id,
+            )
 
     # ========== 异常路径 —— 创建 ==========
 
