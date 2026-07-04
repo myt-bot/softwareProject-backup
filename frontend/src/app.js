@@ -11,6 +11,14 @@ import {
   validateModel,
 } from "./api/client.js";
 
+const datasetOptions = {
+  MNIST: { shapeLabel: "(1x28x28)" },
+  FashionMNIST: { shapeLabel: "(1x28x28)" },
+  KMNIST: { shapeLabel: "(1x28x28)" },
+  CIFAR10: { shapeLabel: "(3x32x32)" },
+  CIFAR100: { shapeLabel: "(3x32x32)" },
+};
+
 
 const layerGroups = [
   {
@@ -148,6 +156,7 @@ function initializeApp() {
   initializeLayerPalette();
   initializeCanvas();
   initializeInspector();
+  initializeDatasetSelector();
   bindEvents();
   loadDevices();
   loadProjectTemplates();
@@ -156,6 +165,11 @@ function initializeApp() {
     centerGraphInCanvas();
     updateFloatingControlPositions();
   }, 100);
+}
+
+
+function initializeDatasetSelector() {
+  updateSelectedDatasetDisplay();
 }
 
 
@@ -265,6 +279,9 @@ function bindEvents() {
   document.getElementById("btn-save").addEventListener("click", handleSaveProject);
   document.getElementById("btn-export").addEventListener("click", handleExportCode);
   document.getElementById("btn-train").addEventListener("click", handleStartTraining);
+  document.getElementById("dataset-select")?.addEventListener("change", () => {
+    updateSelectedDatasetDisplay();
+  });
   document.getElementById("btn-help").addEventListener("click", () => {
     showToast("info", "这是 MNIST-CNN 模型搭建页，功能按钮已接入后端接口。");
   });
@@ -296,6 +313,20 @@ function bindEvents() {
   ["zoom-out", "zoom-in", "zoom-fit"].forEach(id => {
     document.getElementById(id).addEventListener("click", () => handleZoomAction(id));
   });
+}
+
+
+function getSelectedDatasetName() {
+  return document.getElementById("dataset-select")?.value || "MNIST";
+}
+
+
+function updateSelectedDatasetDisplay() {
+  const datasetName = getSelectedDatasetName();
+  const datasetShape = document.getElementById("dataset-shape");
+  if (datasetShape) {
+    datasetShape.textContent = datasetOptions[datasetName]?.shapeLabel || "";
+  }
 }
 
 
@@ -1925,7 +1956,7 @@ function getCurrentModelGraph() {
 
 function getTrainConfig() {
   return {
-    dataset_name: "MNIST",
+    dataset_name: getSelectedDatasetName(),
     epochs: 1,
     batch_size: 64,
     rate: 0.001,

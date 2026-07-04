@@ -141,6 +141,21 @@ button:disabled {
   color: #818cf8;
 }
 
+.dataset-select {
+  min-width: 126px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  outline: none;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.dataset-select option {
+  background: #0f172a;
+  color: var(--text);
+}
+
 .dataset-card span {
   color: var(--faint);
   font-size: 12px;

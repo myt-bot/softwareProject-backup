@@ -176,6 +176,18 @@ project/
 }
 ```
 
+## 当前支持的训练数据集
+
+后端训练模块目前支持以下 torchvision 内置数据集：
+
+| 数据集 | 输入形状 | 分类数 |
+| ------ | -------- | ------ |
+| MNIST | [1, 28, 28] | 10 |
+| FashionMNIST | [1, 28, 28] | 10 |
+| KMNIST | [1, 28, 28] | 10 |
+| CIFAR10 | [3, 32, 32] | 10 |
+| CIFAR100 | [3, 32, 32] | 100 |
+
 ## 当前计划支持的层类型
 
 | 层类型  | 说明       | 主要参数                                         |
@@ -217,52 +229,50 @@ project/
 
 ## 后端模块和函数说明
 
-函数开发完成后，需要将“编写者”从“待填写”改为实际开发者姓名或学号。多人共同完成时，可以写成“张三、李四”。
-
 ### backend/main.py
 
-| 函数                  | 功能                                       | 编写者 |
-| --------------------- | ------------------------------------------ | ------ |
-| health_check          | 检查后端服务是否正常运行                   | 待填写 |
-| list_devices          | 返回当前本机可用的计算设备                 | 待填写 |
-| validate_model        | 校验模型结构，并推导每一层的张量维度变化   | 待填写 |
-| start_training        | 根据用户选择的 CPU 或 GPU 启动本地训练任务 | 待填写 |
-| get_training_status   | 返回指定训练任务的当前状态、日志和进度     | 待填写 |
-| get_training_result   | 返回训练完成后的最终指标和相关产物信息     | 待填写 |
-| export_pytorch_code   | 根据可视化模型结构生成 PyTorch 源代码      | 待填写 |
-| register              | 注册新用户并返回 JWT 令牌（M1）            | 甘淞文 |
-| login                 | 验证凭据后返回 JWT 令牌（M1）              | 甘淞文 |
-| get_current_user_info | 获取当前登录用户信息（M1）                 | 甘淞文 |
-| create_user           | 创建新用户（M1）                           | 甘淞文 |
-| list_users            | 获取所有用户列表（M1）                     | 甘淞文 |
-| get_user              | 获取指定用户信息（M1）                     | 甘淞文 |
-| update_user           | 更新用户信息（M1）                         | 甘淞文 |
-| delete_user           | 删除用户及关联项目（M1）                   | 甘淞文 |
-| get_user_projects     | 获取用户的所有项目（M1）                   | 甘淞文 |
-| create_project        | 创建项目/保存模型（M1）                    | 甘淞文 |
-| list_projects         | 获取项目列表（M1）                         | 甘淞文 |
-| get_project           | 获取指定项目详情（M1）                     | 甘淞文 |
-| update_project        | 更新项目信息（M1）                         | 甘淞文 |
-| delete_project        | 删除项目（M1）                             | 甘淞文 |
+| 函数                  | 功能                                       |
+| --------------------- | ------------------------------------------ |
+| health_check          | 检查后端服务是否正常运行                   |
+| list_devices          | 返回当前本机可用的计算设备                 |
+| validate_model        | 校验模型结构，并推导每一层的张量维度变化   |
+| start_training        | 根据用户选择的 CPU 或 GPU 启动本地训练任务 |
+| get_training_status   | 返回指定训练任务的当前状态、日志和进度     |
+| get_training_result   | 返回训练完成后的最终指标和相关产物信息     |
+| export_pytorch_code   | 根据可视化模型结构生成 PyTorch 源代码      |
+| register              | 注册新用户并返回 JWT 令牌（M1）            |
+| login                 | 验证凭据后返回 JWT 令牌（M1）              |
+| get_current_user_info | 获取当前登录用户信息（M1）                 |
+| create_user           | 创建新用户（M1）                           |
+| list_users            | 获取所有用户列表（M1）                     |
+| get_user              | 获取指定用户信息（M1）                     |
+| update_user           | 更新用户信息（M1）                         |
+| delete_user           | 删除用户及关联项目（M1）                   |
+| get_user_projects     | 获取用户的所有项目（M1）                   |
+| create_project        | 创建项目/保存模型（M1）                    |
+| list_projects         | 获取项目列表（M1）                         |
+| get_project           | 获取指定项目详情（M1）                     |
+| update_project        | 更新项目信息（M1）                         |
+| delete_project        | 删除项目（M1）                             |
 
 ### backend/schemas.py
 
-| 类                   | 功能                                         | 编写者 |
-| -------------------- | -------------------------------------------- | ------ |
-| LayerConfig          | 描述画布中的一个模型层节点以及它的可编辑参数 | 待填写 |
-| ConnectionConfig     | 描述画布中两个层节点之间的连接关系           | 待填写 |
-| ModelGraph           | 描述前端传给后端的完整模型图结构             | 待填写 |
-| TrainConfig          | 描述训练超参数以及用户选择的计算设备         | 待填写 |
-| ModelRequest         | 模型校验和维度推导接口的请求体               | 待填写 |
-| TrainRequest         | 启动本地训练任务接口的请求体                 | 待填写 |
-| CodeExportRequest    | 导出 PyTorch 代码接口的请求体                | 待填写 |
-| UserCreateRequest    | 创建用户接口的请求体（M1）                   | 甘淞文 |
-| UserUpdateRequest    | 更新用户接口的请求体（M1）                   | 甘淞文 |
-| UserRegisterRequest  | 用户注册接口的请求体（M1）                   | 甘淞文 |
-| UserLoginRequest     | 用户登录接口的请求体（M1）                   | 甘淞文 |
-| TokenResponse        | 认证成功后的 JWT 令牌响应（M1）              | 甘淞文 |
-| ProjectCreateRequest | 创建项目接口的请求体（M1）                   | 甘淞文 |
-| ProjectUpdateRequest | 更新项目接口的请求体（M1）                   | 甘淞文 |
+| 类                   | 功能                                         |
+| -------------------- | -------------------------------------------- |
+| LayerConfig          | 描述画布中的一个模型层节点以及它的可编辑参数 |
+| ConnectionConfig     | 描述画布中两个层节点之间的连接关系           |
+| ModelGraph           | 描述前端传给后端的完整模型图结构             |
+| TrainConfig          | 描述训练超参数以及用户选择的计算设备         |
+| ModelRequest         | 模型校验和维度推导接口的请求体               |
+| TrainRequest         | 启动本地训练任务接口的请求体                 |
+| CodeExportRequest    | 导出 PyTorch 代码接口的请求体                |
+| UserCreateRequest    | 创建用户接口的请求体（M1）                   |
+| UserUpdateRequest    | 更新用户接口的请求体（M1）                   |
+| UserRegisterRequest  | 用户注册接口的请求体（M1）                   |
+| UserLoginRequest     | 用户登录接口的请求体（M1）                   |
+| TokenResponse        | 认证成功后的 JWT 令牌响应（M1）              |
+| ProjectCreateRequest | 创建项目接口的请求体（M1）                   |
+| ProjectUpdateRequest | 更新项目接口的请求体（M1）                   |
 
 ### backend/device.py
 
@@ -339,65 +349,65 @@ project/
 
 ### backend/graph_utils.py
 
-| 函数                    | 功能                           | 编写者 |
-| ----------------------- | ------------------------------ | ------ |
-| normalize_model_graph   | 将 JSON 字符串或字典统一成字典 | 待填写 |
-| topological_sort_layers | 对模型层进行拓扑排序           | 待填写 |
-| build_predecessor_map   | 构建每个节点的前驱映射         | 待填写 |
-| build_successor_map     | 构建每个节点的后继映射         | 待填写 |
+| 函数                    | 功能                           |
+| ----------------------- | ------------------------------ |
+| normalize_model_graph   | 将 JSON 字符串或字典统一成字典 |
+| topological_sort_layers | 对模型层进行拓扑排序           |
+| build_predecessor_map   | 构建每个节点的前驱映射         |
+| build_successor_map     | 构建每个节点的后继映射         |
 
 ### backend/storage.py（M1）
 
-| 函数                    | 功能                   | 编写者 |
-| ----------------------- | ---------------------- | ------ |
-| save_user               | 保存新用户记录         | 甘淞文 |
-| get_user                | 按 id 获取用户         | 甘淞文 |
-| list_users              | 列出所有用户，支持过滤 | 甘淞文 |
-| update_user             | 更新用户信息           | 甘淞文 |
-| delete_user             | 删除用户               | 甘淞文 |
-| user_exists             | 检查用户是否存在       | 甘淞文 |
-| save_project            | 保存新项目记录         | 甘淞文 |
-| get_project             | 按 id 获取项目         | 甘淞文 |
-| list_projects           | 列出所有项目，支持过滤 | 甘淞文 |
-| update_project          | 更新项目信息           | 甘淞文 |
-| delete_project          | 删除项目               | 甘淞文 |
-| project_exists          | 检查项目是否存在       | 甘淞文 |
-| delete_projects_by_user | 按用户 id 批量删除项目 | 甘淞文 |
+| 函数                    | 功能                   |
+| ----------------------- | ---------------------- |
+| save_user               | 保存新用户记录         |
+| get_user                | 按 id 获取用户         |
+| list_users              | 列出所有用户，支持过滤 |
+| update_user             | 更新用户信息           |
+| delete_user             | 删除用户               |
+| user_exists             | 检查用户是否存在       |
+| save_project            | 保存新项目记录         |
+| get_project             | 按 id 获取项目         |
+| list_projects           | 列出所有项目，支持过滤 |
+| update_project          | 更新项目信息           |
+| delete_project          | 删除项目               |
+| project_exists          | 检查项目是否存在       |
+| delete_projects_by_user | 按用户 id 批量删除项目 |
 
 ### backend/auth.py（M1）
 
-| 函数              | 功能                                 | 编写者 |
-| ----------------- | ------------------------------------ | ------ |
-| register_user     | 注册新用户，校验邮箱唯一性并哈希密码 | 甘淞文 |
-| create_user       | 创建新用户（委托给 register_user）   | 甘淞文 |
-| authenticate_user | 验证用户凭据（邮箱+密码）            | 甘淞文 |
-| get_user_by_email | 按邮箱查找用户                       | 甘淞文 |
-| get_user          | 按 id 获取用户信息                   | 甘淞文 |
-| list_users        | 获取所有用户列表                     | 甘淞文 |
-| update_user       | 更新用户信息（用户名/邮箱/密码）     | 甘淞文 |
-| delete_user       | 删除用户及关联的所有项目             | 甘淞文 |
-| get_users_by_ids  | 批量按 id 获取用户信息               | 甘淞文 |
+| 函数              | 功能                                 |
+| ----------------- | ------------------------------------ |
+| register_user     | 注册新用户，校验邮箱唯一性并哈希密码 |
+| create_user       | 创建新用户（委托给 register_user）   |
+| authenticate_user | 验证用户凭据（邮箱+密码）            |
+| get_user_by_email | 按邮箱查找用户                       |
+| get_user          | 按 id 获取用户信息                   |
+| list_users        | 获取所有用户列表                     |
+| update_user       | 更新用户信息（用户名/邮箱/密码）     |
+| delete_user       | 删除用户及关联的所有项目             |
+| get_users_by_ids  | 批量按 id 获取用户信息               |
 
 ### backend/security.py（M1）
 
-| 函数                | 功能                                   | 编写者 |
-| ------------------- | -------------------------------------- | ------ |
-| hash_password       | 对明文密码进行 bcrypt 哈希             | 甘淞文 |
-| verify_password     | 验证明文密码与 bcrypt 哈希是否匹配     | 甘淞文 |
-| create_access_token | 为用户生成 JWT 访问令牌                | 甘淞文 |
-| verify_access_token | 验证 JWT 令牌并返回解码 payload        | 甘淞文 |
-| get_current_user    | FastAPI 依赖：从请求头提取当前登录用户 | 甘淞文 |
+| 函数                | 功能                                   |
+| ------------------- | -------------------------------------- |
+| hash_password       | 对明文密码进行 bcrypt 哈希             |
+| verify_password     | 验证明文密码与 bcrypt 哈希是否匹配     |
+| create_access_token | 为用户生成 JWT 访问令牌                |
+| verify_access_token | 验证 JWT 令牌并返回解码 payload        |
+| get_current_user    | FastAPI 依赖：从请求头提取当前登录用户 |
 
 ### backend/projects.py（M1）
 
-| 函数              | 功能                                   | 编写者 |
-| ----------------- | -------------------------------------- | ------ |
-| create_project    | 创建新项目，校验用户存在性和模型图结构 | 甘淞文 |
-| get_project       | 按 id 获取项目详情                     | 甘淞文 |
-| list_projects     | 列出项目，支持按用户过滤               | 甘淞文 |
-| update_project    | 更新项目信息（名称/模型图/描述）       | 甘淞文 |
-| delete_project    | 删除项目                               | 甘淞文 |
-| get_user_projects | 获取指定用户的所有项目                 | 甘淞文 |
+| 函数              | 功能                                   |
+| ----------------- | -------------------------------------- |
+| create_project    | 创建新项目，校验用户存在性和模型图结构 |
+| get_project       | 按 id 获取项目详情                     |
+| list_projects     | 列出项目，支持按用户过滤               |
+| update_project    | 更新项目信息（名称/模型图/描述）       |
+| delete_project    | 删除项目                               |
+| get_user_projects | 获取指定用户的所有项目                 |
 
 ## 前端模块和函数说明
 
@@ -435,7 +445,7 @@ project/
 ### 第一阶段：基础训练闭环
 
 - 固定 CNN 或 MLP 模型。
-- 固定 MNIST 数据集。
+- 支持 MNIST、FashionMNIST、KMNIST、CIFAR10 和 CIFAR100 等内置数据集。
 - 使用 CPU 完成本地训练。
 - 返回 loss 和 accuracy。
 
@@ -483,17 +493,8 @@ project/
 - 用户只能选择系统内置层类型，不能直接提交任意 Python 代码。
 - GPU 是否可用以后端检测结果为准，前端不能自行假设。
 - 新增接口时需要同步更新 backend/main.py 和本 README。
-- 新增函数时需要在本 README 中登记函数功能和编写者。
+- 新增函数时需要在本 README 中登记函数功能。
 - 修改核心 JSON 数据格式时，需要同步更新前端、后端和本 README。
-
-## 编写者维护规则
-
-- 每个函数、类和接口都需要在 README 中注明编写者。
-- 未开始开发或尚未确认负责人时，统一填写“待填写”。
-- 单人完成时填写姓名或学号。
-- 多人共同完成时用顿号分隔，例如“张三、李四”。
-- AI 辅助生成的代码也需要注明最终确认和维护该代码的人。
-- 如果函数经过多人多次修改，可以填写主要负责人，也可以写成“张三维护，李四补充”。
 
 ## AI 协作说明
 
@@ -507,4 +508,4 @@ project/
 - 后端新增设备相关逻辑优先放在 backend/device.py。
 - 后端新增代码导出逻辑优先放在 backend/code_exporter.py。
 - 前端新增接口调用时优先封装到 frontend/src/api/client.js。
-- 新增或修改函数后，需要同步更新本 README 中的函数说明和编写者信息。
+- 新增或修改函数后，需要同步更新本 README 中的函数说明。

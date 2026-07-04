@@ -21,8 +21,14 @@
           <span class="dataset-label">当前数据集:</span>
           <div class="dataset-card">
             <iconify-icon icon="mdi:database"></iconify-icon>
-            <strong>MNIST</strong>
-            <span>(28x28 Gray)</span>
+            <select id="dataset-select" class="dataset-select" aria-label="Dataset">
+              <option value="MNIST">MNIST</option>
+              <option value="FashionMNIST">FashionMNIST</option>
+              <option value="KMNIST">KMNIST</option>
+              <option value="CIFAR10">CIFAR10</option>
+              <option value="CIFAR100">CIFAR100</option>
+            </select>
+            <span id="dataset-shape">(1x28x28)</span>
           </div>
         </div>
 
