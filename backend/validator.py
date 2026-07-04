@@ -427,11 +427,41 @@ def _merge_shapes(layer_config, shapes):
     merge_mode = params.get("merge", "concat")
 
     if merge_mode in ("add", "sum"):
-        return shapes[0]
+        normalized_shapes = [
+            list(shape) if isinstance(shape, (list, tuple)) else shape
+            for shape in shapes
+        ]
+        first_shape = normalized_shapes[0]
+        if any(shape != first_shape for shape in normalized_shapes[1:]):
+            raise ValueError(
+                f"层 {layer_config.get('id')}: add 合并要求所有输入 shape 完全一致，"
+                f"当前输入 shapes 为 {normalized_shapes}"
+            )
+        return first_shape
 
     concat_dim = params.get("dim", params.get("concat_dim", 1))
     shape_index = concat_dim - 1 if concat_dim > 0 else concat_dim
     merged_shape = list(shapes[0])
+
+    if shape_index < 0:
+        shape_index += len(merged_shape)
+
+    for shape in shapes:
+        if len(shape) != len(merged_shape):
+            raise ValueError(
+                f"层 {layer_config.get('id')}: concat 合并要求所有输入 shape 维度数量一致，"
+                f"当前输入 shapes 为 {shapes}"
+            )
+
+        for dimension_index, dimension in enumerate(shape):
+            if dimension_index == shape_index:
+                continue
+            if dimension != merged_shape[dimension_index]:
+                raise ValueError(
+                    f"层 {layer_config.get('id')}: concat 合并要求除拼接维度外其它维度一致，"
+                    f"当前输入 shapes 为 {shapes}"
+                )
+
     merged_shape[shape_index] = sum(shape[shape_index] for shape in shapes)
 
     return merged_shape
