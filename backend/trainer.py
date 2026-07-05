@@ -28,6 +28,35 @@ STATUS_MESSAGES = {
     "cancelled": "训练已取消",
 }
 
+DATASET_SPECS = {
+    "MNIST": {
+        "class": torchvision.datasets.MNIST,
+        "root": "./MNIST",
+        "aliases": ("mnist",),
+    },
+    "FashionMNIST": {
+        "class": torchvision.datasets.FashionMNIST,
+        "root": "./FashionMNIST",
+        "aliases": ("fashionmnist", "fashion_mnist", "fashion-mnist"),
+    },
+    "KMNIST": {
+        "class": torchvision.datasets.KMNIST,
+        "root": "./KMNIST",
+        "aliases": ("kmnist",),
+    },
+    "CIFAR10": {
+        "class": torchvision.datasets.CIFAR10,
+        "root": "./CIFAR10",
+        "aliases": ("cifar10", "cifar-10", "cifar_10"),
+    },
+    "CIFAR100": {
+        "class": torchvision.datasets.CIFAR100,
+        "root": "./CIFAR100",
+        "aliases": ("cifar100", "cifar-100", "cifar_100"),
+    },
+}
+
+
 def create_training_job(model_graph, train_config):
     """在训练开始前创建并登记一个训练任务。
 
@@ -285,38 +314,71 @@ def prepare_dataset(dataset_name, batch_size):
     """加载并预处理用户选择的内置数据集。
 
     参数：
-        dataset_name：数据集名称，例如 "MNIST"，用于决定加载哪个内置数据集。
+        dataset_name：数据集名称，例如 "MNIST"、"FashionMNIST" 或 "CIFAR10"。
         batch_size：每个训练批次的数据量，用于构造 DataLoader。
 
     返回：
-        后续应返回训练集 DataLoader 和测试集 DataLoader。
+        训练集 DataLoader 和测试集 DataLoader。
     """
-    if dataset_name == 'MNIST':
-        train_data = torchvision.datasets.MNIST(
-            root='./MNIST',
-            train=True,
-            transform=torchvision.transforms.ToTensor(),
-            download=True
-        )
+    dataset_key = _resolve_dataset_key(dataset_name)
+    dataset_spec = DATASET_SPECS[dataset_key]
+    dataset_class = dataset_spec["class"]
+    transform = _build_dataset_transform(dataset_key)
 
-        test_data = torchvision.datasets.MNIST(
-            root='./MNIST',
-            train=False,
-            transform=torchvision.transforms.ToTensor()
-        )
-
-    train_DataLoader = torch.utils.data.DataLoader(
-            dataset=train_data,
-            batch_size=batch_size,
-            shuffle=True
+    train_data = dataset_class(
+        root=dataset_spec["root"],
+        train=True,
+        transform=transform,
+        download=True
     )
 
-    test_DataLoader = torch.utils.data.DataLoader(
-            dataset=test_data,
-            batch_size=batch_size
+    test_data = dataset_class(
+        root=dataset_spec["root"],
+        train=False,
+        transform=transform
     )
 
-    return train_DataLoader, test_DataLoader
+    train_dataloader = torch.utils.data.DataLoader(
+        dataset=train_data,
+        batch_size=batch_size,
+        shuffle=True
+    )
+
+    test_dataloader = torch.utils.data.DataLoader(
+        dataset=test_data,
+        batch_size=batch_size
+    )
+
+    return train_dataloader, test_dataloader
+
+
+def _resolve_dataset_key(dataset_name):
+    """将用户传入的数据集名称或别名解析为 DATASET_SPECS 中的标准 key。"""
+    if not isinstance(dataset_name, str) or not dataset_name.strip():
+        raise ValueError("dataset_name 必须是非空字符串")
+
+    normalized_name = dataset_name.strip().lower()
+    for dataset_key, dataset_spec in DATASET_SPECS.items():
+        aliases = (dataset_key.lower(), *dataset_spec.get("aliases", ()))
+        if normalized_name in aliases:
+            return dataset_key
+
+    supported = ", ".join(DATASET_SPECS.keys())
+    raise ValueError(f"暂不支持的数据集: {dataset_name}，当前支持: {supported}")
+
+
+def _build_dataset_transform(dataset_key):
+    """返回指定数据集的默认输入转换。"""
+    if dataset_key in ("CIFAR10", "CIFAR100"):
+        return torchvision.transforms.Compose([
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(
+                mean=(0.4914, 0.4822, 0.4465),
+                std=(0.2470, 0.2435, 0.2616),
+            ),
+        ])
+
+    return torchvision.transforms.ToTensor()
 
 
 def train_one_epoch(model, train_loader, optimizer, loss_fn, device):

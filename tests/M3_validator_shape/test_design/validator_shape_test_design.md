@@ -14,7 +14,7 @@
 - 必要节点检查：缺少 `Input`、缺少 `Output`
 - 连接关系检查：孤立节点、连接断裂、循环连接
 - 参数检查：参数缺失、参数类型或取值非法
-- 维度推导：`Conv2D`、`Pooling`、`Flatten`、`Linear`
+- 维度推导：`Conv2D`、`Pooling`、`Flatten`、`Linear`、多输入 `add/concat` 合并
 - `/validate` 接口：合法模型、业务校验失败模型、请求体 schema 错误
 
 ## 4. 不测试的内容
@@ -44,6 +44,8 @@
 | M3-012 | `/validate` 接口正常流程 | 向接口提交合法 CNN 模型图 | 使用 `TestClient` 请求 `POST /validate` | HTTP 200，响应中 `valid=True`，包含 `message` 和各层 `shapes` | 与预期一致：HTTP 200，响应 `valid=True`、`errors=[]`、`message=结构校验通过`，包含各层 `shapes` | 高 |
 | M3-013 | `/validate` 接口业务校验失败 | 向接口提交缺少 `Output` 的模型图 | 使用 `TestClient` 请求 `POST /validate` | HTTP 200，响应中 `valid=False`，错误包含“模型缺少必要节点: Output” | 与预期一致：HTTP 200，响应 `valid=False`，`errors` 包含“模型缺少必要节点: Output” | 高 |
 | M3-014 | `/validate` 接口请求体格式错误 | `layers` 传入字符串而不是数组 | 使用 `TestClient` 请求 `POST /validate` | HTTP 422，请求体 schema 校验失败 | 与预期一致：HTTP 422，请求体 schema 校验失败 | 中 |
+| M3-015 | add 合并输入维度不一致 | `Input([8,28,28])` 和 `Input([16,28,28])` 同时连接到 `ReLU(params.merge="add")`，再连接 `Output` | 调用 `validate_model_graph` | `valid=False`，错误提示 add 合并要求所有输入 shape 完全一致 | 与预期一致：返回 `valid=False`，错误信息包含“add 合并要求所有输入 shape 完全一致” | 高 |
+| M3-016 | concat 合并非拼接维度不一致 | `Input([8,28,28])` 和 `Input([8,32,28])` 同时连接到 `ReLU(params.merge="concat", dim=1)`，再连接 `Output` | 调用 `validate_model_graph` | `valid=False`，错误提示 concat 合并要求除拼接维度外其它维度一致 | 与预期一致：返回 `valid=False`，错误信息包含“concat 合并要求除拼接维度外其它维度一致” | 高 |
 
 ## 6. 预期结果
 
@@ -51,6 +53,8 @@
 - 缺少必要节点、断裂连接、循环连接、参数缺失或参数非法时，应返回 `valid=False` 和可读错误信息。
 - `Conv2D`、`Pooling`、`Flatten` 应按公式或展平规则正确推导输出维度。
 - `Linear` 应检查输入展平维度是否与 `in_features` 一致；不一致时应返回错误。
+- 多输入节点使用 `params.merge="add"` 或 `"sum"` 时，应检查所有前驱输出 shape 完全一致；不一致时应返回错误。
+- 多输入节点使用 `params.merge="concat"` 时，应检查所有前驱输出 shape 的维度数量一致，并且除拼接维度外其它维度完全一致。
 - `/validate` 接口应将 `ModelRequest.model` 转成普通字典后调用 `validate_model_graph`，并返回统一校验结果。
 
 ## 7. 异常情况考虑
@@ -60,3 +64,5 @@
 - 图中存在循环连接时，应阻止后续维度推导，避免拓扑排序结果错误。
 - 层参数缺失、类型错误或取值越界时，应返回明确的参数错误。
 - 维度无法推导或层之间维度不匹配时，应返回失败结果，而不是静默生成错误维度。
+- add 合并遇到不同 shape 的分支输入时，应阻止后续维度推导并返回可读错误信息。
+- concat 合并遇到非拼接维度不同或维度数量不同的分支输入时，应阻止后续维度推导并返回可读错误信息。

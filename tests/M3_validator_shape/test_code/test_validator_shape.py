@@ -177,6 +177,46 @@ class ValidatorShapeUnitTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("Linear" in error and ("维度" in error or "in_features" in error) for error in result["errors"]))
 
+    def test_add_merge_requires_same_input_shapes(self):
+        graph = {
+            "layers": [
+                layer("input_a", "Input", {"shape": [8, 28, 28]}),
+                layer("input_b", "Input", {"shape": [16, 28, 28]}),
+                layer("merge", "ReLU", {"merge": "add"}),
+                layer("output", "Output"),
+            ],
+            "connections": [
+                connection("input_a", "merge"),
+                connection("input_b", "merge"),
+                connection("merge", "output"),
+            ],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("add 合并要求所有输入 shape 完全一致" in error for error in result["errors"]))
+
+    def test_concat_merge_requires_matching_non_concat_dimensions(self):
+        graph = {
+            "layers": [
+                layer("input_a", "Input", {"shape": [8, 28, 28]}),
+                layer("input_b", "Input", {"shape": [8, 32, 28]}),
+                layer("merge", "ReLU", {"merge": "concat", "dim": 1}),
+                layer("output", "Output"),
+            ],
+            "connections": [
+                connection("input_a", "merge"),
+                connection("input_b", "merge"),
+                connection("merge", "output"),
+            ],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("concat 合并要求除拼接维度外其它维度一致" in error for error in result["errors"]))
+
 
 if __name__ == "__main__":
     unittest.main()
