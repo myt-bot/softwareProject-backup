@@ -1,183 +1,214 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MNIST-CNN 模型搭建页</title>
-    <script src="https://modao.cc/agent-py/static/source/js/iconify-icon.min.1.0.7.js"></script>
-    <link rel="stylesheet" href="./src/styles.css">
-  </head>
-  <body>
-    <div id="app" class="app-shell">
-      <header class="topbar">
-        <div class="brand">
-          <div class="brand-mark">
-            <iconify-icon icon="mdi:brain"></iconify-icon>
-          </div>
-          <h1>MNIST-CNN <span>模型编辑器</span></h1>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MNIST-CNN 模型搭建页</title>
+  <link rel="stylesheet" href="./src/styles.css">
+  <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">
+          <iconify-icon icon="mdi:brain"></iconify-icon>
         </div>
+        <h1>MNIST-CNN<span>模型编辑器</span></h1>
+      </div>
 
-        <div class="dataset-pill">
-          <span class="dataset-label">当前数据集:</span>
-          <div class="dataset-card">
-            <iconify-icon icon="mdi:database"></iconify-icon>
-            <select id="dataset-select" class="dataset-select" aria-label="Dataset">
-              <option value="MNIST">MNIST</option>
-              <option value="FashionMNIST">FashionMNIST</option>
-              <option value="KMNIST">KMNIST</option>
-              <option value="CIFAR10">CIFAR10</option>
-              <option value="CIFAR100">CIFAR100</option>
-            </select>
-            <span id="dataset-shape">(1x28x28)</span>
+      <div class="dataset-pill">
+        <span class="dataset-label">当前数据集:</span>
+        
+        <!-- 全新圆润风格的自定义下拉菜单 -->
+        <div class="dataset-card" id="custom-dataset-dropdown">
+          <iconify-icon icon="mdi:database"></iconify-icon>
+          
+          <!-- 隐藏原生 select (用于兼容后端数据) -->
+          <select id="dataset-select" style="display: none;">
+            <option value="MNIST">MNIST</option>
+            <option value="FashionMNIST">FashionMNIST</option>
+            <option value="KMNIST">KMNIST</option>
+            <option value="CIFAR10">CIFAR10</option>
+            <option value="CIFAR100">CIFAR100</option>
+          </select>
+          
+          <!-- 当前展示值 -->
+          <div class="custom-select-value" id="custom-select-value">MNIST</div>
+          <iconify-icon icon="mdi:chevron-down" class="arrow-icon"></iconify-icon>
+
+          <!-- 下拉选项面板 -->
+          <div class="custom-options">
+            <div class="custom-option active" data-value="MNIST">MNIST</div>
+            <div class="custom-option" data-value="FashionMNIST">FashionMNIST</div>
+            <div class="custom-option" data-value="KMNIST">KMNIST</div>
+            <div class="custom-option" data-value="CIFAR10">CIFAR10</div>
+            <div class="custom-option" data-value="CIFAR100">CIFAR100</div>
           </div>
+          
+          <span id="dataset-shape" class="shape-badge">(1x28x28)</span>
         </div>
+      </div>
 
-        <div class="top-actions">
-          <button class="icon-button" id="btn-help" title="帮助">
-            <iconify-icon icon="mdi:help-circle-outline"></iconify-icon>
-          </button>
-          <div class="avatar" aria-label="User Avatar"></div>
+      <div class="top-actions">
+        <button class="icon-button" id="btn-help" title="帮助"><iconify-icon icon="mdi:help-circle-outline"></iconify-icon></button>
+        <div class="avatar"></div>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <!-- (保留原有的左侧侧边栏结构) -->
+      <aside class="layer-sidebar">
+        <div class="sidebar-search">
+          <iconify-icon icon="mdi:magnify"></iconify-icon>
+          <input type="text" placeholder="搜索层/Layer...">
         </div>
-      </header>
+        <div class="template-tabs">
+          <button data-template="linear">Linear</button>
+          <button data-template="mlp">MLP</button>
+          <button data-template="perceptron">Perceptron</button>
+          <button data-template="lenet">LeNet</button>
+          <button data-template="resnet">ResNet Tiny</button>
+          <button data-template="lstm">LSTM</button>
+          <button data-template="seq2seq">Seq2Seq</button>
+          <button data-template="transformer">Transformer</button>
+          <button data-template="attention">Attention</button>
+          <button data-template="vae">VAE</button>
+          <button data-template="gcn">GCN</button>
+        </div>
+        <div class="layer-list" id="layer-palette"></div>
+      </aside>
 
-      <main class="workspace">
-        <aside class="layer-sidebar">
-          <div class="sidebar-search">
-            <iconify-icon icon="mdi:magnify"></iconify-icon>
-            <input id="layer-search" type="text" placeholder="搜索层/Layer...">
-          </div>
-          <div class="template-tabs">
-            <button data-template="linear_classifier">Linear</button>
-            <button data-template="mlp">MLP</button>
-            <button data-template="perceptron">Perceptron</button>
-            <button data-template="lenet">LeNet</button>
-            <button data-template="resnet_tiny">ResNet Tiny</button>
-            <button data-template="lstm">LSTM</button>
-            <button data-template="seq2seq">Seq2Seq</button>
-            <button data-template="transformer_encoder_tiny">Transformer</button>
-            <button data-template="self_attention_demo">Attention</button>
-            <button data-template="vae">VAE</button>
-            <button data-template="gcn_tiny">GCN</button>
-          </div>
-          <div class="layer-list" id="layer-palette"></div>
-        </aside>
-
-        <section class="canvas canvas-grid" id="canvas-container">
-          <svg id="connections-svg" class="connections-svg" aria-hidden="true"></svg>
-          <div id="nodes-container" class="nodes-container"></div>
-          <button id="btn-exit-connect" class="exit-connect-button hidden">
-            <iconify-icon icon="mdi:close"></iconify-icon>
-            退出连线
-          </button>
-          <div class="zoom-control">
-            <button id="zoom-out" title="缩小"><iconify-icon icon="mdi:minus"></iconify-icon></button>
-            <span>100%</span>
-            <button id="zoom-in" title="放大"><iconify-icon icon="mdi:plus"></iconify-icon></button>
-            <i></i>
-            <button id="zoom-fit" title="适应画布"><iconify-icon icon="mdi:overscan"></iconify-icon></button>
-          </div>
-        </section>
-
-        <aside class="inspector-panel">
-          <div id="inspector-content" class="inspector-content"></div>
-        </aside>
+      <!-- (保留原有的画布结构) -->
+      <main class="canvas" id="canvas-container">
+        <button class="exit-connect-button hidden" id="btn-exit-connect">
+          <iconify-icon icon="mdi:close-circle-outline"></iconify-icon>
+          退出连线
+        </button>
+        <div class="zoom-control">
+          <button id="zoom-out"><iconify-icon icon="mdi:minus"></iconify-icon></button>
+          <span>100%</span>
+          <button id="zoom-in"><iconify-icon icon="mdi:plus"></iconify-icon></button>
+          <i></i>
+          <button id="zoom-fit"><iconify-icon icon="mdi:fit-to-screen-outline"></iconify-icon></button>
+        </div>
+        <div class="canvas-grid connections-svg"></div>
+        <svg class="connections-svg" id="connections-svg"></svg>
+        <div class="nodes-container" id="nodes-container"></div>
       </main>
 
-      <footer class="actionbar">
-        <div id="validation-summary" class="validation-summary hidden">
+      <!-- (保留原有的右侧属性面板结构) -->
+      <aside class="inspector-panel" id="inspector-content"></aside>
+    </div>
+
+    <footer class="actionbar">
+      <div class="actionbar-left">
+        <div class="training-job-panel is-empty" id="training-job-panel">
+          <div class="training-job-icon"><iconify-icon icon="mdi:timer-outline"></iconify-icon></div>
+          <div class="training-job-body">
+            <div class="training-job-head">
+              <strong id="training-job-id">暂无训练任务</strong>
+              <span id="training-job-status">Idle</span>
+            </div>
+            <div class="training-job-track"><i id="training-job-progress" style="width: 0%"></i></div>
+            <p id="training-job-meta">Validate 通过后可启动训练</p>
+          </div>
+          <button class="icon-button" id="btn-view-training" disabled><iconify-icon icon="mdi:chart-line"></iconify-icon></button>
+        </div>
+      </div>
+      <div class="footer-actions">
+        <div class="validation-summary hidden" id="validation-summary">
           <iconify-icon id="summary-icon" icon="mdi:alert-circle"></iconify-icon>
           <span id="summary-text">结构校验失败: 1个潜在错误</span>
         </div>
-        <div class="footer-actions">
-          <button class="secondary-button" id="btn-validate">
-            <iconify-icon icon="mdi:check-circle-outline"></iconify-icon>
-            结构检查 Validate
-          </button>
-          <button class="secondary-button" id="btn-save">
-            <iconify-icon icon="mdi:content-save-outline"></iconify-icon>
-            保存模型 Save
-          </button>
-          <span class="footer-divider"></span>
-          <button class="primary-button" id="btn-export">
-            <iconify-icon icon="mdi:code-braces"></iconify-icon>
-            导出 Export
-          </button>
-          <button class="success-button" id="btn-train" disabled>
-            <iconify-icon icon="mdi:play"></iconify-icon>
-            开始训练 Train
-          </button>
+        <div class="footer-divider"></div>
+        <button class="secondary-button" id="btn-validate">
+          <iconify-icon icon="mdi:check-circle-outline"></iconify-icon>
+          结构检查 Validate
+        </button>
+        <button class="secondary-button" id="btn-save">
+          <iconify-icon icon="mdi:content-save-outline"></iconify-icon>
+          保存模型 Save
+        </button>
+        <button class="primary-button" id="btn-export">
+          <iconify-icon icon="mdi:code-json"></iconify-icon>
+          导出 Export
+        </button>
+        <button class="success-button" id="btn-train" disabled>
+          <iconify-icon icon="mdi:play"></iconify-icon>
+          开始训练 Train
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <div class="context-menu hidden" id="connection-menu">
+    <button id="btn-delete-connection">
+      <iconify-icon icon="mdi:link-variant-off"></iconify-icon>
+      删除连线
+    </button>
+  </div>
+  <div class="context-menu hidden" id="node-menu">
+    <button id="btn-connect-node">
+      <iconify-icon icon="mdi:transit-connection-variant"></iconify-icon>
+      进行连线
+    </button>
+    <button id="btn-delete-node" class="text-rose">
+      <iconify-icon icon="mdi:delete-outline"></iconify-icon>
+      删除节点
+    </button>
+  </div>
+
+  <div class="modal hidden" id="export-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <iconify-icon icon="mdi:file-code-outline"></iconify-icon>
+          <div>
+            <h2>导出 PyTorch 代码 (Export PyTorch)</h2>
+            <p>MNIST-CNN_v1_export.py</p>
+          </div>
         </div>
-      </footer>
-    </div>
-
-    <div id="toast-container" class="toast-container"></div>
-    <div id="connection-menu" class="context-menu hidden">
-      <button id="btn-delete-connection">
-        <iconify-icon icon="mdi:link-variant-off"></iconify-icon>
-        删除连线
-      </button>
-    </div>
-    <div id="node-menu" class="context-menu hidden">
-      <button id="btn-connect-node">
-        <iconify-icon icon="mdi:vector-line"></iconify-icon>
-        进行连线
-      </button>
-      <button id="btn-delete-node">
-        <iconify-icon icon="mdi:trash-can-outline"></iconify-icon>
-        删除节点
-      </button>
-    </div>
-
-    <div id="export-modal" class="modal hidden" role="dialog" aria-modal="true">
-      <div class="modal-card">
-        <div class="modal-header">
-          <div class="modal-title">
-            <iconify-icon icon="mdi:language-python"></iconify-icon>
+        <button class="icon-button" id="btn-close-modal"><iconify-icon icon="mdi:close"></iconify-icon></button>
+      </div>
+      <div class="modal-body">
+        <div class="model-summary">
+          <h3>模型结构摘要</h3>
+          <div class="summary-row blue">
+            <i></i>
             <div>
-              <h2>导出 PyTorch 代码 (Export PyTorch)</h2>
-              <p>MNIST-CNN_v1_export.py</p>
+              <strong>FeatureExtractor</strong>
+              <span>Conv2d(1, 16, 3) + MaxPool2d</span>
             </div>
           </div>
-          <button class="icon-button" id="btn-close-modal" title="关闭">
-            <iconify-icon icon="mdi:close"></iconify-icon>
-          </button>
-        </div>
-        <div class="modal-body">
-          <aside class="model-summary">
-            <h3>模型结构摘要</h3>
-            <div class="summary-row blue">
-              <i></i>
-              <div>
-                <strong>FeatureExtractor</strong>
-                <span>Conv2d(1, 16, 3) + MaxPool2d</span>
-              </div>
+          <div class="summary-row indigo">
+            <i></i>
+            <div>
+              <strong>Classifier</strong>
+              <span>Linear(2704, 128) + Linear(128, 10)</span>
             </div>
-            <div class="summary-row indigo">
-              <i></i>
-              <div>
-                <strong>Classifier</strong>
-                <span>Linear(2704, 128) + Linear(128, 10)</span>
-              </div>
-            </div>
-          </aside>
-          <section class="code-panel">
-            <button id="btn-copy-code" class="copy-button">
-              <iconify-icon icon="mdi:content-copy"></iconify-icon>
-              复制代码
-            </button>
-            <pre id="export-code">点击“导出 Export”后会从后端请求 PyTorch 代码。</pre>
-          </section>
+          </div>
         </div>
-        <div class="modal-footer">
-          <button class="text-button" id="btn-cancel-modal">取消</button>
-          <button class="secondary-button" id="btn-download-code">
-            <iconify-icon icon="mdi:download"></iconify-icon>
-            下载 .py 文件
+        <div class="code-panel">
+          <button class="copy-button" id="btn-copy-code">
+            <iconify-icon icon="mdi:content-copy"></iconify-icon>
+            复制代码
           </button>
+          <pre id="export-code">点击"导出 Export"后会从后端请求 PyTorch 代码。</pre>
         </div>
       </div>
+      <div class="modal-footer">
+        <button class="text-button" id="btn-cancel-modal">取消</button>
+        <button class="primary-button" id="btn-download-code">
+          <iconify-icon icon="mdi:download"></iconify-icon>
+          下载 .py 文件
+        </button>
+      </div>
     </div>
+  </div>
 
-    <script type="module" src="./src/app.js"></script>
-  </body>
+  <script type="module" src="./src/app.js"></script>
+</body>
 </html>

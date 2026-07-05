@@ -10,6 +10,7 @@ import {
   startTraining,
   validateModel,
 } from "./api/client.js";
+import { openTrainingMonitor } from "./training.js";
 
 const datasetOptions = {
   MNIST: { shapeLabel: "(1x28x28)" },
@@ -133,6 +134,8 @@ const state = {
   inFeatures: 1024,
   jobId: null,
   lastExportCode: "",
+  trainingPollTimer: null,
+  trainingJob: null,
   isConnecting: false,
   connectSourceId: null,
   pendingConnection: null,
@@ -157,6 +160,7 @@ function initializeApp() {
   initializeCanvas();
   initializeInspector();
   initializeDatasetSelector();
+  initializeTrainingJobPanel();
   bindEvents();
   loadDevices();
   loadProjectTemplates();
@@ -170,6 +174,53 @@ function initializeApp() {
 
 function initializeDatasetSelector() {
   updateSelectedDatasetDisplay();
+
+  const dropdown = document.getElementById("custom-dataset-dropdown");
+  const nativeSelect = document.getElementById("dataset-select");
+  const displayValue = document.getElementById("custom-select-value");
+
+  // 安全检查：如果没找到对应DOM元素则直接返回，防止JS崩溃
+  if (!dropdown || !nativeSelect || !displayValue) {
+    console.error("未找到下拉菜单的相关DOM节点。");
+    return;
+  }
+
+  const options = dropdown.querySelectorAll(".custom-option");
+
+  // 点击展开/收起下拉菜单 (阻止冒泡非常关键，否则会被 document 的 click 瞬间关掉)
+  dropdown.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dropdown.classList.toggle("open");
+  });
+
+  // 点击页面其他区域时关闭下拉菜单
+  document.addEventListener("click", (e) => {
+    if (!dropdown.contains(e.target)) {
+      dropdown.classList.remove("open");
+    }
+  });
+
+  // 选中某一个选项的处理逻辑
+  options.forEach(option => {
+    option.addEventListener("click", (e) => {
+      e.stopPropagation(); // 阻止冒泡，避免触发上方 dropdown 的 toggle
+      const value = option.dataset.value;
+
+      // 1. 更新下拉菜单的 UI 高亮状态
+      options.forEach(opt => opt.classList.remove("active"));
+      option.classList.add("active");
+      displayValue.textContent = value;
+
+      // 2. 将值同步给隐藏的原生 select
+      nativeSelect.value = value;
+
+      // 3. 手动派发 change 事件，触发 app.js 原有的形状自动同步逻辑
+      nativeSelect.dispatchEvent(new Event("change"));
+
+      // 4. 收起下拉菜单
+      dropdown.classList.remove("open");
+    });
+  });
 }
 
 
@@ -279,6 +330,7 @@ function bindEvents() {
   document.getElementById("btn-save").addEventListener("click", handleSaveProject);
   document.getElementById("btn-export").addEventListener("click", handleExportCode);
   document.getElementById("btn-train").addEventListener("click", handleStartTraining);
+  document.getElementById("btn-view-training")?.addEventListener("click", openCurrentTrainingMonitor);
   document.getElementById("dataset-select")?.addEventListener("change", () => {
     updateSelectedDatasetDisplay();
   });
@@ -313,6 +365,11 @@ function bindEvents() {
   ["zoom-out", "zoom-in", "zoom-fit"].forEach(id => {
     document.getElementById(id).addEventListener("click", () => handleZoomAction(id));
   });
+}
+
+
+function initializeTrainingJobPanel() {
+  updateTrainingJobPanel();
 }
 
 
@@ -1967,6 +2024,123 @@ function getTrainConfig() {
 }
 
 
+function getTrainingLayers() {
+  return nodes
+    .filter(node => node.type !== "Add")
+    .map(node => ({
+      type: node.badge || node.type,
+      color: node.color || "cyan",
+    }));
+}
+
+
+function getTrainingStatusLabel(status) {
+  return {
+    pending: "等待中",
+    running: "训练中",
+    completed: "已完成",
+    failed: "失败",
+    cancelled: "已取消",
+  }[status] || "未知";
+}
+
+
+function updateTrainingJobPanel() {
+  const panel = document.getElementById("training-job-panel");
+  if (!panel) return;
+
+  const job = state.trainingJob;
+  if (!job) {
+    panel.classList.add("is-empty");
+    panel.classList.remove("is-running", "is-completed", "is-failed");
+    document.getElementById("training-job-id").textContent = "暂无训练任务";
+    document.getElementById("training-job-status").textContent = "Idle";
+    document.getElementById("training-job-progress").style.width = "0%";
+    document.getElementById("training-job-meta").textContent = "Validate 通过后可启动训练";
+    document.getElementById("btn-view-training").disabled = true;
+    return;
+  }
+
+  const status = job.status || "pending";
+  const progress = typeof job.progress === "number"
+    ? job.progress
+    : (job.total_epochs ? (job.current_epoch || 0) / job.total_epochs : 0);
+  const percentage = Math.round(clamp(progress, 0, 1) * 100);
+
+  panel.classList.remove("is-empty", "is-running", "is-completed", "is-failed");
+  panel.classList.add(
+    status === "completed" ? "is-completed" : status === "failed" || status === "cancelled" ? "is-failed" : "is-running"
+  );
+  document.getElementById("training-job-id").textContent = job.job_id || "未知任务";
+  document.getElementById("training-job-status").textContent = getTrainingStatusLabel(status);
+  document.getElementById("training-job-progress").style.width = `${percentage}%`;
+  document.getElementById("training-job-meta").textContent =
+    `Epoch ${job.current_epoch ?? 0}/${job.total_epochs ?? "-"} · ${percentage}%`;
+  document.getElementById("btn-view-training").disabled = false;
+}
+
+
+function setTrainingJob(job) {
+  state.trainingJob = {
+    ...(state.trainingJob || {}),
+    ...job,
+  };
+  state.jobId = state.trainingJob.job_id || state.jobId;
+  updateTrainingJobPanel();
+}
+
+
+function stopTrainingPanelPolling() {
+  if (state.trainingPollTimer) {
+    clearTimeout(state.trainingPollTimer);
+    state.trainingPollTimer = null;
+  }
+}
+
+
+async function submitTrainingJob() {
+  const trainConfig = getTrainConfig();
+  const result = await startTraining(getCurrentModelGraph(), trainConfig);
+  return {
+    result,
+    trainConfig,
+    jobId: result?.job_id,
+  };
+}
+
+
+function openCurrentTrainingMonitor() {
+  if (!state.trainingJob?.job_id) {
+    showToast("warning", "当前没有可查看的训练任务。");
+    return;
+  }
+
+  openTrainingMonitor({
+    live: true,
+    jobId: state.trainingJob.job_id,
+    fetchStatus: fetchTrainingStatus,
+    fetchResult: fetchTrainingResult,
+    hyperparams: state.trainingJob.trainConfig || getTrainConfig(),
+    layers: getTrainingLayers(),
+    onRerun: async () => {
+      const { jobId, trainConfig, result } = await submitTrainingJob();
+      setTrainingJob({
+        job_id: jobId,
+        status: result?.job_status || result?.status || "pending",
+        current_epoch: result?.current_epoch ?? 0,
+        total_epochs: result?.total_epochs ?? trainConfig.epochs,
+        progress: 0,
+        trainConfig,
+      });
+      if (jobId) {
+        pollTrainingStatus(jobId);
+      }
+      return { jobId };
+    },
+  });
+}
+
+
 async function handleValidateModel() {
   const button = document.getElementById("btn-validate");
   const originalHtml = button.innerHTML;
@@ -2115,11 +2289,19 @@ async function handleStartTraining() {
   setButtonLoading(button, "启动训练...");
 
   try {
-    const result = await startTraining(getCurrentModelGraph(), getTrainConfig());
-    state.jobId = result?.job_id;
+    const { result, trainConfig, jobId } = await submitTrainingJob();
+    setTrainingJob({
+      job_id: jobId,
+      status: result?.job_status || result?.status || "pending",
+      current_epoch: result?.current_epoch ?? 0,
+      total_epochs: result?.total_epochs ?? trainConfig.epochs,
+      progress: 0,
+      trainConfig,
+    });
     showToast("success", `训练任务已创建: ${state.jobId || "未知任务"}`);
-    if (state.jobId) {
-      pollTrainingStatus(state.jobId);
+    if (jobId) {
+      openCurrentTrainingMonitor();
+      pollTrainingStatus(jobId);
     }
   } catch (error) {
     showBackendError(error, "训练接口暂未实现。");
@@ -2131,13 +2313,25 @@ async function handleStartTraining() {
 
 
 async function pollTrainingStatus(jobId) {
+  stopTrainingPanelPolling();
+
   try {
     const status = await fetchTrainingStatus(jobId);
-    showToast("info", `训练状态: ${status?.status || "未知"}`);
+    setTrainingJob(status);
     if (status?.status === "completed") {
       const result = await fetchTrainingResult(jobId);
+      setTrainingJob({
+        ...result,
+        progress: 1,
+      });
       showToast("success", `训练完成，accuracy=${result?.accuracy ?? "未知"}`);
+      return;
     }
+    if (status?.status === "failed" || status?.status === "cancelled") {
+      showToast(status.status === "failed" ? "error" : "warning", `训练${getTrainingStatusLabel(status.status)}。`);
+      return;
+    }
+    state.trainingPollTimer = setTimeout(() => pollTrainingStatus(jobId), 1000);
   } catch (error) {
     showBackendError(error, "训练状态接口暂未实现。");
   }
