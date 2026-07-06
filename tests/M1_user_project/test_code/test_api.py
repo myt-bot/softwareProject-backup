@@ -2,7 +2,6 @@
 
 使用 FastAPI TestClient 测试用户、项目、认证相关的 HTTP 接口。
 覆盖：/auth/* 路由测试、权限校验测试、stub 路由 501 测试。
-编写者：甘淞文
 """
 
 import sys
@@ -198,11 +197,12 @@ class TestAuthAPI(unittest.TestCase):
     # ========== 注册 ==========
 
     def test_register_success(self):
-        """POST /auth/register 正常注册，返回 JWT。"""
+        """POST /auth/register 正常注册（含确认密码），返回 JWT。"""
         resp = self.client.post("/auth/register", json={
             "username": "newuser",
             "email": "new@test.com",
             "password": "testpass123",
+            "confirm_password": "testpass123",
         })
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
@@ -213,26 +213,50 @@ class TestAuthAPI(unittest.TestCase):
     def test_register_duplicate_email(self):
         """POST /auth/register 重复邮箱返回 400（邮箱必须唯一）。"""
         self.client.post("/auth/register", json={
-            "username": "u1", "email": "dup@test.com", "password": "testpass123",
+            "username": "u1", "email": "dup@test.com",
+            "password": "testpass123", "confirm_password": "testpass123",
         })
         resp = self.client.post("/auth/register", json={
-            "username": "u2", "email": "dup@test.com", "password": "testpass123",
+            "username": "u2", "email": "dup@test.com",
+            "password": "testpass123", "confirm_password": "testpass123",
         })
         self.assertEqual(resp.status_code, 400)
 
     def test_register_weak_password(self):
         """POST /auth/register 弱密码返回 400。"""
         resp = self.client.post("/auth/register", json={
-            "username": "test", "email": "t@test.com", "password": "short",
+            "username": "test", "email": "t@test.com",
+            "password": "short", "confirm_password": "short",
         })
         self.assertEqual(resp.status_code, 400)
+
+    def test_register_password_mismatch(self):
+        """POST /auth/register 两次输入的密码不一致返回 400。"""
+        resp = self.client.post("/auth/register", json={
+            "username": "mismatch",
+            "email": "mismatch@test.com",
+            "password": "testpass123",
+            "confirm_password": "testpass456",
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("不一致", resp.json()["message"])
+
+    def test_register_missing_confirm_password(self):
+        """POST /auth/register 缺少确认密码字段返回 422。"""
+        resp = self.client.post("/auth/register", json={
+            "username": "noconfirm",
+            "email": "noconfirm@test.com",
+            "password": "testpass123",
+        })
+        self.assertEqual(resp.status_code, 422)
 
     # ========== 登录 ==========
 
     def test_login_success(self):
         """POST /auth/login 正确凭据（邮箱+密码）返回 JWT。"""
         self.client.post("/auth/register", json={
-            "username": "loginuser", "email": "login@test.com", "password": "testpass123",
+            "username": "loginuser", "email": "login@test.com",
+            "password": "testpass123", "confirm_password": "testpass123",
         })
         resp = self.client.post("/auth/login", json={
             "email": "login@test.com", "password": "testpass123",
@@ -245,7 +269,8 @@ class TestAuthAPI(unittest.TestCase):
     def test_login_wrong_password(self):
         """POST /auth/login 错误密码返回 401。"""
         self.client.post("/auth/register", json={
-            "username": "loginuser2", "email": "l2@test.com", "password": "testpass123",
+            "username": "loginuser2", "email": "l2@test.com",
+            "password": "testpass123", "confirm_password": "testpass123",
         })
         resp = self.client.post("/auth/login", json={
             "email": "l2@test.com", "password": "wrongpassword",
@@ -266,7 +291,8 @@ class TestAuthAPI(unittest.TestCase):
     def test_get_me_success(self):
         """GET /auth/me 正确 token 返回用户信息。"""
         register_resp = self.client.post("/auth/register", json={
-            "username": "meuser", "email": "me@test.com", "password": "testpass123",
+            "username": "meuser", "email": "me@test.com",
+            "password": "testpass123", "confirm_password": "testpass123",
         })
         token = register_resp.json()["access_token"]
 
@@ -319,6 +345,7 @@ class TestProjectAPI(unittest.TestCase):
             "username": "proj_owner",
             "email": "owner@test.com",
             "password": "testpass123",
+            "confirm_password": "testpass123",
         })
         cls._token = resp.json()["access_token"]
         cls._user_id = resp.json()["user"]["id"]
@@ -328,6 +355,7 @@ class TestProjectAPI(unittest.TestCase):
             "username": "other_owner",
             "email": "other@test.com",
             "password": "testpass123",
+            "confirm_password": "testpass123",
         })
         cls._other_token = resp2.json()["access_token"]
         cls._other_user_id = resp2.json()["user"]["id"]

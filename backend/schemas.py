@@ -342,11 +342,13 @@ class UserRegisterRequest(BaseModel):
         username：用户名，2-20 个字符，支持中英文、数字和下划线。
         email：用户邮箱，需符合基本邮箱格式。
         password：登录密码，8-128 字符，至少含一个字母和一个数字。
+        confirm_password：确认密码，必须与 password 完全一致。
     """
 
     username: str
     email: str
     password: str
+    confirm_password: str
 
     def check_password(self) -> List[str]:
         """检查密码强度：8-128 字符，至少含一个字母和一个数字。"""
@@ -363,9 +365,20 @@ class UserRegisterRequest(BaseModel):
             errors.append("密码必须包含至少一个数字")
         return errors
 
+    def check_confirm_password(self) -> List[str]:
+        """检查确认密码是否与密码一致。"""
+        if not isinstance(self.confirm_password, str):
+            return ["confirm_password 必须是字符串"]
+        if self.confirm_password != self.password:
+            return ["两次输入的密码不一致"]
+        return []
+
     def check_all(self) -> List[str]:
         """汇总检查注册请求。"""
-        return self.check_password()
+        errors = []
+        errors.extend(self.check_password())
+        errors.extend(self.check_confirm_password())
+        return errors
 
 
 class UserLoginRequest(BaseModel):

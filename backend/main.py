@@ -185,13 +185,15 @@ def register(request: UserRegisterRequest):
     """注册新用户，返回 JWT 令牌和用户信息。
 
     参数：
-        request：注册请求体，包含 username、email、password。
+        request：注册请求体，包含 username、email、password、confirm_password
+        （确认密码，需与 password 一致）。
     """
     try:
         user = auth_mgr.register_user(
             username=request.username,
             email=request.email,
             password=request.password,
+            confirm_password=request.confirm_password,
         )
         token = create_access_token(user["id"])
         return {

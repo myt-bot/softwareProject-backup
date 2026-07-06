@@ -111,19 +111,26 @@ def _sanitize_user(user: Dict[str, Any]) -> Dict[str, Any]:
 # 业务逻辑
 # ============================================================
 
-def register_user(username: str, email: str, password: str) -> Dict[str, Any]:
+def register_user(
+    username: str,
+    email: str,
+    password: str,
+    confirm_password: Optional[str] = None,
+) -> Dict[str, Any]:
     """注册新用户（含密码哈希）。
 
     参数：
         username：用户名，2-20 个字符，支持中英文、数字和下划线（可重复）。
         email：用户邮箱，需符合基本邮箱格式（必须唯一）。
         password：明文密码，8-128 字符，至少含一个字母和一个数字。
+        confirm_password：确认密码，需与 password 完全一致；传 None 时跳过
+            该项校验（供内部创建用户等无确认密码的场景使用）。
 
     返回：
         创建成功的用户字典（不含 password_hash），包含 id、username、email、created_at。
 
     异常：
-        ValueError：参数不合法或邮箱已被注册。
+        ValueError：参数不合法、两次密码不一致或邮箱已被注册。
     """
     from .security import hash_password as _hash_password
 
@@ -139,6 +146,9 @@ def register_user(username: str, email: str, password: str) -> Dict[str, Any]:
     password_error = _validate_password(password)
     if password_error:
         raise ValueError(f"密码不合法: {password_error}")
+
+    if confirm_password is not None and confirm_password != password:
+        raise ValueError("确认密码不合法: 两次输入的密码不一致")
 
     # 检查邮箱唯一性（邮箱是用户唯一标识）
     email_clean = email.strip().lower()

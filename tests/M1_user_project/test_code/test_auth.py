@@ -2,7 +2,6 @@
 
 测试 backend/auth.py 中所有业务逻辑的正常路径和异常路径。
 覆盖：注册、登录、密码强度校验、用户 CRUD。
-编写者：甘淞文
 """
 
 import sys
@@ -239,6 +238,39 @@ class TestUserManager(unittest.TestCase):
         """测试无数字密码抛出异常。"""
         with self.assertRaises(ValueError):
             auth_mgr.register_user("validname", "test@test.com", "abcdefgh")
+
+    # --- 确认密码校验 ---
+
+    def test_register_user_confirm_password_match(self):
+        """测试确认密码一致时注册成功。"""
+        user = auth_mgr.register_user(
+            "confirmuser", "confirm@test.com", VALID_PASSWORD,
+            confirm_password=VALID_PASSWORD,
+        )
+        self.assertEqual(user["username"], "confirmuser")
+        self.assertNotIn("password_hash", user)
+
+    def test_register_user_confirm_password_mismatch(self):
+        """测试确认密码不一致抛出异常。"""
+        with self.assertRaises(ValueError) as ctx:
+            auth_mgr.register_user(
+                "confirmuser", "confirm@test.com", VALID_PASSWORD,
+                confirm_password="different123",
+            )
+        self.assertIn("不一致", str(ctx.exception))
+
+    def test_register_user_confirm_password_empty_mismatch(self):
+        """测试确认密码为空字符串（与密码不一致）抛出异常。"""
+        with self.assertRaises(ValueError):
+            auth_mgr.register_user(
+                "confirmuser", "confirm@test.com", VALID_PASSWORD,
+                confirm_password="",
+            )
+
+    def test_register_user_without_confirm_password(self):
+        """测试不传确认密码时跳过一致性校验（兼容内部创建用户场景）。"""
+        user = auth_mgr.register_user("noconfirm", "noconfirm@test.com", VALID_PASSWORD)
+        self.assertEqual(user["username"], "noconfirm")
 
     # ========== 异常路径 —— 获取 ==========
 
