@@ -24,9 +24,11 @@
 
 负责代码路径：
 
-- `frontend/src/app.js`
+- `frontend/src/store.ts`
+- `frontend/src/canvas.ts`
+- `frontend/src/components/`
 - `frontend/src/styles.css`
-- `frontend/src/api/client.js`
+- `frontend/src/api/client.ts`
 
 测试代码路径：
 
@@ -38,9 +40,9 @@
 
 相关功能说明：
 
-- `app.js`：负责前端页面主逻辑，包括节点渲染、节点拖拽、节点添加、节点删除、连线操作、参数编辑、ModelGraph 导出、按钮事件处理等。
+- `store.ts` / `canvas.ts` / `components/`：负责前端页面主逻辑，包括节点渲染、节点拖拽、节点添加、节点删除、连线操作、参数编辑、ModelGraph 导出、按钮事件处理等（Vue 3 + TypeScript 实现）。
 - `styles.css`：负责页面布局、画布样式、节点样式、连线样式、右侧参数面板样式、提示信息样式等。
-- `client.js`：负责封装前端与后端接口的通信，包括 `/validate`、`/train`、`/export/pytorch` 等接口调用。
+- `client.ts`：负责封装前端与后端接口的通信，包括 `/validate`、`/train`、`/export/pytorch` 等接口调用。
 
 ## 3. 测试范围
 

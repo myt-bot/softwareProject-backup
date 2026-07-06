@@ -38,6 +38,7 @@
 ### 运行环境
 
 - Python 3.10 或更高版本
+- Node.js 20.19 或更高版本（前端 Vue 3 + TypeScript + Vite）
 - CUDA GPU 可选
 - 无 GPU 时自动使用 CPU
 
@@ -51,16 +52,26 @@
 pip install -r requirements.txt
 ```
 
-终端一：启动前端静态页面服务。
+终端一：启动前端开发服务器（首次运行需要先安装 npm 依赖）。
 
 ```bash
-python -m http.server 5173
+cd frontend
+npm install
+npm run dev
 ```
 
 启动后在浏览器访问：
 
 ```text
 http://127.0.0.1:5173/
+```
+
+前端其他常用命令（均在 `frontend/` 目录下执行）：
+
+```bash
+npm run typecheck   # TypeScript 类型检查
+npm run build       # 类型检查 + 生产构建（输出到 frontend/dist/）
+npm run preview     # 预览生产构建产物
 ```
 
 终端二：启动后端 FastAPI 服务。
@@ -92,11 +103,34 @@ project/
     projects.py         # 项目管理模块（M1）
     security.py         # 密码哈希与 JWT 令牌（M1）
   frontend/
-    index.html          # 前端页面入口
+    index.html          # 前端页面入口（Vite）
+    package.json        # 前端依赖与脚本
+    vite.config.ts      # Vite 构建配置
+    tsconfig.json       # TypeScript 配置
     src/
-      app.js            # 前端主逻辑
+      main.ts           # 应用入口，挂载 Vue 根组件
+      App.vue           # 根组件，组织页面整体布局
+      store.ts          # 全局响应式状态与纯数据逻辑
+      canvas.ts         # 画布交互引擎（拖拽/连线/SVG 绘制/缩放）
+      actions.ts        # 后端交互动作（校验/保存/导出/训练）
+      monitor.ts        # 训练监控页状态机与轮询
+      types.ts          # 共享类型定义
       api/
-        client.js       # 后端接口调用封装
+        client.ts       # 后端接口调用封装
+      components/       # Vue 组件
+        TopBar.vue          # 顶栏与数据集下拉
+        GuideStrip.vue      # 新手引导条
+        LayerSidebar.vue    # 左侧组件库与模板
+        CanvasBoard.vue     # 中间模型画布
+        InspectorPanel.vue  # 右侧参数面板
+        ActionBar.vue       # 底部操作栏与训练任务面板
+        ExportModal.vue     # 导出代码弹窗
+        HelpModal.vue       # 新手指南弹窗
+        ContextMenus.vue    # 节点/连线右键菜单
+        ToastContainer.vue  # 消息提示
+        TrainingMonitor.vue # 训练监控页
+        TmChart.vue         # 训练指标折线图
+        ParamNumberField.vue # 数字参数输入框
       styles.css        # 页面样式
   tests/
     M1_user_project/
@@ -411,24 +445,49 @@ project/
 
 ## 前端模块和函数说明
 
-### frontend/src/app.js
+前端使用 Vue 3（组合式 API + `<script setup>`）+ TypeScript + Vite 实现。
 
-| 函数                    | 功能                                             |
-| ----------------------- | ------------------------------------------------ |
-| initializeApp           | 初始化页面状态，加载可用设备，并绑定界面事件     |
-| initializeLayerPalette  | 渲染支持的层类型列表                             |
-| initializeCanvas        | 初始化可视化模型画布或图编辑器                   |
-| initializePropertyPanel | 渲染当前选中层的可编辑参数                       |
-| initializeTrainingPanel | 渲染训练设置、设备选择、指标展示和操作按钮       |
-| getCurrentModelGraph    | 将当前画布状态转换为后端需要的模型 JSON          |
-| loadModelGraph          | 将后端或模板提供的模型 JSON 加载到可视化画布中   |
-| handleValidateModel     | 将当前模型图发送到后端，并展示结构校验结果       |
-| handleStartTraining     | 将模型图和训练配置发送到后端，启动本地训练       |
-| pollTrainingStatus      | 定时查询训练状态，并更新界面中的训练进度         |
-| renderTrainingCurves    | 根据后端返回的训练指标绘制 loss 和 accuracy 曲线 |
-| handleExportCode        | 向后端请求生成的 PyTorch 代码，并展示给用户      |
+### frontend/src/store.ts
 
-### frontend/src/api/client.js
+| 导出                           | 功能                                               |
+| ------------------------------ | -------------------------------------------------- |
+| store                          | 全局响应式状态（节点、连线、选中态、校验态等）     |
+| ui / toasts / showToast        | 弹窗开关、消息提示队列                             |
+| getCurrentModelGraph           | 将当前画布状态转换为后端需要的模型 JSON            |
+| getTrainConfig                 | 生成训练配置（数据集、超参数）                     |
+| updateNodeParam                | 更新节点参数并刷新节点摘要                         |
+| resetValidationAfterGraphChange | 图结构变化后重置校验状态                          |
+
+### frontend/src/canvas.ts
+
+| 导出                 | 功能                                           |
+| -------------------- | ---------------------------------------------- |
+| drawLines            | 绘制节点间的贝塞尔连线（含交叉过桥、控制点）   |
+| beginConnection 等   | 连线模式的进入、预览、完成与取消               |
+| handleNodeMouseDown 等 | 节点拖拽                                     |
+| handleZoomAction     | 画布缩放                                       |
+| addNodeFromLayer     | 从组件库拖入新节点                             |
+| applyTemplateGraph   | 将后端模板提供的模型 JSON 加载到可视化画布中   |
+
+### frontend/src/actions.ts
+
+| 导出                      | 功能                                         |
+| ------------------------- | -------------------------------------------- |
+| handleValidateModel       | 将当前模型图发送到后端，并展示结构校验结果   |
+| handleSaveProject         | 保存当前模型到项目                           |
+| handleExportCode          | 向后端请求生成的 PyTorch 代码，并展示给用户  |
+| handleStartTraining       | 将模型图和训练配置发送到后端，启动本地训练   |
+| openCurrentTrainingMonitor | 打开训练监控页并对接实时轮询                |
+
+### frontend/src/monitor.ts
+
+| 导出                          | 功能                                             |
+| ----------------------------- | ------------------------------------------------ |
+| openTrainingMonitor           | 打开训练监控页（live 轮询 / demo 演示两种模式）  |
+| activeSeries / computeResults | 训练指标序列与结果卡数值                         |
+| handleRerun 等                | 重新训练、模拟完成、图例切换等交互               |
+
+### frontend/src/api/client.ts
 
 | 函数                | 功能                                             |
 | ------------------- | ------------------------------------------------ |
@@ -507,5 +566,6 @@ project/
 - 后端新增维度推导和校验逻辑优先放在 backend/validator.py。
 - 后端新增设备相关逻辑优先放在 backend/device.py。
 - 后端新增代码导出逻辑优先放在 backend/code_exporter.py。
-- 前端新增接口调用时优先封装到 frontend/src/api/client.js。
+- 前端新增接口调用时优先封装到 frontend/src/api/client.ts，共享类型放在 frontend/src/types.ts。
+- 前端新增页面区块时拆分为 frontend/src/components/ 下的 Vue 组件，跨组件状态放在 frontend/src/store.ts。
 - 新增或修改函数后，需要同步更新本 README 中的函数说明。
