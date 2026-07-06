@@ -44,20 +44,18 @@ class TestUserAPI(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """创建独立的临时目录并重定向存储（在导入 app 之前）。"""
+        """把存储切换到独立的临时 SQLite 库。"""
         cls._tmp_dir = tempfile.TemporaryDirectory()
         cls._data_dir = Path(cls._tmp_dir.name)
-        storage._STORAGE_DIR = cls._data_dir
-        storage._USERS_FILE = cls._data_dir / "users.json"
-        storage._PROJECTS_FILE = cls._data_dir / "projects.json"
+        storage.configure_database(f"sqlite:///{cls._data_dir / 'test.db'}")
 
-        # 延迟导入，确保存储路径已重定向
         from fastapi.testclient import TestClient
         from backend.main import app
         cls.client = TestClient(app)
 
     @classmethod
     def tearDownClass(cls):
+        storage.dispose_database()
         cls._tmp_dir.cleanup()
 
     # ========== 创建用户 ==========
@@ -179,12 +177,10 @@ class TestAuthAPI(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """创建独立的临时目录。"""
+        """把存储切换到独立的临时 SQLite 库。"""
         cls._tmp_dir = tempfile.TemporaryDirectory()
         cls._data_dir = Path(cls._tmp_dir.name)
-        storage._STORAGE_DIR = cls._data_dir
-        storage._USERS_FILE = cls._data_dir / "users.json"
-        storage._PROJECTS_FILE = cls._data_dir / "projects.json"
+        storage.configure_database(f"sqlite:///{cls._data_dir / 'test.db'}")
 
         from fastapi.testclient import TestClient
         from backend.main import app
@@ -192,6 +188,7 @@ class TestAuthAPI(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        storage.dispose_database()
         cls._tmp_dir.cleanup()
 
     # ========== 注册 ==========
@@ -329,12 +326,10 @@ class TestProjectAPI(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """创建临时目录，注册测试用户并获取 JWT。"""
+        """把存储切换到独立 SQLite 库，注册测试用户并获取 JWT。"""
         cls._tmp_dir = tempfile.TemporaryDirectory()
         cls._data_dir = Path(cls._tmp_dir.name)
-        storage._STORAGE_DIR = cls._data_dir
-        storage._USERS_FILE = cls._data_dir / "users.json"
-        storage._PROJECTS_FILE = cls._data_dir / "projects.json"
+        storage.configure_database(f"sqlite:///{cls._data_dir / 'test.db'}")
 
         from fastapi.testclient import TestClient
         from backend.main import app
@@ -362,6 +357,7 @@ class TestProjectAPI(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        storage.dispose_database()
         cls._tmp_dir.cleanup()
 
     def _auth_headers(self, token=None):

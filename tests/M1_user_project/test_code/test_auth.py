@@ -22,18 +22,14 @@ class TestUserManager(unittest.TestCase):
     """测试用户管理 CRUD 操作的正常和异常路径。"""
 
     def setUp(self):
-        """重定向存储到临时目录。"""
+        """把存储切换到临时目录下的独立 SQLite 库。"""
         self._tmp_dir = tempfile.TemporaryDirectory()
         self._data_dir = Path(self._tmp_dir.name)
-        storage._STORAGE_DIR = self._data_dir
-        storage._USERS_FILE = self._data_dir / "users.json"
-        storage._PROJECTS_FILE = self._data_dir / "projects.json"
+        storage.configure_database(f"sqlite:///{self._data_dir / 'test.db'}")
 
     def tearDown(self):
+        storage.dispose_database()
         self._tmp_dir.cleanup()
-        storage._STORAGE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
-        storage._USERS_FILE = storage._STORAGE_DIR / "users.json"
-        storage._PROJECTS_FILE = storage._STORAGE_DIR / "projects.json"
 
     # ========== 正常路径 ==========
 

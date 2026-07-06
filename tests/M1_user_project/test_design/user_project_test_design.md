@@ -2,6 +2,7 @@
 
 > 编写者：甘淞文
 > 日期：2026-06-30
+> 更新：2026-07-06（注册确认密码；存储层由本地 JSON 迁移至 MySQL 数据库）
 
 ---
 
@@ -11,27 +12,38 @@
 
 验证「用户与项目管理模块」各层代码的正确性、稳定性和异常处理能力，覆盖：
 
-- 本地 JSON 存储层的 CRUD 操作与并发安全
-- 用户管理业务逻辑的正常路径和异常路径
-- 项目管理业务逻辑的正常路径和异常路径
+- 数据库存储层的 CRUD 操作、数据库约束（唯一键/外键）与并发安全
+- 用户管理业务逻辑的正常路径和异常路径（含注册确认密码校验）
+- 项目管理业务逻辑的正常路径、异常路径和权限控制
 - FastAPI HTTP 接口的请求/响应正确性
 
 ### 1.2 测试框架
 
-- Python `unittest` 标准库
+- Python `unittest` 标准库（兼容 `pytest` 运行）
 - FastAPI `TestClient`（API 集成测试）
 
-### 1.3 测试运行方式
+### 1.3 测试隔离机制
+
+生产环境存储层使用 MySQL（连接串由环境变量 `DATABASE_URL` 配置）。测试不依赖
+MySQL 服务：每个测试类/用例通过 `storage.configure_database()` 将存储切换到
+**临时目录下的独立 SQLite 库**，表结构与约束（邮箱唯一、同用户项目名唯一、
+外键级联）由同一份 SQLAlchemy 定义生成，测试结束后 `storage.dispose_database()`
+释放引擎并清理临时目录，用例之间数据完全隔离。
+
+### 1.4 测试运行方式
 
 ```bash
-# 运行全部测试
-python tests\M1_user_project\test_code\run_all.py
+# 运行全部测试（pytest 方式，推荐）
+python -m pytest tests/M1_user_project/test_code/ -q
+
+# 运行全部测试（unittest 入口）
+python tests/M1_user_project/test_code/run_all.py
 
 # 单独运行某个测试文件
-python tests\M1_user_project\test_code\test_storage.py
-python tests\M1_user_project\test_code\test_auth.py
-python tests\M1_user_project\test_code\test_projects.py
-python tests\M1_user_project\test_code\test_api.py
+python tests/M1_user_project/test_code/test_storage.py
+python tests/M1_user_project/test_code/test_auth.py
+python tests/M1_user_project/test_code/test_projects.py
+python tests/M1_user_project/test_code/test_api.py
 ```
 
 ---
@@ -43,19 +55,21 @@ tests/M1_user_project/
 ├── test_code/
 │   ├── __init__.py              # 包声明
 │   ├── run_all.py               # 测试运行入口
-│   ├── test_storage.py          # 存储层单元测试（19 用例）
-│   ├── test_auth.py     # 用户与认证模块单元测试（40 用例）
-│   ├── test_projects.py  # 项目管理单元测试（31 用例）
-│   └── test_api.py              # API 集成测试（39 用例）
+│   ├── test_storage.py          # 数据库存储层单元测试（22 用例）
+│   ├── test_auth.py             # 用户与认证模块单元测试（44 用例）
+│   ├── test_projects.py         # 项目管理单元测试（31 用例）
+│   └── test_api.py              # API 集成测试（41 用例）
 └── test_design/
-    └── 测试设计文档.md           # 本文档
+    └── user_project_test_design.md   # 本文档
 ```
 
 ---
 
 ## 三、测试用例设计
 
-### 3.1 存储层测试（test_storage.py）
+### 3.1 存储层测试（test_storage.py，22 用例）
+
+#### 用户/项目 CRUD
 
 | 编号 | 测试用例 | 类型 | 说明 |
 |------|----------|------|------|
@@ -68,16 +82,31 @@ tests/M1_user_project/
 | S07 | test_delete_user | 正常 | 删除用户成功 |
 | S08 | test_delete_nonexistent_user | 异常 | 删除不存在用户返回 False |
 | S09 | test_user_exists | 正常 | 用户存在性检查 |
-| S10 | test_save_and_get_project | 正常 | 保存项目后能正确获取 |
+| S10 | test_save_and_get_project | 正常 | 保存项目后能正确获取（含 JSON 模型图完整往返） |
 | S11 | test_get_nonexistent_project | 边界 | 获取不存在的项目返回 None |
 | S12 | test_list_projects_by_user | 正常 | 按用户过滤项目 |
 | S13 | test_update_project | 正常 | 更新项目字段 |
 | S14 | test_delete_project | 正常 | 删除项目成功 |
 | S15 | test_delete_projects_by_user | 正常 | 按用户批量删除项目 |
-| S16 | test_data_persists_on_disk | 正常 | 数据正确写入磁盘 JSON |
-| S17 | test_concurrent_writes | 并发 | 20 线程并发写入不丢失数据 |
 
-### 3.2 认证模块测试（test_auth.py）
+#### 持久化与数据库约束（并发兜底）
+
+| 编号 | 测试用例 | 类型 | 说明 |
+|------|----------|------|------|
+| S16 | test_data_persists_across_reconnect | 正常 | 数据落库后重建连接仍可读取（模拟服务重启） |
+| S17 | test_duplicate_email_rejected_by_db | 约束 | 邮箱唯一约束：重复邮箱被数据库拒绝 → ValueError |
+| S18 | test_duplicate_project_name_rejected_by_db | 约束 | 同用户下项目名唯一约束 → ValueError |
+| S19 | test_same_project_name_allowed_for_different_users | 约束 | 不同用户可使用相同项目名 |
+| S20 | test_project_with_nonexistent_user_rejected_by_db | 约束 | 外键约束：所属用户不存在的项目被拒绝 → ValueError |
+
+#### 并发安全
+
+| 编号 | 测试用例 | 类型 | 说明 |
+|------|----------|------|------|
+| S21 | test_concurrent_writes | 并发 | 20 线程并发写入不丢失数据 |
+| S22 | test_concurrent_read_write | 并发 | 多线程读写混合操作数据不损坏 |
+
+### 3.2 认证模块测试（test_auth.py，44 用例）
 
 #### 正常路径
 
@@ -122,6 +151,15 @@ tests/M1_user_project/
 | U33 | test_create_user_duplicate_email_whitespace_bypass | 空格绕过邮箱唯一性检查 |
 | U34 | test_create_user_duplicate_username_allowed | 相同用户名+不同邮箱注册成功（用户名可重复） |
 
+#### 确认密码校验（注册增强）
+
+| 编号 | 测试用例 | 说明 |
+|------|----------|------|
+| U42 | test_register_user_confirm_password_match | 确认密码一致时注册成功 |
+| U43 | test_register_user_confirm_password_mismatch | 确认密码不一致 → ValueError（提示"两次输入的密码不一致"） |
+| U44 | test_register_user_confirm_password_empty_mismatch | 确认密码为空字符串（与密码不一致）→ ValueError |
+| U45 | test_register_user_without_confirm_password | 不传确认密码时跳过一致性校验（兼容内部创建用户场景） |
+
 #### 异常路径 —— 获取/更新/删除
 
 | 编号 | 测试用例 | 说明 |
@@ -134,7 +172,7 @@ tests/M1_user_project/
 | U40 | test_delete_nonexistent_user | 删除不存在用户 → ValueError |
 | U41 | test_delete_user_empty_id | 空 id 删除 → ValueError |
 
-### 3.3 项目管理测试（test_projects.py）
+### 3.3 项目管理测试（test_projects.py，31 用例）
 
 #### 正常路径
 
@@ -150,6 +188,15 @@ tests/M1_user_project/
 | P08 | test_update_project_model_graph | 更新模型图 |
 | P09 | test_update_project_description | 更新描述 |
 | P10 | test_delete_project_success | 正常删除 |
+| P11 | test_create_project_with_current_user_id | 带 current_user_id 为自己创建项目 |
+
+#### 权限控制
+
+| 编号 | 测试用例 | 说明 |
+|------|----------|------|
+| P29 | test_create_project_cross_user_rejected | 用户 A 不能以用户 B 身份创建项目 → PermissionError |
+| P30 | test_update_project_wrong_owner_rejected | 非所有者不能修改项目 → PermissionError |
+| P31 | test_delete_project_wrong_owner_rejected | 非所有者不能删除项目 → PermissionError |
 
 #### 异常路径 —— 创建
 
@@ -178,7 +225,7 @@ tests/M1_user_project/
 | P27 | test_delete_nonexistent_project | 删除不存在项目 |
 | P28 | test_delete_project_empty_id | 空 id 删除 |
 
-### 3.4 API 集成测试（test_api.py）
+### 3.4 API 集成测试（test_api.py，41 用例）
 
 #### 用户接口
 
@@ -200,43 +247,46 @@ tests/M1_user_project/
 
 | 方法 | 路径 | 编号 | 测试用例 |
 |------|------|------|----------|
-| POST | /auth/register | A12 | test_register_success |
+| POST | /auth/register | A12 | test_register_success（含 confirm_password） |
 | POST | /auth/register | A13 | test_register_duplicate_email |
 | POST | /auth/register | A14 | test_register_weak_password |
-| POST | /auth/login | A15 | test_login_success |
-| POST | /auth/login | A16 | test_login_wrong_password |
-| POST | /auth/login | A17 | test_login_nonexistent_user |
-| GET | /auth/me | A18 | test_get_me_success |
-| GET | /auth/me | A19 | test_get_me_no_token |
-| GET | /auth/me | A20 | test_get_me_invalid_token |
+| POST | /auth/register | A15 | test_register_password_mismatch（两次密码不一致 → 400） |
+| POST | /auth/register | A16 | test_register_missing_confirm_password（缺少确认密码 → 422） |
+| POST | /auth/login | A17 | test_login_success |
+| POST | /auth/login | A18 | test_login_wrong_password |
+| POST | /auth/login | A19 | test_login_nonexistent_user |
+| GET | /auth/me | A20 | test_get_me_success |
+| GET | /auth/me | A21 | test_get_me_no_token |
+| GET | /auth/me | A22 | test_get_me_invalid_token |
 
 #### 项目接口
 
 | 方法 | 路径 | 编号 | 测试用例 |
 |------|------|------|----------|
-| POST | /projects | A21 | test_create_project_success |
-| POST | /projects | A22 | test_create_project_no_auth |
-| POST | /projects | A23 | test_create_project_cross_user_rejected |
-| POST | /projects | A24 | test_create_project_invalid_user |
-| POST | /projects | A25 | test_create_project_empty_name |
-| POST | /projects | A26 | test_create_project_missing_field |
-| GET | /projects | A27 | test_list_projects |
-| GET | /projects?user_id= | A28 | test_list_projects_by_user |
-| GET | /projects/{id} | A29 | test_get_project_exists |
-| GET | /projects/{id} | A30 | test_get_project_not_found |
-| PUT | /projects/{id} | A31 | test_update_project_success |
-| PUT | /projects/{id} | A32 | test_update_project_not_found |
-| PUT | /projects/{id} | A33 | test_update_project_wrong_owner_rejected |
-| DELETE | /projects/{id} | A34 | test_delete_project_success |
-| DELETE | /projects/{id} | A35 | test_delete_project_not_found |
-| DELETE | /projects/{id} | A36 | test_delete_project_wrong_owner_rejected |
+| POST | /projects | A23 | test_create_project_success |
+| POST | /projects | A24 | test_create_project_no_auth |
+| POST | /projects | A25 | test_create_project_cross_user_rejected |
+| POST | /projects | A26 | test_create_project_invalid_user |
+| POST | /projects | A27 | test_create_project_empty_name |
+| POST | /projects | A28 | test_create_project_missing_field |
+| GET | /projects | A29 | test_list_projects |
+| GET | /projects?user_id= | A30 | test_list_projects_by_user |
+| GET | /projects/{id} | A31 | test_get_project_exists |
+| GET | /projects/{id} | A32 | test_get_project_not_found |
+| PUT | /projects/{id} | A33 | test_update_project_success |
+| PUT | /projects/{id} | A34 | test_update_project_not_found |
+| PUT | /projects/{id} | A35 | test_update_project_wrong_owner_rejected |
+| DELETE | /projects/{id} | A36 | test_delete_project_success |
+| DELETE | /projects/{id} | A37 | test_delete_project_not_found |
+| DELETE | /projects/{id} | A38 | test_delete_project_wrong_owner_rejected |
+
 #### 基础设施路由
 
 | 方法 | 路径 | 编号 | 测试用例 |
 |------|------|------|----------|
-| GET | /health | A38 | test_health_returns_ok |
-| GET | /devices | A39 | test_devices_returns_device_info |
-| POST | /train | A40 | test_train_creates_job |
+| GET | /health | A39 | test_health_returns_ok |
+| GET | /devices | A40 | test_devices_returns_device_info |
+| POST | /train | A41 | test_train_creates_job |
 
 ---
 
@@ -244,11 +294,11 @@ tests/M1_user_project/
 
 | 模块 | 测试文件 | 用例数 | 全部通过 |
 |------|----------|--------|----------|
-| storage.py | test_storage.py | 19 | ✅ |
-| auth.py | test_auth.py | 40 | ✅ |
+| storage.py | test_storage.py | 22 | ✅ |
+| auth.py | test_auth.py | 44 | ✅ |
 | projects.py | test_projects.py | 31 | ✅ |
-| main.py (M1 API) | test_api.py | 39 | ✅ |
-| **合计** | | **129** | ✅ |
+| main.py (M1 API) | test_api.py | 41 | ✅ |
+| **合计** | | **138** | ✅ |
 
 ---
 
@@ -256,19 +306,21 @@ tests/M1_user_project/
 
 | 异常类型 | 场景数 | 覆盖模块 |
 |----------|--------|----------|
-| ValueError（参数不合法） | 30+ | auth, projects |
+| ValueError（参数不合法/密码不一致） | 30+ | auth, projects |
+| 数据库唯一键约束（邮箱、同用户项目名） | 3 | storage（并发兜底，业务层预检查之外的最后防线） |
+| 数据库外键约束（项目所属用户） | 1 | storage |
 | 401 Unauthorized | 4 | API（登录失败、缺少/无效 token） |
 | 403 Forbidden | 3 | API（跨用户操作项目） |
 | 404 Not Found | 3 | API（用户/项目不存在、邮箱未注册） |
-| 422 Unprocessable | 2 | API（Pydantic 自动校验） |
+| 422 Unprocessable | 3 | API（Pydantic 自动校验：缺少必填字段/缺少确认密码） |
 | 并发写入冲突 | 2 | storage |
-| 数据文件损坏恢复 | 隐蔽 | storage（JSONDecodeError 兜底） |
 
 ---
 
 ## 六、后续测试计划
 
-1. **性能测试**：大量用户/项目数据下的读写性能
-2. **数据库迁移测试**：从 JSON 迁移到数据库后回归测试
-3. **前端集成测试**：前端页面通过 API 完成用户注册和项目保存的端到端流程
-4. **安全测试**：输入注入、超大数据体、恶意 JSON 结构
+1. ~~数据库迁移测试：从 JSON 迁移到数据库后回归测试~~（已完成：2026-07-06 迁移至 MySQL，138 用例全部回归通过）
+2. **MySQL 方言全量回归**：当前测试基于 SQLite 隔离库，交付前将 `DATABASE_URL` 指向真实 MySQL 再跑一轮（迁移当日已用 Docker MySQL 8 做过端到端冒烟验证：注册/登录/建项目全链路 + 历史数据迁移脚本）
+3. **性能测试**：大量用户/项目数据下的读写性能与分页需求评估
+4. **前端集成测试**：前端页面通过 API 完成用户注册（含确认密码）和项目保存的端到端流程
+5. **安全测试**：输入注入、超大数据体、恶意 JSON 结构

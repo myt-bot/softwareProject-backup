@@ -3,8 +3,6 @@
 运行方式：
     cd d:\softwareProject
     python tests\M1_user_project\test_code\run_all.py
-
-编写者：甘淞文
 """
 
 import sys

@@ -2,7 +2,6 @@
 
 测试 backend/projects.py 中所有业务逻辑的正常路径和异常路径。
 覆盖：项目 CRUD、权限控制测试（current_user_id 参数）。
-编写者：甘淞文
 """
 
 import sys
@@ -50,12 +49,10 @@ class TestProjectManager(unittest.TestCase):
     """测试项目管理 CRUD 操作的正常和异常路径。"""
 
     def setUp(self):
-        """重定向存储到临时目录并创建测试用户。"""
+        """把存储切换到临时 SQLite 库并创建测试用户。"""
         self._tmp_dir = tempfile.TemporaryDirectory()
         self._data_dir = Path(self._tmp_dir.name)
-        storage._STORAGE_DIR = self._data_dir
-        storage._USERS_FILE = self._data_dir / "users.json"
-        storage._PROJECTS_FILE = self._data_dir / "projects.json"
+        storage.configure_database(f"sqlite:///{self._data_dir / 'test.db'}")
 
         # 创建测试用户
         self._user = auth_mgr.register_user("testuser", "test@example.com", "testpass123")
@@ -66,10 +63,8 @@ class TestProjectManager(unittest.TestCase):
         self._other_user_id = self._other_user["id"]
 
     def tearDown(self):
+        storage.dispose_database()
         self._tmp_dir.cleanup()
-        storage._STORAGE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
-        storage._USERS_FILE = storage._STORAGE_DIR / "users.json"
-        storage._PROJECTS_FILE = storage._STORAGE_DIR / "projects.json"
 
     # ========== 正常路径 ==========
 
