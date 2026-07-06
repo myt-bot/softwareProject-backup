@@ -1,0 +1,48 @@
+# 一键部署：MySQL 数据库 + FastAPI 后端
+#
+# 常用命令（均在项目根目录执行）：
+#   docker compose up -d --build   # 构建并启动全部服务
+#   docker compose ps              # 查看服务状态
+#   docker compose logs -f api    # 跟踪后端日志
+#   docker compose down            # 停止并删除容器（数据卷保留，数据不丢）
+#   docker compose down -v         # ⚠️ 连数据卷一起删除，数据库数据将清空
+#
+# 环境变量：复制 .env.example 为 .env 可覆盖默认值（.env 不入库）。
+
+services:
+  db:
+    image: mysql:8
+    container_name: vdl-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-devroot}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-visual_dl}
+    ports:
+      # 只绑定本机回环地址，不对外网暴露 3306
+      - "127.0.0.1:3306:3306"
+    volumes:
+      # 命名数据卷：数据存在宿主机，容器删除/重建不影响数据
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -uroot -p${MYSQL_ROOT_PASSWORD:-devroot} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  api:
+    build: .
+    container_name: vdl-api
+    restart: unless-stopped
+    environment:
+      # 主机名写服务名 db，由 compose 内部网络解析
+      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-devroot}@db:3306/${MYSQL_DATABASE:-visual_dl}?charset=utf8mb4
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret-key-change-in-production}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        # 等 MySQL 通过健康检查（真正可接受连接）后才启动后端
+        condition: service_healthy
+
+volumes:
+  mysql_data:

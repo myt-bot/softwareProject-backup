@@ -1,0 +1,25 @@
+# 构建镜像时排除的内容（避免把虚拟环境、数据集等大文件送进构建上下文）
+.git
+.venv
+env
+venv
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+.idea
+.vscode
+.claude
+.agents
+.env
+
+# 运行时生成物与本地数据
+MNIST
+training_artifacts
+data
+
+# 与后端镜像无关的部分
+frontend
+tests
+demo.py
+README.md

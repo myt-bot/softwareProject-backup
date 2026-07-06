@@ -39,6 +39,8 @@
 
 - Python 3.10 或更高版本
 - Node.js 20.19 或更高版本（前端 Vue 3 + TypeScript + Vite）
+- MySQL 8（后端存储；推荐直接用 Docker Compose 启动，见下文「Docker Compose 一键部署」）
+- Docker（可选，用于一键部署后端与数据库）
 - CUDA GPU 可选
 - 无 GPU 时自动使用 CPU
 
@@ -76,11 +78,86 @@ npm run preview     # 预览生产构建产物
 
 终端二：启动后端 FastAPI 服务。
 
+后端存储使用 MySQL，启动后端前需保证 `DATABASE_URL` 环境变量（缺省为
+`mysql+pymysql://root:devroot@127.0.0.1:3306/visual_dl`）指向的数据库可用。
+最简单的方式是先用 Docker 只启动数据库：
+
+```bash
+docker compose up -d db
+```
+
+然后启动后端：
+
 ```bash
 python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
 前端默认访问 `http://127.0.0.1:8000` 上的后端接口。若 `5173` 或 `8000` 端口被占用，需要先关闭占用该端口的旧服务，或同步修改前端接口地址和启动端口。
+
+## Docker Compose 一键部署（后端 + MySQL）
+
+仓库提供了 `docker-compose.yml`，可一条命令同时启动 MySQL 数据库和后端 API，适合演示答辩、服务器部署和新成员快速上手（无需手动装 MySQL 和 Python 依赖）。
+
+### 首次启动
+
+```bash
+# （可选）自定义密码/密钥：复制环境变量模板并按需编辑；跳过则使用开发默认值
+cp .env.example .env
+
+# 构建镜像并启动全部服务（MySQL + 后端 API）
+docker compose up -d --build
+
+# （可选）把 data/ 下的历史 JSON 数据导入 MySQL（幂等脚本，可重复执行）
+python -m backend.migrate_json_to_mysql
+```
+
+启动后：后端 API 在 `http://127.0.0.1:8000`，MySQL 在 `127.0.0.1:3306`（只绑定本机回环地址，不对外网暴露）。前端仍按上文方式用 npm 启动。
+
+### 常用命令
+
+| 命令 | 作用 |
+| --- | --- |
+| `docker compose ps` | 查看服务状态 |
+| `docker compose logs -f api` | 跟踪后端日志 |
+| `docker compose down` | 停止并删除容器（**数据卷保留，数据不丢**） |
+| `docker compose down -v` | ⚠️ 连数据卷一起删除，数据库数据将清空 |
+| `docker compose up -d --build` | 代码更新后重新构建镜像并启动 |
+
+### 数据持久化与备份
+
+MySQL 数据存放在命名数据卷 `softwareproject_mysql_data` 中（位于宿主机磁盘），
+容器删除、重建、镜像升级均不影响数据；只有显式执行 `docker compose down -v`
+或 `docker volume rm` 才会删除数据。
+
+备份与恢复：
+
+```bash
+# 备份（在项目根目录执行）
+docker exec vdl-mysql mysqldump -uroot -p密码 visual_dl > backup_$(date +%F).sql
+
+# 恢复
+docker exec -i vdl-mysql mysql -uroot -p密码 visual_dl < backup_2026-07-06.sql
+```
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `MYSQL_ROOT_PASSWORD` | `devroot` | MySQL root 密码（生产部署必改） |
+| `MYSQL_DATABASE` | `visual_dl` | 数据库名 |
+| `JWT_SECRET_KEY` | 开发默认值 | JWT 签名密钥（生产部署必改） |
+| `DATABASE_URL` | 指向本机 3306 | 后端数据库连接串；手动运行后端时可用它指向任意 MySQL |
+
+在项目根目录创建 `.env`（参考 `.env.example`）即可覆盖默认值；`.env` 已被
+`.gitignore` 忽略，不会提交到仓库。
+
+### 端口说明与常见问题
+
+- Docker 方式启动的后端与「服务启动方法」中手动 `uvicorn` 启动的后端**共用
+  8000 端口，二者同一时间只能运行一个**。若 `docker compose up` 报
+  `bind: address already in use`，先停掉手动启动的后端（包括其他项目副本里
+  启动的）再执行。
+- 只想用 Docker 跑数据库、后端仍在本机调试：`docker compose up -d db`。
 
 ## 项目目录结构
 
@@ -98,7 +175,8 @@ project/
     code_exporter.py    # 导出 PyTorch 代码
     templates.py        # 内置模型模板
     graph_utils.py      # 模型图拓扑排序与前驱/后继映射
-    storage.py          # 本地 JSON 文件存储层（M1）
+    storage.py          # MySQL 数据库存储层（SQLAlchemy，M1）
+    migrate_json_to_mysql.py  # 一次性迁移脚本：JSON 历史数据导入 MySQL（M1）
     auth.py             # 用户管理与认证模块（M1）
     projects.py         # 项目管理模块（M1）
     security.py         # 密码哈希与 JWT 令牌（M1）
@@ -135,9 +213,15 @@ project/
       styles.css        # 页面样式
   tests/
     M1_user_project/
-      test_code/        # M1 模块测试代码
+      test_code/        # M1 用户与项目管理模块测试代码
       test_design/      # M1 模块测试设计文档
+    M2_model_editor/    # M2 模型编辑器模块测试
+    M3_validator_shape/ # M3 结构校验与维度推导模块测试
+    M7_templates_docs/  # M7 内置模板模块测试
   requirements.txt      # Python 依赖
+  docker-compose.yml    # 一键部署编排：MySQL + 后端 API
+  Dockerfile            # 后端 API 镜像构建配方
+  .env.example          # 部署环境变量模板（复制为 .env 使用）
   README.md             # 项目开发文档
 ```
 
@@ -236,6 +320,9 @@ project/
 | Dropout | 随机失活层 | p                                                |
 | Output  | 输出节点   | 无，分类数量由前置 Linear 层的 out_features 决定 |
 
+除上述基础层外，结构校验器（M3）与内置模板（M7）现已支持进阶层类型：
+LSTM、SelfAttention、TransformerEncoder、Seq2Seq、VAE、GraphConv。
+
 ## 后端接口设计
 
 | 方法   | 路径                      | 功能                   | 模块 |
@@ -247,7 +334,7 @@ project/
 | GET    | /train/{job_id}/status    | 查询训练状态           | -    |
 | GET    | /train/{job_id}/result    | 查询训练结果           | -    |
 | POST   | /train/{job_id}/cancel    | 停止进行中的训练任务   | -    |
-| POST   | /export/pytorch           | 导出 PyTorch 代码      | -    |
+| POST   | /export/pytorch           | 导出 PyTorch 代码（暂未实现，返回 501） | - |
 | POST   | /auth/register            | 注册新用户（自动登录） | M1   |
 | POST   | /auth/login               | 用户登录（邮箱+密码）  | M1   |
 | GET    | /auth/me                  | 获取当前登录用户信息   | M1   |
@@ -256,9 +343,11 @@ project/
 | GET    | /users/{user_id}          | 获取指定用户信息       | M1   |
 | PUT    | /users/{user_id}          | 更新用户信息           | M1   |
 | DELETE | /users/{user_id}          | 删除用户及关联项目     | M1   |
-| GET    | /users/{user_id}/projects | 获取用户的所有项目     | M1   |
 | POST   | /projects                 | 创建项目（保存模型）   | M1   |
-| GET    | /projects                 | 获取项目列表           | M1   |
+| GET    | /projects                 | 获取项目列表（支持 ?user_id= 按用户过滤） | M1 |
+| GET    | /projects/templates       | 获取内置模型模板列表   | M7   |
+| GET    | /projects/templates/{template_name} | 获取指定模板的完整模型图 | M7 |
+| POST   | /projects/from-template   | 基于内置模板创建项目   | M7   |
 | GET    | /projects/{project_id}    | 获取指定项目详情       | M1   |
 | PUT    | /projects/{project_id}    | 更新项目信息           | M1   |
 | DELETE | /projects/{project_id}    | 删除项目               | M1   |
@@ -275,7 +364,7 @@ project/
 | start_training        | 根据用户选择的 CPU 或 GPU 启动本地训练任务 |
 | get_training_status   | 返回指定训练任务的当前状态、日志和进度     |
 | get_training_result   | 返回训练完成后的最终指标和相关产物信息     |
-| export_pytorch_code   | 根据可视化模型结构生成 PyTorch 源代码      |
+| export_pytorch_code   | 导出 PyTorch 代码接口（暂未实现，返回 501）|
 | register              | 注册新用户并返回 JWT 令牌（M1）            |
 | login                 | 验证凭据后返回 JWT 令牌（M1）              |
 | get_current_user_info | 获取当前登录用户信息（M1）                 |
@@ -284,8 +373,10 @@ project/
 | get_user              | 获取指定用户信息（M1）                     |
 | update_user           | 更新用户信息（M1）                         |
 | delete_user           | 删除用户及关联项目（M1）                   |
-| get_user_projects     | 获取用户的所有项目（M1）                   |
 | create_project        | 创建项目/保存模型（M1）                    |
+| list_project_templates | 获取内置模型模板列表（M7）                |
+| get_project_template  | 获取指定模板的完整模型图（M7）             |
+| create_project_from_template | 基于内置模板创建项目（M7）           |
 | list_projects         | 获取项目列表（M1）                         |
 | get_project           | 获取指定项目详情（M1）                     |
 | update_project        | 更新项目信息（M1）                         |
@@ -304,10 +395,11 @@ project/
 | CodeExportRequest    | 导出 PyTorch 代码接口的请求体                |
 | UserCreateRequest    | 创建用户接口的请求体（M1）                   |
 | UserUpdateRequest    | 更新用户接口的请求体（M1）                   |
-| UserRegisterRequest  | 用户注册接口的请求体（M1）                   |
+| UserRegisterRequest  | 用户注册接口的请求体，含 confirm_password 确认密码（M1） |
 | UserLoginRequest     | 用户登录接口的请求体（M1）                   |
 | TokenResponse        | 认证成功后的 JWT 令牌响应（M1）              |
 | ProjectCreateRequest | 创建项目接口的请求体（M1）                   |
+| ProjectTemplateCreateRequest | 基于内置模板创建项目的请求体（M7）   |
 | ProjectUpdateRequest | 更新项目接口的请求体（M1）                   |
 
 ### backend/device.py
@@ -378,10 +470,9 @@ project/
 
 | 函数                    | 功能                                      |
 | ----------------------- | ----------------------------------------- |
-| get_available_templates | 返回前端可选择的模型模板，例如 MLP 和 CNN |
-| create_mlp_template     | 创建适合初学者使用的 MLP 模板图           |
-| create_cnn_template     | 创建适合图像分类任务的入门 CNN 模板图     |
-| apply_template          | 返回用户选择的模板图，供前端加载到画布中  |
+| get_available_templates | 返回前端可选择的全部内置模板元信息（共 11 个） |
+| create_*_template 系列  | 各内置模板的模型图构建函数：线性分类器、MLP、感知机、LeNet、ResNet-tiny、LSTM、Seq2Seq、Transformer 编码器、自注意力演示、VAE、GCN-tiny、CNN |
+| apply_template          | 按模板名或别名返回模板图，供前端加载到画布中 |
 
 ### backend/graph_utils.py
 
@@ -394,8 +485,14 @@ project/
 
 ### backend/storage.py（M1）
 
+MySQL 数据库存储层（SQLAlchemy 实现）。连接串由环境变量 `DATABASE_URL` 配置；
+邮箱唯一、同用户项目名唯一、用户-项目外键级联等业务约束由数据库层保证。
+对外函数只进出普通字典，上层业务无需感知数据库细节。
+
 | 函数                    | 功能                   |
 | ----------------------- | ---------------------- |
+| configure_database      | 初始化/切换数据库引擎并建表（测试传入独立 SQLite 实现隔离） |
+| dispose_database        | 释放当前引擎，下次访问时按环境变量重新初始化 |
 | save_user               | 保存新用户记录         |
 | get_user                | 按 id 获取用户         |
 | list_users              | 列出所有用户，支持过滤 |
@@ -414,15 +511,13 @@ project/
 
 | 函数              | 功能                                 |
 | ----------------- | ------------------------------------ |
-| register_user     | 注册新用户，校验邮箱唯一性并哈希密码 |
-| create_user       | 创建新用户（委托给 register_user）   |
+| register_user     | 注册新用户，校验邮箱唯一性、确认密码一致性并哈希密码 |
 | authenticate_user | 验证用户凭据（邮箱+密码）            |
 | get_user_by_email | 按邮箱查找用户                       |
 | get_user          | 按 id 获取用户信息                   |
 | list_users        | 获取所有用户列表                     |
 | update_user       | 更新用户信息（用户名/邮箱/密码）     |
 | delete_user       | 删除用户及关联的所有项目             |
-| get_users_by_ids  | 批量按 id 获取用户信息               |
 
 ### backend/security.py（M1）
 
@@ -441,9 +536,8 @@ project/
 | create_project    | 创建新项目，校验用户存在性和模型图结构 |
 | get_project       | 按 id 获取项目详情                     |
 | list_projects     | 列出项目，支持按用户过滤               |
-| update_project    | 更新项目信息（名称/模型图/描述）       |
-| delete_project    | 删除项目                               |
-| get_user_projects | 获取指定用户的所有项目                 |
+| update_project    | 更新项目信息（名称/模型图/描述），校验项目所有权 |
+| delete_project    | 删除项目，校验项目所有权               |
 
 ## 前端模块和函数说明
 
