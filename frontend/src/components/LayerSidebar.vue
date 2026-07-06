@@ -28,6 +28,7 @@ function handleDragStart(event: DragEvent, layerType: string) {
 <template>
   <!-- 左侧：网络层组件库 -->
   <aside class="layer-sidebar">
+    <div class="sidebar-inner">
     <div class="sidebar-header">
       <h2><iconify-icon icon="mdi:shape-plus"></iconify-icon>网络层组件库</h2>
       <p>把下面的“积木”拖到中间画布上</p>
@@ -75,6 +76,7 @@ function handleDragStart(event: DragEvent, layerType: string) {
           </article>
         </div>
       </section>
+    </div>
     </div>
   </aside>
 </template>

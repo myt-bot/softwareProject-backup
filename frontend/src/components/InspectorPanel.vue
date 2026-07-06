@@ -1,16 +1,25 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { redrawAfterDomUpdate } from "../canvas";
-import { showToast, store, updateNodeParam } from "../store";
+import { activeCanvas, showToast, ui, updateNodeParam } from "../store";
 import ParamNumberField from "./ParamNumberField.vue";
 
+const canvas = computed(() => activeCanvas());
+
 const selectedNode = computed(() =>
-  store.nodes.find(item => item.id === store.selectedNodeId) || null
+  canvas.value.nodes.find(item => item.id === canvas.value.selectedNodeId) || null
 );
+
+// 面板悬浮于画布之上：选中节点且未被手动收起时滑入，不改变画布尺寸
+const panelOpen = computed(() => Boolean(selectedNode.value) && !ui.inspectorCollapsed);
+
+function collapsePanel() {
+  ui.inspectorCollapsed = true;
+}
 
 // Linear 的 shape mismatch 提示（教学演示：in_features 应为 2704）
 const linearShapeError = computed(
-  () => store.validationStatus === "failed" && store.inFeatures !== 2704
+  () => canvas.value.validationStatus === "failed" && canvas.value.inFeatures !== 2704
 );
 
 function setParam(key: string, value: number) {
@@ -21,7 +30,7 @@ function setParam(key: string, value: number) {
 }
 
 function autoFix() {
-  store.inFeatures = 2704;
+  canvas.value.inFeatures = 2704;
   showToast("success", "参数已自动修复为 2704。");
 }
 
@@ -54,8 +63,13 @@ const inputShapeValue = computed(() => {
 </script>
 
 <template>
-  <!-- 右侧：参数面板 -->
-  <aside class="inspector-panel" id="inspector-content">
+  <!-- 右侧：参数面板（悬浮层，选中节点时滑入，不挤压画布） -->
+  <aside class="inspector-panel" :class="{ open: panelOpen }" id="inspector-content">
+    <!-- 收起箭头：收起后再次点击节点卡片才会重新展开 -->
+    <button v-if="panelOpen" class="inspector-collapse" title="收起参数面板" @click="collapsePanel">
+      <iconify-icon icon="mdi:chevron-right"></iconify-icon>
+    </button>
+
     <!-- 未选中节点 -->
     <div v-if="!selectedNode" class="empty-inspector">
       <iconify-icon icon="mdi:cursor-default-click-outline"></iconify-icon>
@@ -94,14 +108,14 @@ const inputShapeValue = computed(() => {
 
       <section v-if="linearShapeError" class="error-card">
         <h4><iconify-icon icon="mdi:alert-circle"></iconify-icon> Shape mismatch</h4>
-        <p>前一层 Flatten 输出维度为 2704，而当前 Linear.in_features 设为 {{ store.inFeatures }}。</p>
+        <p>前一层 Flatten 输出维度为 2704，而当前 Linear.in_features 设为 {{ canvas.inFeatures }}。</p>
         <button id="btn-autofix" @click="autoFix">一键修复</button>
       </section>
 
       <div class="field-stack">
         <label class="form-field muted-field">
           <span>In Features 输入特征数</span>
-          <input type="text" :value="store.inFeatures" readonly>
+          <input type="text" :value="canvas.inFeatures" readonly>
           <small>由前一层自动推导</small>
         </label>
 

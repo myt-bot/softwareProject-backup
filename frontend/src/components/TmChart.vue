@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 训练指标折线图（手绘 SVG，无外部依赖），对应原 training.js 的 drawChart。
-import { computed, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { fmt, formatTick, labelFor } from "../monitor";
 import type { Point } from "../types";
 
@@ -15,12 +15,14 @@ const props = defineProps<{
   yTicks: number[];
   total: number;
   visible: number;
-  showTrainOnly: boolean;
 }>();
 
-const emit = defineEmits<{
-  toggle: [series: string];
-}>();
+// 每张图各自独立的曲线显隐（点击图例切换，两张图互不联动）
+const hiddenSeries = reactive({ train: false, val: false });
+
+function toggleSeries(name: "train" | "val") {
+  hiddenSeries[name] = !hiddenSeries[name];
+}
 
 const W = 520;
 const H = 260;
@@ -69,12 +71,12 @@ const placeholder = computed(() => {
 // val 先画、train 后画（train 在上层）
 const renderSeries = computed(() => {
   const series = [
-    { name: "val", data: props.val, cls: "val" },
-    { name: "train", data: props.train, cls: "train" },
+    { name: "val" as const, data: props.val, cls: "val" },
+    { name: "train" as const, data: props.train, cls: "train" },
   ];
 
   return series
-    .filter(item => !(item.name === "val" && props.showTrainOnly))
+    .filter(item => !hiddenSeries[item.name])
     .map(item => {
       const pts: Point[] = [];
       for (let i = 0; i < Math.max(props.visible, 0); i += 1) {
@@ -128,10 +130,22 @@ const hoverVal = computed(() => (hoverIndex.value === null ? undefined : props.v
         <span class="tm-chart-sub">{{ subtitle }} · 横轴 epoch</span>
       </div>
       <div class="tm-legend" :data-chart="chartKey">
-        <button class="tm-legend-item" :class="showTrainOnly ? '' : 'active'" data-series="train" @click="emit('toggle', 'train')">
+        <button
+          class="tm-legend-item"
+          :class="hiddenSeries.train ? 'muted' : 'active'"
+          data-series="train"
+          :title="hiddenSeries.train ? '显示曲线' : '隐藏曲线'"
+          @click="toggleSeries('train')"
+        >
           <i class="dot train"></i>{{ labelFor(chartKey, "train") }}
         </button>
-        <button class="tm-legend-item" :class="showTrainOnly ? 'muted' : 'active'" data-series="val" @click="emit('toggle', 'val')">
+        <button
+          class="tm-legend-item"
+          :class="hiddenSeries.val ? 'muted' : 'active'"
+          data-series="val"
+          :title="hiddenSeries.val ? '显示曲线' : '隐藏曲线'"
+          @click="toggleSeries('val')"
+        >
           <i class="dot val"></i>{{ labelFor(chartKey, "val") }}
         </button>
       </div>
@@ -184,8 +198,8 @@ const hoverVal = computed(() => (hoverIndex.value === null ? undefined : props.v
       </svg>
       <div class="tm-tooltip" :class="{ hidden: hoverIndex === null }" :id="`tm-tooltip-${chartKey}`" :style="{ left: tooltipLeft }">
         <div class="tm-tt-title">Epoch {{ (hoverIndex ?? 0) + 1 }}</div>
-        <div><i class="dot train"></i>{{ labelFor(chartKey, "train") }}: <b>{{ fmt(chartKey, hoverTrain) }}</b></div>
-        <div v-if="!showTrainOnly"><i class="dot val"></i>{{ labelFor(chartKey, "val") }}: <b>{{ fmt(chartKey, hoverVal) }}</b></div>
+        <div v-if="!hiddenSeries.train"><i class="dot train"></i>{{ labelFor(chartKey, "train") }}: <b>{{ fmt(chartKey, hoverTrain) }}</b></div>
+        <div v-if="!hiddenSeries.val"><i class="dot val"></i>{{ labelFor(chartKey, "val") }}: <b>{{ fmt(chartKey, hoverVal) }}</b></div>
       </div>
     </div>
   </section>

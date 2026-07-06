@@ -83,6 +83,8 @@ export interface TrainingStatus {
   status?: string;
   current_epoch?: number;
   total_epochs?: number;
+  current_step?: number;
+  total_steps?: number;
   progress?: number;
   metrics?: EpochMetrics[];
   error?: string;
@@ -96,6 +98,12 @@ export interface TrainingResult extends TrainingStatus {
 
 export interface TrainStartResponse extends TrainingStatus {
   job_status?: string;
+}
+
+export interface CancelTrainingResponse {
+  job_id?: string;
+  cancelled?: boolean;
+  status?: string;
 }
 
 // 前端本地维护的训练任务（底部任务面板）

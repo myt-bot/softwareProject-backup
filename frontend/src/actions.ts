@@ -1,7 +1,9 @@
 // 与后端交互的业务动作（校验 / 保存 / 导出 / 训练）。
+// 所有操作在发起时捕获所属画布的引用，异步结果写回原画布——
+// 各画布可以并行进行结构检查、保存模型、导出代码、训练与查看训练任务。
 
-import { ref } from "vue";
 import {
+  cancelTraining,
   createProject,
   exportPytorchCode,
   fetchDevices,
@@ -17,6 +19,7 @@ import {
 import { applyTemplateGraph } from "./canvas";
 import { openTrainingMonitor } from "./monitor";
 import {
+  activeCanvas,
   getCurrentModelGraph,
   getTrainConfig,
   getTrainingLayers,
@@ -27,13 +30,11 @@ import {
   ui,
   updateShapeHints,
 } from "./store";
+import type { WorkCanvas } from "./store";
 import type { ValidationResult } from "./types";
 
-// 按钮加载态
-export const validating = ref(false);
-export const trainStarting = ref(false);
-
-let trainingPollTimer: number | null = null;
+// 每个画布独立的训练轮询定时器（画布 id → timer）
+const trainingPollTimers = new Map<number, number>();
 
 
 export function showBackendError(error: unknown, fallbackMessage: string) {
@@ -42,6 +43,11 @@ export function showBackendError(error: unknown, fallbackMessage: string) {
     return;
   }
   showToast("error", (error as Error)?.message || fallbackMessage);
+}
+
+
+function canvasExists(canvas: WorkCanvas) {
+  return store.canvases.some(item => item.id === canvas.id);
 }
 
 
@@ -91,63 +97,44 @@ export async function loadTemplateToCanvas(templateName: string) {
 
 
 // —————————————————————————————————————————————
-// 结构校验
+// 结构校验（按画布并行）
 // —————————————————————————————————————————————
 
 export async function handleValidateModel() {
-  validating.value = true;
+  const canvas = activeCanvas();
+  if (canvas.validating) return;
+  canvas.validating = true;
 
   try {
-    const result = await validateModel(getCurrentModelGraph());
-    applyValidationResult(result);
-    showToast("success", "结构校验完成。");
+    const result = await validateModel(getCurrentModelGraph(canvas));
+    applyValidationResult(canvas, result);
   } catch (error) {
-    showBackendError(error, "结构校验接口暂未实现。");
-    applyUnavailableValidation(
-      isBackendUnavailable(error) ? "后端服务未启动" : "结构校验接口暂未实现"
-    );
+    // 校验结果只通过 toast 提示
+    if (isBackendUnavailable(error)) {
+      showToast("error", "后端服务未启动，无法进行结构校验。");
+    } else {
+      showBackendError(error, "结构校验接口暂未实现。");
+    }
+    canvas.validationStatus = "unvalidated";
   } finally {
-    validating.value = false;
+    canvas.validating = false;
   }
 }
 
 
-function applyValidationResult(result: ValidationResult) {
+function applyValidationResult(canvas: WorkCanvas, result: ValidationResult) {
   const valid = result?.valid === true || result?.status === "ok";
   if (valid) {
-    store.validationStatus = "passing";
-    applyValidationUI(true, "结构校验通过");
+    canvas.validationStatus = "passing";
+    canvas.nodeBadge = "passed";
+    updateShapeHints(canvas);
+    showToast("success", `${canvas.name} 结构校验通过。`);
     return;
   }
 
-  store.validationStatus = "failed";
-  applyValidationUI(false, result?.message || "结构校验失败");
-}
-
-
-function applyUnavailableValidation(message: string) {
-  store.validationStatus = "unvalidated";
-  store.validationSummary = {
-    visible: true,
-    kind: "warning",
-    icon: "mdi:clock-alert-outline",
-    text: message,
-  };
-}
-
-
-function applyValidationUI(isPass: boolean, message: string) {
-  store.validationSummary = {
-    visible: true,
-    kind: isPass ? "success" : "error",
-    icon: isPass ? "mdi:check-circle" : "mdi:alert-circle",
-    text: message,
-  };
-  store.nodeBadge = isPass ? "passed" : "pending";
-
-  if (isPass) {
-    updateShapeHints();
-  }
+  canvas.validationStatus = "failed";
+  canvas.nodeBadge = "pending";
+  showToast("error", `${canvas.name} ${result?.message || "结构校验失败"}`);
 }
 
 
@@ -156,6 +143,8 @@ function applyValidationUI(isPass: boolean, message: string) {
 // —————————————————————————————————————————————
 
 export async function handleSaveProject() {
+  const canvas = activeCanvas();
+
   const userId = window.prompt("请输入 user_id，用于保存到 /projects：");
   if (!userId) {
     showToast("warning", "已取消保存。");
@@ -172,7 +161,7 @@ export async function handleSaveProject() {
     const result = await createProject({
       user_id: userId,
       name,
-      model_graph: getCurrentModelGraph(),
+      model_graph: getCurrentModelGraph(canvas),
       description: "Created from visual model editor",
     });
     showToast("success", `项目已保存: ${result?.data?.name || name}`);
@@ -183,19 +172,20 @@ export async function handleSaveProject() {
 
 
 export async function handleExportCode() {
+  const canvas = activeCanvas();
   ui.exportModalOpen = true;
-  store.exportCodeDisplay = "正在请求后端导出接口...";
+  canvas.exportCodeDisplay = "正在请求后端导出接口...";
 
   try {
-    const result = await exportPytorchCode(getCurrentModelGraph());
+    const result = await exportPytorchCode(getCurrentModelGraph(canvas));
     const code = typeof result === "string" ? result : result?.code || result?.source_code;
-    store.lastExportCode = typeof code === "string" ? code : JSON.stringify(result, null, 2);
-    store.exportCodeDisplay = store.lastExportCode;
-    showToast("success", "PyTorch 代码已从后端导出。");
+    canvas.lastExportCode = typeof code === "string" ? code : JSON.stringify(result, null, 2);
+    canvas.exportCodeDisplay = canvas.lastExportCode;
+    showToast("success", `${canvas.name} 的 PyTorch 代码已从后端导出。`);
   } catch (error) {
     showBackendError(error, "代码导出接口暂未实现。");
-    store.lastExportCode = "";
-    store.exportCodeDisplay = "代码导出接口暂未实现。";
+    canvas.lastExportCode = "";
+    canvas.exportCodeDisplay = "代码导出接口暂未实现。";
   }
 }
 
@@ -206,13 +196,14 @@ export function closeExportModal() {
 
 
 export async function copyExportCode() {
-  if (!store.lastExportCode) {
+  const canvas = activeCanvas();
+  if (!canvas.lastExportCode) {
     showToast("warning", "暂无可复制代码。");
     return;
   }
 
   try {
-    await navigator.clipboard.writeText(store.lastExportCode);
+    await navigator.clipboard.writeText(canvas.lastExportCode);
     showToast("success", "代码已复制。");
   } catch {
     showToast("warning", "当前浏览器不支持自动复制。");
@@ -221,12 +212,13 @@ export async function copyExportCode() {
 
 
 export function downloadExportCode() {
-  if (!store.lastExportCode) {
+  const canvas = activeCanvas();
+  if (!canvas.lastExportCode) {
     showToast("warning", "暂无可下载代码。");
     return;
   }
 
-  const blob = new Blob([store.lastExportCode], { type: "text/x-python;charset=utf-8" });
+  const blob = new Blob([canvas.lastExportCode], { type: "text/x-python;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -237,12 +229,12 @@ export function downloadExportCode() {
 
 
 // —————————————————————————————————————————————
-// 训练任务
+// 训练任务（按画布并行）
 // —————————————————————————————————————————————
 
-async function submitTrainingJob() {
-  const trainConfig = getTrainConfig();
-  const result = await startTraining(getCurrentModelGraph(), trainConfig);
+async function submitTrainingJob(canvas: WorkCanvas) {
+  const trainConfig = getTrainConfig(canvas);
+  const result = await startTraining(getCurrentModelGraph(canvas), trainConfig);
   return {
     result,
     trainConfig,
@@ -252,11 +244,13 @@ async function submitTrainingJob() {
 
 
 export async function handleStartTraining() {
-  trainStarting.value = true;
+  const canvas = activeCanvas();
+  if (canvas.trainStarting) return;
+  canvas.trainStarting = true;
 
   try {
-    const { result, trainConfig, jobId } = await submitTrainingJob();
-    setTrainingJob({
+    const { result, trainConfig, jobId } = await submitTrainingJob(canvas);
+    setTrainingJob(canvas, {
       job_id: jobId,
       status: result?.job_status || result?.status || "pending",
       current_epoch: result?.current_epoch ?? 0,
@@ -264,69 +258,81 @@ export async function handleStartTraining() {
       progress: 0,
       trainConfig,
     });
-    showToast("success", `训练任务已创建: ${store.jobId || "未知任务"}`);
+    showToast("success", `训练任务已创建: ${canvas.jobId || "未知任务"}`);
     if (jobId) {
-      openCurrentTrainingMonitor();
-      void pollTrainingStatus(jobId);
+      openTrainingMonitorForCanvas(canvas);
+      pollTrainingStatus(canvas, jobId);
     }
   } catch (error) {
     showBackendError(error, "训练接口暂未实现。");
   } finally {
-    trainStarting.value = false;
+    canvas.trainStarting = false;
   }
 }
 
 
-function stopTrainingPanelPolling() {
-  if (trainingPollTimer) {
-    clearTimeout(trainingPollTimer);
-    trainingPollTimer = null;
+function stopTrainingPolling(canvas: WorkCanvas) {
+  const timer = trainingPollTimers.get(canvas.id);
+  if (timer) {
+    clearTimeout(timer);
+    trainingPollTimers.delete(canvas.id);
   }
 }
 
 
-async function pollTrainingStatus(jobId: string) {
-  stopTrainingPanelPolling();
+function pollTrainingStatus(canvas: WorkCanvas, jobId: string) {
+  stopTrainingPolling(canvas);
+  void poll();
 
-  try {
-    const status = await fetchTrainingStatus(jobId);
-    setTrainingJob(status);
-    if (status?.status === "completed") {
-      const result = await fetchTrainingResult(jobId);
-      setTrainingJob({
-        ...result,
-        progress: 1,
-      });
-      showToast("success", `训练完成，accuracy=${result?.accuracy ?? "未知"}`);
-      return;
+  async function poll() {
+    // 画布被关闭后停止跟踪其训练任务
+    if (!canvasExists(canvas)) return;
+
+    try {
+      const status = await fetchTrainingStatus(jobId);
+      setTrainingJob(canvas, status);
+      if (status?.status === "completed") {
+        const result = await fetchTrainingResult(jobId);
+        setTrainingJob(canvas, {
+          ...result,
+          progress: 1,
+        });
+        showToast("success", `${canvas.name} 训练完成，accuracy=${result?.accuracy ?? "未知"}`);
+        return;
+      }
+      if (status?.status === "failed" || status?.status === "cancelled") {
+        showToast(
+          status.status === "failed" ? "error" : "warning",
+          `${canvas.name} 训练${getTrainingStatusLabel(status.status)}。`
+        );
+        return;
+      }
+      trainingPollTimers.set(canvas.id, window.setTimeout(() => void poll(), 1000));
+    } catch (error) {
+      showBackendError(error, "训练状态接口暂未实现。");
     }
-    if (status?.status === "failed" || status?.status === "cancelled") {
-      showToast(status.status === "failed" ? "error" : "warning", `训练${getTrainingStatusLabel(status.status)}。`);
-      return;
-    }
-    trainingPollTimer = window.setTimeout(() => pollTrainingStatus(jobId), 1000);
-  } catch (error) {
-    showBackendError(error, "训练状态接口暂未实现。");
   }
 }
 
 
-export function openCurrentTrainingMonitor() {
-  if (!store.trainingJob?.job_id) {
-    showToast("warning", "当前没有可查看的训练任务。");
+// 打开指定画布的训练监控页（重新训练也会回写到该画布）
+function openTrainingMonitorForCanvas(canvas: WorkCanvas) {
+  if (!canvas.trainingJob?.job_id) {
+    showToast("warning", "当前画布没有可查看的训练任务。");
     return;
   }
 
   openTrainingMonitor({
     live: true,
-    jobId: store.trainingJob.job_id,
+    jobId: canvas.trainingJob.job_id,
     fetchStatus: fetchTrainingStatus,
     fetchResult: fetchTrainingResult,
-    hyperparams: store.trainingJob.trainConfig || getTrainConfig(),
-    layers: getTrainingLayers(),
+    cancelJob: cancelTraining,
+    hyperparams: canvas.trainingJob.trainConfig || getTrainConfig(canvas),
+    layers: getTrainingLayers(canvas),
     onRerun: async () => {
-      const { jobId, trainConfig, result } = await submitTrainingJob();
-      setTrainingJob({
+      const { jobId, trainConfig, result } = await submitTrainingJob(canvas);
+      setTrainingJob(canvas, {
         job_id: jobId,
         status: result?.job_status || result?.status || "pending",
         current_epoch: result?.current_epoch ?? 0,
@@ -335,9 +341,14 @@ export function openCurrentTrainingMonitor() {
         trainConfig,
       });
       if (jobId) {
-        void pollTrainingStatus(jobId);
+        pollTrainingStatus(canvas, jobId);
       }
       return { jobId };
     },
   });
+}
+
+
+export function openCurrentTrainingMonitor() {
+  openTrainingMonitorForCanvas(activeCanvas());
 }

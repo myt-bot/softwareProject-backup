@@ -17,20 +17,23 @@ import {
   selectNode,
   showNodeMenu,
 } from "../canvas";
-import { showToast, store } from "../store";
+import { activeCanvas, showToast, store } from "../store";
+import CanvasTabs from "./CanvasTabs.vue";
 
 const canvasRef = ref<HTMLElement | null>(null);
 const svgRef = ref<SVGSVGElement | null>(null);
 const nodesRef = ref<HTMLElement | null>(null);
 const gridRef = ref<HTMLElement | null>(null);
 
-const zoomLabel = computed(() => `${Math.round(store.zoom * 100)}%`);
+const canvas = computed(() => activeCanvas());
+
+const zoomLabel = computed(() => `${Math.round(canvas.value.zoom * 100)}%`);
 
 const statusBadgeText = computed(() =>
-  store.nodeBadge === "passed" ? "通过" : store.nodeBadge === "pending" ? "待检查" : "未校验"
+  canvas.value.nodeBadge === "passed" ? "通过" : canvas.value.nodeBadge === "pending" ? "待检查" : "未校验"
 );
 const statusBadgeClass = computed(() =>
-  store.nodeBadge === "passed" ? "status-badge passed" : "status-badge"
+  canvas.value.nodeBadge === "passed" ? "status-badge passed" : "status-badge"
 );
 
 function onNodeClick(event: MouseEvent, nodeId: string) {
@@ -79,8 +82,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <!-- 中间：模型画布 -->
-  <main
+  <!-- 中间：模型画布（多画布标签页 + 画布主体） -->
+  <section class="canvas-pane">
+    <CanvasTabs />
+    <main
     ref="canvasRef"
     class="canvas"
     id="canvas-container"
@@ -110,13 +115,13 @@ onBeforeUnmount(() => {
     <svg ref="svgRef" class="connections-svg" id="connections-svg"></svg>
     <div ref="nodesRef" class="nodes-container" id="nodes-container">
       <article
-        v-for="node in store.nodes"
+        v-for="node in canvas.nodes"
         :key="node.id"
         class="node-card"
         :id="`node-${node.id}`"
         :data-node-id="node.id"
         :class="{
-          'node-selected': store.selectedNodeId === node.id,
+          'node-selected': canvas.selectedNodeId === node.id,
           'connection-source': store.connectSourceId === node.id,
           'connection-target': store.connectTargetId === node.id,
           'node-dragging': store.draggingNodeId === node.id,
@@ -138,5 +143,6 @@ onBeforeUnmount(() => {
         </div>
       </article>
     </div>
-  </main>
+    </main>
+  </section>
 </template>

@@ -1,10 +1,6 @@
-<script setup lang="ts">
-import { dismissGuideStrip, ui } from "../store";
-</script>
-
 <template>
-  <!-- 新手引导条：四步上手 -->
-  <div class="guide-strip" :class="{ hidden: ui.guideStripHidden }" id="guide-strip">
+  <!-- 新手引导条：四步上手（常驻，不可关闭） -->
+  <div class="guide-strip" id="guide-strip">
     <div class="guide-steps">
       <div class="guide-step">
         <span class="guide-step-num">1</span>
@@ -38,8 +34,5 @@ import { dismissGuideStrip, ui } from "../store";
         </div>
       </div>
     </div>
-    <button class="guide-close" id="btn-close-guide" title="收起引导条" @click="dismissGuideStrip">
-      <iconify-icon icon="mdi:close"></iconify-icon>
-    </button>
   </div>
 </template>

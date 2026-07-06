@@ -6,12 +6,30 @@ import {
   handleStartTraining,
   handleValidateModel,
   openCurrentTrainingMonitor,
-  trainStarting,
-  validating,
 } from "../actions";
-import { clamp, getTrainingStatusLabel, store } from "../store";
+import { activeCanvas, clamp, getTrainingStatusLabel, showToast } from "../store";
 
-const job = computed(() => store.trainingJob);
+// 底部操作栏跟随当前激活画布：各画布的校验/训练状态相互独立、并行进行
+const canvas = computed(() => activeCanvas());
+
+const MAX_EPOCHS = 100;
+
+// 训练轮次输入（按画布独立保存）
+function handleEpochsChange(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const value = Number(input.value);
+
+  if (!Number.isInteger(value) || value < 1 || value > MAX_EPOCHS) {
+    showToast("warning", `训练轮次须为 1-${MAX_EPOCHS} 的整数。`);
+    canvas.value.epochs = clamp(Math.round(value) || 1, 1, MAX_EPOCHS);
+  } else {
+    canvas.value.epochs = value;
+  }
+  // 输入被纠正时同步回输入框（响应式值可能未变化）
+  input.value = String(canvas.value.epochs);
+}
+
+const job = computed(() => canvas.value.trainingJob);
 
 const jobPanelClass = computed(() => {
   if (!job.value) return "is-empty";
@@ -36,7 +54,9 @@ const jobMeta = computed(() => {
   return `Epoch ${job.value.current_epoch ?? 0}/${job.value.total_epochs ?? "-"} · ${jobPercentage.value}%`;
 });
 
-const trainDisabled = computed(() => trainStarting.value || store.validationStatus !== "passing");
+const trainDisabled = computed(
+  () => canvas.value.trainStarting || canvas.value.validationStatus !== "passing"
+);
 </script>
 
 <template>
@@ -62,25 +82,16 @@ const trainDisabled = computed(() => trainStarting.value || store.validationStat
       </div>
     </div>
     <div class="footer-actions">
-      <div
-        class="validation-summary"
-        :class="[store.validationSummary.kind, { hidden: !store.validationSummary.visible }]"
-        id="validation-summary"
-      >
-        <iconify-icon id="summary-icon" :icon="store.validationSummary.icon"></iconify-icon>
-        <span id="summary-text">{{ store.validationSummary.text }}</span>
-      </div>
-      <div class="footer-divider"></div>
       <button
         class="secondary-button"
         id="btn-validate"
         title="自动检查每一层的尺寸是否匹配"
-        :disabled="validating"
+        :disabled="canvas.validating"
         @click="handleValidateModel"
       >
-        <iconify-icon v-if="validating" icon="mdi:loading" class="spin"></iconify-icon>
+        <iconify-icon v-if="canvas.validating" icon="mdi:loading" class="spin"></iconify-icon>
         <iconify-icon v-else icon="mdi:check-circle-outline"></iconify-icon>
-        {{ validating ? "正在校验..." : "检查结构" }}
+        {{ canvas.validating ? "正在校验..." : "检查结构" }}
       </button>
       <button class="secondary-button" id="btn-save" title="把当前模型保存到我的项目" @click="handleSaveProject">
         <iconify-icon icon="mdi:content-save-outline"></iconify-icon>
@@ -90,6 +101,17 @@ const trainDisabled = computed(() => trainStarting.value || store.validationStat
         <iconify-icon icon="mdi:code-json"></iconify-icon>
         导出代码
       </button>
+      <label class="epochs-field" title="完整遍历训练集的次数（1-100）">
+        <span>训练轮次</span>
+        <input
+          id="epochs-input"
+          type="number"
+          min="1"
+          :max="MAX_EPOCHS"
+          :value="canvas.epochs"
+          @change="handleEpochsChange"
+        >
+      </label>
       <button
         class="success-button"
         id="btn-train"
@@ -97,9 +119,9 @@ const trainDisabled = computed(() => trainStarting.value || store.validationStat
         title="先通过“检查结构”，此按钮才会亮起"
         @click="handleStartTraining"
       >
-        <iconify-icon v-if="trainStarting" icon="mdi:loading" class="spin"></iconify-icon>
+        <iconify-icon v-if="canvas.trainStarting" icon="mdi:loading" class="spin"></iconify-icon>
         <iconify-icon v-else icon="mdi:play"></iconify-icon>
-        {{ trainStarting ? "启动训练..." : "开始训练" }}
+        {{ canvas.trainStarting ? "启动训练..." : "开始训练" }}
       </button>
     </div>
   </footer>

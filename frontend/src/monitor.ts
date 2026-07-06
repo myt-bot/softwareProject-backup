@@ -11,7 +11,7 @@
 
 import { reactive } from "vue";
 import { showToast } from "./store";
-import type { EpochMetrics, MonitorLayer, TrainingResult, TrainingStatus } from "./types";
+import type { CancelTrainingResponse, EpochMetrics, MonitorLayer, TrainingResult, TrainingStatus } from "./types";
 
 // 预设指标曲线（mock），趋势合理：loss 下降、acc 上升、val 略低但接近。
 export const MOCK = {
@@ -75,6 +75,7 @@ export interface OpenMonitorOptions {
   jobId?: string;
   fetchStatus?: (jobId: string) => Promise<TrainingStatus>;
   fetchResult?: (jobId: string) => Promise<TrainingResult>;
+  cancelJob?: (jobId: string) => Promise<CancelTrainingResponse>;
   onBackToBuilder?: () => void;
   onRerun?: () => Promise<{ jobId?: string } | undefined>;
   hyperparams?: Partial<MonitorHyperparams>;
@@ -85,6 +86,7 @@ export interface OpenMonitorOptions {
 // 非响应式的回调与定时器
 let fetchStatusFn: OpenMonitorOptions["fetchStatus"] = undefined;
 let fetchResultFn: OpenMonitorOptions["fetchResult"] = undefined;
+let cancelJobFn: OpenMonitorOptions["cancelJob"] = undefined;
 let onBackToBuilderFn: OpenMonitorOptions["onBackToBuilder"] = undefined;
 let onRerunFn: OpenMonitorOptions["onRerun"] = undefined;
 let pollTimer: number | null = null;
@@ -92,7 +94,6 @@ let pollTimer: number | null = null;
 export const monitor = reactive({
   visible: false,
   state: "running" as "running" | "completed",
-  showTrainOnly: false, // legend 交互：show both / show train only
   visibleEpochs: 3, // demo running 状态曲线画到第几轮
   live: false,
   jobId: null as string | null,
@@ -107,6 +108,7 @@ export const monitor = reactive({
   series: emptySeries(10) as MonitorSeries, // live 模式的真实逐轮指标
   result: null as TrainingResult | null,
   error: null as string | null,
+  stopping: false, // 停止请求已发出、等待后端确认
 });
 
 
@@ -115,18 +117,20 @@ export function openTrainingMonitor(options: OpenMonitorOptions = {}) {
   monitor.jobId = options.jobId || null;
   fetchStatusFn = options.fetchStatus;
   fetchResultFn = options.fetchResult;
+  cancelJobFn = options.cancelJob;
   onBackToBuilderFn = options.onBackToBuilder;
   onRerunFn = options.onRerun;
+  monitor.stopping = false;
   monitor.hyperparams = { ...DEFAULT_HYPERPARAMS, ...(options.hyperparams || {}) };
   monitor.layers = options.layers?.length ? options.layers : DEFAULT_LAYERS;
   monitor.paramCount = options.paramCount || monitor.paramCount;
 
   monitor.state = "running";
-  monitor.showTrainOnly = false;
   monitor.visibleEpochs = 3;
   monitor.progress = monitor.live ? 0 : 0.3;
   monitor.currentEpoch = monitor.live ? 0 : 3;
   monitor.currentStep = monitor.live ? 0 : 180;
+  monitor.totalSteps = monitor.live ? 0 : 600;
   monitor.series = emptySeries(monitor.hyperparams.epochs);
   monitor.result = null;
   monitor.error = null;
@@ -221,14 +225,35 @@ export function handleBack() {
 }
 
 
+// 停止进行中的训练：请求后端取消，轮询会在状态变为 cancelled 后收尾
+export async function handleStopTraining() {
+  if (!monitor.jobId || !cancelJobFn || monitor.stopping) return;
+  monitor.stopping = true;
+
+  try {
+    const result = await cancelJobFn(monitor.jobId);
+    if (result?.cancelled) {
+      showToast("warning", "已请求停止训练。");
+    } else {
+      showToast("info", `任务已处于「${result?.status || "未知"}」状态，无需停止。`);
+      monitor.stopping = false;
+    }
+  } catch (error) {
+    showToast("error", (error as Error)?.message || "停止训练失败");
+    monitor.stopping = false;
+  }
+}
+
+
 export async function handleRerun() {
   stopPolling();
+  monitor.stopping = false;
   monitor.state = "running";
-  monitor.showTrainOnly = false;
   monitor.visibleEpochs = 3;
   monitor.progress = monitor.live ? 0 : 0.3;
   monitor.currentEpoch = monitor.live ? 0 : 3;
   monitor.currentStep = monitor.live ? 0 : 180;
+  monitor.totalSteps = monitor.live ? 0 : 600;
   monitor.series = emptySeries(monitor.hyperparams.epochs);
   monitor.result = null;
   monitor.error = null;
@@ -265,14 +290,6 @@ export function handleSimulateComplete() {
 }
 
 
-export function toggleSeries(series: string) {
-  // 只对 val 做显隐切换：show both / show train only
-  if (series === "val") {
-    monitor.showTrainOnly = !monitor.showTrainOnly;
-  } else {
-    monitor.showTrainOnly = false;
-  }
-}
 
 
 // —————————————————————————————————————————————
@@ -303,6 +320,7 @@ async function poll() {
 
     const s = status?.status;
     if (s === "completed") {
+      monitor.stopping = false;
       try {
         const result = await fetchResultFn!(monitor.jobId);
         applyLiveResult(result);
@@ -314,12 +332,14 @@ async function poll() {
       return;
     }
     if (s === "failed") {
+      monitor.stopping = false;
       monitor.error = status?.error || "未知错误";
       monitor.state = "completed";
       showToast("error", `训练失败: ${monitor.error}`);
       return;
     }
     if (s === "cancelled") {
+      monitor.stopping = false;
       monitor.state = "completed";
       showToast("warning", "训练任务已取消。");
       return;
@@ -343,6 +363,9 @@ function applyLiveStatus(status: TrainingStatus) {
   ingestMetrics(status?.metrics, total);
   monitor.currentEpoch = current;
   monitor.hyperparams.epochs = total;
+  // 轮次内 step 进度（后端每个 batch 更新一次）
+  monitor.currentStep = status?.current_step ?? 0;
+  monitor.totalSteps = status?.total_steps ?? 0;
   monitor.progress = typeof status?.progress === "number"
     ? status.progress
     : (total ? current / total : 0);

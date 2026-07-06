@@ -36,6 +36,7 @@ from .trainer import (
     get_job_result,
     get_job_status,
     run_training_job,
+    stop_training_job,
 )
 
 
@@ -141,6 +142,28 @@ def get_training_status(job_id: str):
     """
     try:
         return get_job_status(job_id)
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "error", "message": str(exc)},
+        )
+
+
+@app.post("/train/{job_id}/cancel")
+def cancel_training(job_id: str):
+    """请求停止一个进行中的训练任务。
+
+    训练循环会在最近的检查点中止，任务状态变为 cancelled；
+    已结束（completed/failed/cancelled）的任务不会被改变。
+
+    参数：
+        job_id：训练任务编号，用于定位需要停止的训练任务。
+
+    返回：
+        取消请求是否被接受以及任务的当前状态；任务不存在时返回 404。
+    """
+    try:
+        return stop_training_job(job_id)
     except ValueError as exc:
         return JSONResponse(
             status_code=404,

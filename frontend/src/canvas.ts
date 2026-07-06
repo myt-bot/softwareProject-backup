@@ -3,13 +3,17 @@
 
 import { nextTick } from "vue";
 import {
+  activeCanvas,
   clamp,
+  createCanvas,
   getConnectionKey,
   getLayerConfig,
   isKnownLayerType,
+  nextCanvasName,
   resetValidationAfterGraphChange,
   showToast,
   store,
+  ui,
 } from "./store";
 import type { Connection, GraphNode, ModelGraph, Point } from "./types";
 
@@ -61,11 +65,7 @@ let dragCandidate: { nodeId: string; startClientX: number; startClientY: number 
 let dragOffsetX = 0;
 let dragOffsetY = 0;
 
-// 自由画布：视口平移量（transform translate，无边界限制）
-let panX = 0;
-let panY = 0;
-
-// 按住空白区域拖动画布
+// 按住空白区域拖动画布（视口平移量 panX/panY 属于各画布自身状态）
 let panState: {
   startClientX: number;
   startClientY: number;
@@ -87,15 +87,73 @@ export function registerCanvasElements(elements: {
 }
 
 
-// 把平移 + 缩放应用到内容层；点阵背景跟随平移，营造整体移动感
+// 把当前激活画布的平移 + 缩放应用到内容层；点阵背景跟随平移，营造整体移动感
 function applyTransform() {
   if (!nodesEl || !svgEl) return;
-  const transform = `translate(${panX}px, ${panY}px) scale(${store.zoom})`;
+  const canvas = activeCanvas();
+  const transform = `translate(${canvas.panX}px, ${canvas.panY}px) scale(${canvas.zoom})`;
   nodesEl.style.transform = transform;
   svgEl.style.transform = transform;
   if (gridEl) {
-    gridEl.style.backgroundPosition = `${panX}px ${panY}px`;
+    gridEl.style.backgroundPosition = `${canvas.panX}px ${canvas.panY}px`;
   }
+}
+
+
+// —————————————————————————————————————————————
+// 多画布管理（标签页）
+// —————————————————————————————————————————————
+
+export function addCanvas() {
+  store.canvasSeq += 1;
+  const canvas = createCanvas(store.canvasSeq, nextCanvasName());
+  store.canvases.push(canvas);
+  activateCanvas(canvas.id);
+  showToast("success", `已新建 ${canvas.name}。`);
+}
+
+
+export function switchCanvas(id: number) {
+  if (id === store.activeCanvasId) return;
+  activateCanvas(id);
+}
+
+
+export function closeCanvas(id: number) {
+  if (store.canvases.length <= 1) {
+    showToast("warning", "至少保留一个画布。");
+    return;
+  }
+
+  const index = store.canvases.findIndex(canvas => canvas.id === id);
+  const canvas = store.canvases[index];
+  if (!canvas) return;
+
+  const isTraining = ["pending", "running"].includes(canvas.trainingJob?.status || "");
+  if (canvas.nodes.length > 0 || isTraining) {
+    const message = isTraining
+      ? `${canvas.name} 有训练任务进行中，关闭后将不再跟踪其进度。确定关闭？`
+      : `确定关闭 ${canvas.name}？画布上的模型将被丢弃。`;
+    if (!window.confirm(message)) return;
+  }
+
+  store.canvases.splice(index, 1);
+  if (store.activeCanvasId === id) {
+    const neighbor = store.canvases[Math.min(index, store.canvases.length - 1)]!;
+    activateCanvas(neighbor.id);
+  }
+  showToast("success", `已关闭 ${canvas.name}。`);
+}
+
+
+function activateCanvas(id: number) {
+  // 切换前结束当前画布上的瞬时交互
+  cancelPendingConnection();
+  hideConnectionMenu();
+  hideNodeMenu();
+  store.activeCanvasId = id;
+  applyTransform();
+  void redrawAfterDomUpdate();
 }
 
 
@@ -114,15 +172,15 @@ export function initializeCanvasView() {
 
 
 function centerInitialNodesInViewport() {
-  if (store.hasCenteredInitialGraph) return;
+  if (activeCanvas().hasCenteredInitialGraph) return;
   if (!canvasEl || canvasEl.clientWidth === 0) return;
 
   const nodeWidth = 224;
   const centeredX = Math.max(40, (canvasEl.clientWidth - nodeWidth) / 2);
-  store.nodes.forEach(node => {
+  activeCanvas().nodes.forEach(node => {
     node.x = centeredX;
   });
-  store.hasCenteredInitialGraph = true;
+  activeCanvas().hasCenteredInitialGraph = true;
 }
 
 
@@ -139,7 +197,7 @@ export function drawLines() {
   const bridges: Bridge[] = [];
   const connectorsByKey: Record<string, Connector> = {};
 
-  store.connections.forEach(([from, to], connectionIndex) => {
+  activeCanvas().connections.forEach(([from, to], connectionIndex) => {
     const points = getConnectionPoints(from, to, connectionIndex);
     if (!points) return;
 
@@ -153,7 +211,7 @@ export function drawLines() {
     visiblePath.setAttribute("d", connector.d);
     visiblePath.setAttribute(
       "class",
-      `line-connector${store.selectedConnectionKey === connector.key ? " line-selected" : ""}`
+      `line-connector${activeCanvas().selectedConnectionKey === connector.key ? " line-selected" : ""}`
     );
     visiblePath.dataset.from = from;
     visiblePath.dataset.to = to;
@@ -196,7 +254,7 @@ export async function redrawAfterDomUpdate() {
 
 
 function getConnectionPoints(from: string, to: string, index = 0): ConnectorPoints | null {
-  if (!store.nodes.some(node => node.id === from) || !store.nodes.some(node => node.id === to)) {
+  if (!activeCanvas().nodes.some(node => node.id === from) || !activeCanvas().nodes.some(node => node.id === to)) {
     return null;
   }
 
@@ -227,7 +285,7 @@ function buildConnector(points: Partial<ConnectorPoints> & { start: Point; end: 
 
 function buildBezierSegments(points: Partial<ConnectorPoints> & { start: Point; end: Point }): BezierSegment[] {
   const { start, end } = points;
-  const controlPoint = points.key ? store.edgeControls[points.key] : null;
+  const controlPoint = points.key ? activeCanvas().edgeControls[points.key] : null;
 
   if (controlPoint) {
     return buildControlledBezierSegments(start, controlPoint, end);
@@ -484,13 +542,13 @@ function renderLineJumps(svg: SVGSVGElement, bridges: Bridge[]) {
 
 // 被选中连线的可拖拽控制点
 function renderEdgeControlPoints(svg: SVGSVGElement, connectorsByKey: Record<string, Connector>) {
-  const selectedKey = store.selectedConnectionKey;
-  if (!selectedKey || !store.edgeControls[selectedKey]) return;
+  const selectedKey = activeCanvas().selectedConnectionKey;
+  if (!selectedKey || !activeCanvas().edgeControls[selectedKey]) return;
 
   const connector = connectorsByKey[selectedKey];
   if (!connector) return;
 
-  const controlPoint = store.edgeControls[selectedKey];
+  const controlPoint = activeCanvas().edgeControls[selectedKey];
   const handle = document.createElementNS(SVG_NS, "circle");
   const halo = document.createElementNS(SVG_NS, "circle");
 
@@ -521,13 +579,13 @@ function renderEdgeControlPoints(svg: SVGSVGElement, connectorsByKey: Record<str
 
 export function selectConnection(from: string, to: string, connector: Connector | null = null) {
   const key = getConnectionKey(from, to);
-  store.selectedConnectionKey = key;
-  store.selectedNodeId = null;
+  activeCanvas().selectedConnectionKey = key;
+  activeCanvas().selectedNodeId = null;
 
-  if (!store.edgeControls[key]) {
+  if (!activeCanvas().edgeControls[key]) {
     const points = getConnectionPoints(from, to);
     if (points) {
-      store.edgeControls[key] = getDefaultEdgeControlPoint(connector || buildConnector(points));
+      activeCanvas().edgeControls[key] = getDefaultEdgeControlPoint(connector || buildConnector(points));
     }
   }
 
@@ -560,7 +618,7 @@ function startEdgeControlDrag(connectionKey: string) {
 function dragEdgeControlToPointer(clientX: number, clientY: number) {
   if (!store.draggingEdgeControlKey) return;
   const point = getCanvasPoint(clientX, clientY);
-  store.edgeControls[store.draggingEdgeControlKey] = {
+  activeCanvas().edgeControls[store.draggingEdgeControlKey] = {
     x: point.x,
     y: point.y,
   };
@@ -576,15 +634,15 @@ function finishEdgeControlDrag() {
 
 
 function removeEdgeControl(from: string, to: string) {
-  delete store.edgeControls[getConnectionKey(from, to)];
+  delete activeCanvas().edgeControls[getConnectionKey(from, to)];
 }
 
 
 function removeEdgeControlsForNode(nodeId: string) {
-  Object.keys(store.edgeControls).forEach(key => {
+  Object.keys(activeCanvas().edgeControls).forEach(key => {
     const [source, target] = key.split("->");
     if (source === nodeId || target === nodeId) {
-      delete store.edgeControls[key];
+      delete activeCanvas().edgeControls[key];
     }
   });
 }
@@ -595,7 +653,7 @@ function removeEdgeControlsForNode(nodeId: string) {
 // —————————————————————————————————————————————
 
 function getNodeRect(nodeId: string) {
-  const node = store.nodes.find(item => item.id === nodeId);
+  const node = activeCanvas().nodes.find(item => item.id === nodeId);
   if (!node) return null;
 
   const element = document.getElementById(`node-${nodeId}`);
@@ -614,7 +672,7 @@ function getNodeRect(nodeId: string) {
 
 
 function getNodeBottomCenter(nodeId: string): Point {
-  const node = store.nodes.find(item => item.id === nodeId);
+  const node = activeCanvas().nodes.find(item => item.id === nodeId);
   const rect = getNodeRect(nodeId);
   if (!node || !rect) {
     return { x: 0, y: 0 };
@@ -628,7 +686,7 @@ function getNodeBottomCenter(nodeId: string): Point {
 
 
 function getNodeTopCenter(nodeId: string): Point {
-  const node = store.nodes.find(item => item.id === nodeId);
+  const node = activeCanvas().nodes.find(item => item.id === nodeId);
   const rect = getNodeRect(nodeId);
   if (!node || !rect) {
     return { x: 0, y: 0 };
@@ -651,8 +709,8 @@ export function getCanvasPoint(clientX: number, clientY: number): Point {
   if (!canvasEl) return { x: 0, y: 0 };
   const rect = canvasEl.getBoundingClientRect();
   return {
-    x: (clientX - rect.left - panX) / store.zoom,
-    y: (clientY - rect.top - panY) / store.zoom,
+    x: (clientX - rect.left - activeCanvas().panX) / activeCanvas().zoom,
+    y: (clientY - rect.top - activeCanvas().panY) / activeCanvas().zoom,
   };
 }
 
@@ -665,7 +723,7 @@ export function handleNodeMouseDown(event: MouseEvent, nodeId: string) {
   if (event.button !== 0) return;
   if (store.isConnecting) return;
 
-  const node = store.nodes.find(item => item.id === nodeId);
+  const node = activeCanvas().nodes.find(item => item.id === nodeId);
   const point = getCanvasPoint(event.clientX, event.clientY);
   hideConnectionMenu();
   hideNodeMenu();
@@ -695,8 +753,8 @@ export function handleCanvasMouseDown(event: MouseEvent) {
   panState = {
     startClientX: event.clientX,
     startClientY: event.clientY,
-    startPanX: panX,
-    startPanY: panY,
+    startPanX: activeCanvas().panX,
+    startPanY: activeCanvas().panY,
     moved: false,
   };
 }
@@ -711,8 +769,9 @@ function dragCanvasToPointer(clientX: number, clientY: number) {
     panState.moved = true;
   }
   if (panState.moved) {
-    panX = panState.startPanX + deltaX;
-    panY = panState.startPanY + deltaY;
+    const canvas = activeCanvas();
+    canvas.panX = panState.startPanX + deltaX;
+    canvas.panY = panState.startPanY + deltaY;
     applyTransform();
   }
 }
@@ -722,8 +781,9 @@ function dragCanvasToPointer(clientX: number, clientY: number) {
 export function handleCanvasWheel(event: WheelEvent) {
   hideConnectionMenu();
   hideNodeMenu();
-  panX -= event.deltaX;
-  panY -= event.deltaY;
+  const canvas = activeCanvas();
+  canvas.panX -= event.deltaX;
+  canvas.panY -= event.deltaY;
   applyTransform();
 }
 
@@ -799,7 +859,7 @@ function startNodeDrag(nodeId: string) {
 
 
 function dragNodeToPointer(clientX: number, clientY: number) {
-  const node = store.nodes.find(item => item.id === store.draggingNodeId);
+  const node = activeCanvas().nodes.find(item => item.id === store.draggingNodeId);
   if (!node) return;
 
   // 自由画布：节点可以放置在任意坐标（含负坐标），不做边界限制
@@ -830,6 +890,8 @@ export function beginConnection(sourceId: string, clientX: number, clientY: numb
   store.connectSourceId = sourceId;
   store.suppressNextClick = false;
 
+  // 连线模式下收起参数面板，避免遮挡画布右侧与"退出连线"按钮
+  ui.inspectorCollapsed = true;
   document.body.classList.add("is-connecting");
   createPendingConnection();
   updatePendingConnection(clientX, clientY);
@@ -877,13 +939,13 @@ export function completeConnection(targetId: string) {
     return;
   }
 
-  const exists = store.connections.some(([source, target]) => source === sourceId && target === targetId);
+  const exists = activeCanvas().connections.some(([source, target]) => source === sourceId && target === targetId);
   if (exists) {
     showToast("warning", "这两个节点之间已经存在连线。");
     return;
   }
 
-  store.connections.push([sourceId, targetId]);
+  activeCanvas().connections.push([sourceId, targetId]);
   resetValidationAfterGraphChange();
   drawLines();
   showToast("success", "连线成功。");
@@ -945,11 +1007,11 @@ export function deleteMenuNode(event: Event) {
   const nodeId = store.menuNodeId;
   if (!nodeId) return;
 
-  store.nodes = store.nodes.filter(node => node.id !== nodeId);
-  store.connections = store.connections.filter(([source, target]) => source !== nodeId && target !== nodeId);
+  activeCanvas().nodes = activeCanvas().nodes.filter(node => node.id !== nodeId);
+  activeCanvas().connections = activeCanvas().connections.filter(([source, target]) => source !== nodeId && target !== nodeId);
   removeEdgeControlsForNode(nodeId);
-  if (store.selectedNodeId === nodeId) {
-    store.selectedNodeId = null;
+  if (activeCanvas().selectedNodeId === nodeId) {
+    activeCanvas().selectedNodeId = null;
   }
   if (store.connectSourceId === nodeId) {
     cancelPendingConnection();
@@ -967,10 +1029,10 @@ export function deleteMenuConnection(event: Event) {
   if (!store.menuConnection) return;
 
   const [from, to] = store.menuConnection;
-  store.connections = store.connections.filter(([source, target]) => !(source === from && target === to));
+  activeCanvas().connections = activeCanvas().connections.filter(([source, target]) => !(source === from && target === to));
   removeEdgeControl(from, to);
   store.menuConnection = null;
-  store.selectedConnectionKey = null;
+  activeCanvas().selectedConnectionKey = null;
   hideConnectionMenu();
   resetValidationAfterGraphChange();
   drawLines();
@@ -1023,8 +1085,8 @@ export function handleCanvasDrop(event: DragEvent) {
 
 export function handleZoomAction(actionId: "zoom-out" | "zoom-in") {
   const newZoom = actionId === "zoom-in"
-    ? Math.min(1.5, Number((store.zoom + 0.1).toFixed(2)))
-    : Math.max(0.6, Number((store.zoom - 0.1).toFixed(2)));
+    ? Math.min(1.5, Number((activeCanvas().zoom + 0.1).toFixed(2)))
+    : Math.max(0.6, Number((activeCanvas().zoom - 0.1).toFixed(2)));
 
   setZoomAroundViewportCenter(newZoom);
 }
@@ -1036,12 +1098,13 @@ function setZoomAroundViewportCenter(newZoom: number) {
 
   const centerX = canvasEl.clientWidth / 2;
   const centerY = canvasEl.clientHeight / 2;
-  const contentX = (centerX - panX) / store.zoom;
-  const contentY = (centerY - panY) / store.zoom;
+  const canvas = activeCanvas();
+  const contentX = (centerX - canvas.panX) / canvas.zoom;
+  const contentY = (centerY - canvas.panY) / canvas.zoom;
 
-  store.zoom = newZoom;
-  panX = centerX - contentX * newZoom;
-  panY = centerY - contentY * newZoom;
+  canvas.zoom = newZoom;
+  canvas.panX = centerX - contentX * newZoom;
+  canvas.panY = centerY - contentY * newZoom;
   applyTransform();
 }
 
@@ -1052,7 +1115,7 @@ function setZoomAroundViewportCenter(newZoom: number) {
 
 export function addNodeFromLayer(layerType: string, x: number, y: number) {
   const node = createNodeConfig(layerType, x, y);
-  store.nodes.push(node);
+  activeCanvas().nodes.push(node);
   void redrawAfterDomUpdate();
   selectNode(node.id);
   resetValidationAfterGraphChange();
@@ -1063,8 +1126,8 @@ export function addNodeFromLayer(layerType: string, x: number, y: number) {
 function createNodeConfig(layerType: string, x: number, y: number): GraphNode {
   const config = getLayerConfig(layerType);
   const type = config.type;
-  store.nodeCounters[type] = (store.nodeCounters[type] || 0) + 1;
-  const id = `${type.toLowerCase()}_${store.nodeCounters[type]}`;
+  activeCanvas().nodeCounters[type] = (activeCanvas().nodeCounters[type] || 0) + 1;
+  const id = `${type.toLowerCase()}_${activeCanvas().nodeCounters[type]}`;
   // 自由画布：新节点直接落在拖放位置，不做边界限制
   const canvasX = x;
   const canvasY = y;
@@ -1087,7 +1150,7 @@ function createNodeConfig(layerType: string, x: number, y: number): GraphNode {
 export function applyTemplateGraph(modelGraph: ModelGraph) {
   const centeredX = Math.max(40, ((canvasEl?.clientWidth || 0) - 224) / 2);
 
-  store.nodes = modelGraph.layers.map((layer, index) => {
+  activeCanvas().nodes = modelGraph.layers.map((layer, index) => {
     const config = getLayerConfig(layer.type);
     return {
       id: layer.id,
@@ -1102,11 +1165,11 @@ export function applyTemplateGraph(modelGraph: ModelGraph) {
       params: { ...(layer.params || {}) },
     };
   });
-  store.connections = modelGraph.connections.map(connection => [connection.source, connection.target] as Connection);
-  store.selectedNodeId = null;
-  store.edgeControls = {};
-  store.selectedConnectionKey = null;
-  store.hasCenteredInitialGraph = true;
+  activeCanvas().connections = modelGraph.connections.map(connection => [connection.source, connection.target] as Connection);
+  activeCanvas().selectedNodeId = null;
+  activeCanvas().edgeControls = {};
+  activeCanvas().selectedConnectionKey = null;
+  activeCanvas().hasCenteredInitialGraph = true;
   void redrawAfterDomUpdate().then(centerGraphHorizontally);
   resetValidationAfterGraphChange();
 }
@@ -1128,14 +1191,16 @@ function formatLayerNote(layer: { params?: Record<string, unknown> }) {
 // —————————————————————————————————————————————
 
 export function selectNode(nodeId: string) {
-  store.selectedNodeId = nodeId;
-  store.selectedConnectionKey = null;
+  activeCanvas().selectedNodeId = nodeId;
+  activeCanvas().selectedConnectionKey = null;
+  // 点击节点卡片时重新展开参数面板
+  ui.inspectorCollapsed = false;
 }
 
 
 export function deselectNode() {
-  store.selectedNodeId = null;
-  store.selectedConnectionKey = null;
+  activeCanvas().selectedNodeId = null;
+  activeCanvas().selectedConnectionKey = null;
 }
 
 
@@ -1145,33 +1210,35 @@ export function deselectNode() {
 
 // 将画布平移到节点处，使整个模型图在视口中居中（缩放级别保持不变）
 export function centerGraphInCanvas() {
-  if (!canvasEl || store.nodes.length === 0) return;
+  const canvas = activeCanvas();
+  if (!canvasEl || canvas.nodes.length === 0) return;
 
   const bounds = getGraphBounds();
   const graphCenterX = (bounds.left + bounds.right) / 2;
   const graphCenterY = (bounds.top + bounds.bottom) / 2;
 
-  panX = canvasEl.clientWidth / 2 - graphCenterX * store.zoom;
-  panY = canvasEl.clientHeight / 2 - graphCenterY * store.zoom;
+  canvas.panX = canvasEl.clientWidth / 2 - graphCenterX * canvas.zoom;
+  canvas.panY = canvasEl.clientHeight / 2 - graphCenterY * canvas.zoom;
   applyTransform();
 }
 
 
 // 初始加载 / 模板加载：水平居中并回到图的顶部（保持旧版首屏视角）
 function centerGraphHorizontally() {
-  if (!canvasEl || store.nodes.length === 0) return;
+  const canvas = activeCanvas();
+  if (!canvasEl || canvas.nodes.length === 0) return;
 
   const bounds = getGraphBounds();
   const graphCenterX = (bounds.left + bounds.right) / 2;
 
-  panX = canvasEl.clientWidth / 2 - graphCenterX * store.zoom;
-  panY = 0;
+  canvas.panX = canvasEl.clientWidth / 2 - graphCenterX * canvas.zoom;
+  canvas.panY = 0;
   applyTransform();
 }
 
 
 function getGraphBounds() {
-  return store.nodes.reduce(
+  return activeCanvas().nodes.reduce(
     (bounds, node) => ({
       left: Math.min(bounds.left, node.x),
       top: Math.min(bounds.top, node.y),

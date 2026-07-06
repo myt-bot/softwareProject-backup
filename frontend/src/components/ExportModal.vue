@@ -1,6 +1,10 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { closeExportModal, copyExportCode, downloadExportCode } from "../actions";
-import { store, ui } from "../store";
+import { activeCanvas, ui } from "../store";
+
+// 显示当前激活画布的导出结果（各画布的导出相互独立）
+const canvas = computed(() => activeCanvas());
 </script>
 
 <template>
@@ -40,7 +44,7 @@ import { store, ui } from "../store";
             <iconify-icon icon="mdi:content-copy"></iconify-icon>
             复制代码
           </button>
-          <pre id="export-code">{{ store.exportCodeDisplay }}</pre>
+          <pre id="export-code">{{ canvas.exportCodeDisplay }}</pre>
         </div>
       </div>
       <div class="modal-footer">

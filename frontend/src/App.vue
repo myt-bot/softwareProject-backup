@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted } from "vue";
 import { loadDevices, loadProjectTemplates } from "./actions";
 import { cancelPendingConnection, hideConnectionMenu, hideNodeMenu } from "./canvas";
-import { closeHelpModal, initializeBeginnerGuide } from "./store";
+import { closeHelpModal, initializeBeginnerGuide, ui } from "./store";
 import ActionBar from "./components/ActionBar.vue";
 import CanvasBoard from "./components/CanvasBoard.vue";
 import ContextMenus from "./components/ContextMenus.vue";
@@ -48,10 +48,18 @@ onBeforeUnmount(() => {
     <TopBar />
     <GuideStrip />
 
-    <div class="workspace">
+    <div class="workspace" :class="{ 'sidebar-collapsed': ui.sidebarCollapsed }">
       <LayerSidebar />
       <CanvasBoard />
       <InspectorPanel />
+      <!-- 左侧组件库收起/展开把手（贴在侧栏右缘，跟随收拢动画） -->
+      <button
+        class="sidebar-toggle"
+        :title="ui.sidebarCollapsed ? '展开组件库' : '收起组件库'"
+        @click="ui.sidebarCollapsed = !ui.sidebarCollapsed"
+      >
+        <iconify-icon :icon="ui.sidebarCollapsed ? 'mdi:chevron-right' : 'mdi:chevron-left'"></iconify-icon>
+      </button>
     </div>
 
     <ActionBar />

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 训练监控页（Training Monitor）
 // 作为一个全屏视图挂载在主 shell 之上：训练开始时打开，"返回继续修改"关闭回到搭建页。
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref, watchEffect } from "vue";
 import {
   activeSeries,
   computeResults,
@@ -9,12 +9,12 @@ import {
   handleBack,
   handleRerun,
   handleSimulateComplete,
+  handleStopTraining,
   MOCK,
   monitor,
   niceLossMax,
   numToStr,
   ticksFor,
-  toggleSeries,
   visibleCount,
 } from "../monitor";
 import TmChart from "./TmChart.vue";
@@ -35,25 +35,69 @@ const lossTicks = computed(() => ticksFor(lossMax.value));
 const totalEpochs = computed(() =>
   monitor.live ? (series.value.totalEpochs || monitor.hyperparams.epochs) : monitor.hyperparams.epochs
 );
-// 后端未提供 step 粒度，live 模式下 Step 显示占位。
 const stepText = computed(() =>
-  monitor.live ? "—" : `${monitor.currentStep}/${monitor.totalSteps}`
+  monitor.totalSteps > 0 ? `${monitor.currentStep}/${monitor.totalSteps}` : "—"
 );
-const etaText = computed(() =>
-  isRunning.value ? (monitor.live ? "—" : "00:45") : "00:00"
+
+// 轮次内进度（顶栏显眼位置）：current_epoch 为已完成轮数，进行中的是下一轮
+const displayEpoch = computed(() => Math.min(monitor.currentEpoch + 1, totalEpochs.value || 1));
+const epochPercent = computed(() =>
+  monitor.totalSteps > 0 ? Math.round((monitor.currentStep / monitor.totalSteps) * 100) : 0
 );
-const progressPercent = computed(() =>
+
+// 高亮"正在运行的层"：训练进行时按数据流动方向循环点亮 minimap 中的层
+const activeLayerIndex = ref(-1);
+let layerTimer: number | null = null;
+
+watchEffect(() => {
+  const running = monitor.visible && monitor.state === "running";
+  if (running && layerTimer === null) {
+    activeLayerIndex.value = 0;
+    layerTimer = window.setInterval(() => {
+      activeLayerIndex.value = (activeLayerIndex.value + 1) % Math.max(monitor.layers.length, 1);
+    }, 550);
+  } else if (!running && layerTimer !== null) {
+    clearInterval(layerTimer);
+    layerTimer = null;
+    activeLayerIndex.value = -1;
+  }
+});
+
+onBeforeUnmount(() => {
+  if (layerTimer !== null) clearInterval(layerTimer);
+});
+
+// 超参数用中文 + 英文名标注，对新手更友好
+const hpRows = computed(() => [
+  { label: "训练轮次 epochs", value: monitor.hyperparams.epochs },
+  { label: "批大小 batch size", value: monitor.hyperparams.batch_size },
+  { label: "学习率 learning rate", value: monitor.hyperparams.rate },
+  { label: "优化器 optimizer", value: monitor.hyperparams.optimizer },
+  { label: "损失函数 loss", value: monitor.hyperparams.loss_fn },
+  { label: "设备 device", value: monitor.hyperparams.device },
+]);
+
+// —— 进度总览（新手友好的主视觉区）——
+const overallPercent = computed(() =>
   Math.round((isRunning.value ? monitor.progress : 1) * 100)
 );
 
-const hpRows = computed(() => [
-  { label: "epochs", value: monitor.hyperparams.epochs },
-  { label: "batch size", value: monitor.hyperparams.batch_size },
-  { label: "learning rate", value: monitor.hyperparams.rate },
-  { label: "optimizer", value: monitor.hyperparams.optimizer },
-  { label: "loss", value: monitor.hyperparams.loss_fn },
-  { label: "device", value: monitor.hyperparams.device },
-]);
+const heroTitle = computed(() => {
+  if (monitor.error) return "训练失败";
+  if (isRunning.value) return `正在进行第 ${displayEpoch.value}/${totalEpochs.value} 轮训练`;
+  return "训练完成 🎉";
+});
+
+const heroSubtitle = computed(() => {
+  if (monitor.error) return monitor.error;
+  if (isRunning.value) {
+    return monitor.live && monitor.currentStep === 0 && monitor.currentEpoch === 0
+      ? "正在准备数据集并启动训练，稍等片刻..."
+      : "模型正在逐批学习训练数据：损失（loss）越来越低、准确率（accuracy）越来越高，说明学习有效。";
+  }
+  const final = computeResults();
+  return final ? `最终训练准确率 ${final.finalAcc}，详细表现见下方结果卡。` : "查看下方结果卡了解本次训练的表现。";
+});
 
 // 完成态的四张结果卡
 const results = computed(() => (isRunning.value ? null : computeResults()));
@@ -62,10 +106,10 @@ const resultCards = computed(() => {
   const val = (key: "finalAcc" | "bestVal" | "finalLoss" | "gap") =>
     results.value ? results.value[key] : null;
   return [
-    { label: "Final Accuracy", value: val("finalAcc"), hint: "最终训练准确率", highlight: true },
-    { label: "Best Val Accuracy", value: val("bestVal"), hint: "最佳验证准确率", highlight: false },
-    { label: "Final Loss", value: val("finalLoss"), hint: "最终验证损失", highlight: false },
-    { label: "Generalization Gap", value: val("gap"), hint: "train acc − val acc", highlight: false },
+    { label: "最终训练准确率 Final Accuracy", value: val("finalAcc"), hint: "最后一轮在训练集上的准确率", highlight: true },
+    { label: "最佳验证准确率 Best Val Accuracy", value: val("bestVal"), hint: "验证集上表现最好的一轮", highlight: false },
+    { label: "最终验证损失 Final Loss", value: val("finalLoss"), hint: "最后一轮在验证集上的损失", highlight: false },
+    { label: "泛化差距 Generalization Gap", value: val("gap"), hint: "训练准确率 − 验证准确率，过大提示过拟合", highlight: false },
   ];
 });
 
@@ -115,13 +159,27 @@ const logLines = computed(() => {
         <div class="tm-topbar-center">
           <span v-if="isRunning" class="tm-badge running"><span class="tm-dot"></span>Running</span>
           <span v-else class="tm-badge completed"><iconify-icon icon="mdi:check-circle"></iconify-icon>Completed</span>
+          <!-- 轮次内进度条：每个 batch 实时推进 -->
+          <div v-if="isRunning && monitor.live" class="tm-epoch-progress" title="当前轮次内的训练进度">
+            <span class="tm-ep-label">Epoch {{ displayEpoch }}/{{ totalEpochs }}</span>
+            <div class="tm-ep-track"><i :style="{ width: `${epochPercent}%` }"></i></div>
+            <span class="tm-ep-value">{{ epochPercent }}%</span>
+          </div>
         </div>
         <div class="tm-topbar-right">
-          <button class="secondary-button" id="tm-back" @click="handleBack">
-            <iconify-icon icon="mdi:pencil-outline"></iconify-icon>
-            返回继续修改 Back to Builder
+          <!-- 状态切换：训练中显示"停止训练"，已结束显示"重新训练" -->
+          <button
+            v-if="monitor.live && isRunning"
+            class="danger-button"
+            id="tm-stop"
+            :disabled="monitor.stopping"
+            @click="handleStopTraining"
+          >
+            <iconify-icon v-if="monitor.stopping" icon="mdi:loading" class="spin"></iconify-icon>
+            <iconify-icon v-else icon="mdi:stop-circle-outline"></iconify-icon>
+            {{ monitor.stopping ? "正在停止..." : "停止训练 Stop" }}
           </button>
-          <button class="primary-button" id="tm-rerun" @click="handleRerun">
+          <button v-else class="primary-button" id="tm-rerun" @click="handleRerun">
             <iconify-icon icon="mdi:restart"></iconify-icon>
             重新训练 Re-run
           </button>
@@ -134,7 +192,9 @@ const logLines = computed(() => {
             <h3>模型结构 Model Graph</h3>
             <div class="tm-minimap">
               <template v-for="(layer, index) in monitor.layers" :key="index">
-                <div :class="`tm-mini-node ${layer.color}`">{{ layer.type }}</div>
+                <div
+                  :class="[`tm-mini-node ${layer.color}`, { 'running-layer': index === activeLayerIndex }]"
+                >{{ layer.type }}</div>
                 <iconify-icon
                   v-if="index < monitor.layers.length - 1"
                   class="tm-mini-arrow"
@@ -155,31 +215,34 @@ const logLines = computed(() => {
               <div v-for="row in hpRows" :key="row.label" class="tm-hp-row"><span>{{ row.label }}</span><code>{{ row.value }}</code></div>
             </div>
           </section>
-
-          <section class="tm-card">
-            <h3>训练状态 Training Status</h3>
-            <div class="tm-status-rows">
-              <div class="tm-status-item">
-                <span>Epoch</span>
-                <strong>{{ monitor.currentEpoch }}/{{ totalEpochs }}</strong>
-              </div>
-              <div class="tm-status-item">
-                <span>Step</span>
-                <strong>{{ stepText }}</strong>
-              </div>
-              <div class="tm-status-item">
-                <span>ETA</span>
-                <strong>{{ etaText }}</strong>
-              </div>
-            </div>
-            <div class="tm-progress">
-              <div class="tm-progress-bar" :class="{ done: !isRunning }" :style="{ width: `${progressPercent}%` }"></div>
-            </div>
-            <p class="tm-progress-label">{{ isRunning ? `训练中 ${Math.round(monitor.progress * 100)}%` : "训练完成 100%" }}</p>
-          </section>
         </aside>
 
         <main class="tm-main">
+          <!-- 训练进度总览：状态一目了然，无需滚动 -->
+          <section class="tm-card tm-progress-hero" :class="{ done: !isRunning, failed: Boolean(monitor.error) }">
+            <div class="tm-hero-head">
+              <div class="tm-hero-icon">
+                <iconify-icon :icon="monitor.error ? 'mdi:alert-circle-outline' : isRunning ? 'mdi:run-fast' : 'mdi:flag-checkered'"></iconify-icon>
+              </div>
+              <div class="tm-hero-text">
+                <strong>{{ heroTitle }}</strong>
+                <span>{{ heroSubtitle }}</span>
+              </div>
+            </div>
+            <div v-if="isRunning" class="tm-hero-bars">
+              <div class="tm-hero-bar">
+                <span class="tm-hero-bar-label">本轮进度</span>
+                <div class="tm-ep-track big"><i :style="{ width: `${epochPercent}%` }"></i></div>
+                <span class="tm-hero-bar-value">{{ epochPercent }}%<template v-if="monitor.totalSteps > 0"> · 步 {{ stepText }}</template></span>
+              </div>
+              <div class="tm-hero-bar">
+                <span class="tm-hero-bar-label">整体进度</span>
+                <div class="tm-ep-track big overall"><i :style="{ width: `${overallPercent}%` }"></i></div>
+                <span class="tm-hero-bar-value">{{ overallPercent }}% · 第 {{ displayEpoch }}/{{ totalEpochs }} 轮</span>
+              </div>
+            </div>
+          </section>
+
           <div class="tm-charts">
             <TmChart
               chart-key="loss"
@@ -192,8 +255,6 @@ const logLines = computed(() => {
               :y-ticks="lossTicks"
               :total="chartTotal"
               :visible="visible"
-              :show-train-only="monitor.showTrainOnly"
-              @toggle="toggleSeries"
             />
             <TmChart
               chart-key="acc"
@@ -206,8 +267,6 @@ const logLines = computed(() => {
               :y-ticks="[0, 0.25, 0.5, 0.75, 1]"
               :total="chartTotal"
               :visible="visible"
-              :show-train-only="monitor.showTrainOnly"
-              @toggle="toggleSeries"
             />
           </div>
 

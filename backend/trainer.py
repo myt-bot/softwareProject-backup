@@ -142,16 +142,19 @@ def run_training_job(job_id):
         )
 
         metrics = []
+        job["total_steps"] = len(train_loader)
         for epoch in range(1, epochs + 1):
             if job["status"] == "cancelled":
                 break
 
+            job["current_step"] = 0
             train_metrics = train_one_epoch(
                 model=model,
                 train_loader=train_loader,
                 optimizer=optimizer,
                 loss_fn=loss_fn,
                 device=device,
+                progress_callback=lambda step: job.__setitem__("current_step", step),
             )
             eval_metrics = evaluate_model(
                 model=model,
@@ -168,6 +171,8 @@ def run_training_job(job_id):
             metrics.append(epoch_metrics)
 
             job["current_epoch"] = epoch
+            # 该轮已计入 current_epoch，清零 step 避免整体进度短暂超前
+            job["current_step"] = 0
             job["metrics"] = metrics
 
         if job["status"] == "cancelled":
@@ -381,7 +386,7 @@ def _build_dataset_transform(dataset_key):
     return torchvision.transforms.ToTensor()
 
 
-def train_one_epoch(model, train_loader, optimizer, loss_fn, device):
+def train_one_epoch(model, train_loader, optimizer, loss_fn, device, progress_callback=None):
     """训练一个 epoch，并返回该轮训练指标。
 
     参数：
@@ -390,6 +395,8 @@ def train_one_epoch(model, train_loader, optimizer, loss_fn, device):
         optimizer：优化器，用于根据梯度更新模型参数。
         loss_fn：损失函数，用于计算预测值与真实标签之间的误差。
         device：实际训练设备，例如 CPU 或 CUDA GPU。
+        progress_callback：可选回调，每完成一个 batch 以 step 序号（从 1 开始）
+            调用一次，用于向状态接口汇报轮次内进度。
 
     返回：
         后续应返回该 epoch 的平均 loss、accuracy 和样本数量等指标。
@@ -399,7 +406,7 @@ def train_one_epoch(model, train_loader, optimizer, loss_fn, device):
     correct = 0
     total = 0
 
-    for inputs, labels in train_loader:
+    for step, (inputs, labels) in enumerate(train_loader, start=1):
         inputs = inputs.to(device)
         labels = labels.to(device)
         optimizer.zero_grad()
@@ -416,6 +423,9 @@ def train_one_epoch(model, train_loader, optimizer, loss_fn, device):
         predicted = outputs.argmax(dim=1)
         correct += (predicted == labels).sum().item()
         total += batch_size
+
+        if progress_callback is not None:
+            progress_callback(step)
 
     if total == 0:
         return {
@@ -527,9 +537,13 @@ def get_job_status(job_id):
     job = TRANING_JOBS[job_id]
     total_epochs = job.get("total_epochs") or 0
     current_epoch = job.get("current_epoch", 0)
+    total_steps = job.get("total_steps") or 0
+    current_step = job.get("current_step", 0)
 
     if total_epochs > 0:
-        progress = round(current_epoch / total_epochs, 4)
+        # current_epoch 为已完成的轮数，再叠加进行中轮次的 step 进度
+        step_fraction = (current_step / total_steps) if total_steps > 0 else 0.0
+        progress = round(min(1.0, (current_epoch + step_fraction) / total_epochs), 4)
     else:
         progress = 0.0
 
@@ -538,6 +552,8 @@ def get_job_status(job_id):
         "status": job.get("status"),
         "current_epoch": current_epoch,
         "total_epochs": total_epochs,
+        "current_step": current_step,
+        "total_steps": total_steps,
         "progress": progress,
         "metrics": job.get("metrics", []),
         "error": job.get("error"),

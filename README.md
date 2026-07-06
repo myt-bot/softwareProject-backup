@@ -122,6 +122,7 @@ project/
         GuideStrip.vue      # 新手引导条
         LayerSidebar.vue    # 左侧组件库与模板
         CanvasBoard.vue     # 中间模型画布
+        CanvasTabs.vue      # 多画布标签页（新建/切换/关闭画布）
         InspectorPanel.vue  # 右侧参数面板
         ActionBar.vue       # 底部操作栏与训练任务面板
         ExportModal.vue     # 导出代码弹窗
@@ -245,6 +246,7 @@ project/
 | POST   | /train                    | 启动训练任务           | -    |
 | GET    | /train/{job_id}/status    | 查询训练状态           | -    |
 | GET    | /train/{job_id}/result    | 查询训练结果           | -    |
+| POST   | /train/{job_id}/cancel    | 停止进行中的训练任务   | -    |
 | POST   | /export/pytorch           | 导出 PyTorch 代码      | -    |
 | POST   | /auth/register            | 注册新用户（自动登录） | M1   |
 | POST   | /auth/login               | 用户登录（邮箱+密码）  | M1   |
@@ -497,6 +499,7 @@ project/
 | startTraining       | 根据选择的数据集、超参数和设备启动本地训练任务   |
 | fetchTrainingStatus | 查询训练任务的当前状态和进度                     |
 | fetchTrainingResult | 查询已完成训练任务的最终指标和产物信息           |
+| cancelTraining      | 请求停止进行中的训练任务                         |
 | exportPytorchCode   | 向后端请求根据模型图生成的 PyTorch 模型代码      |
 
 ## 增量开发计划

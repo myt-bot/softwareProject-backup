@@ -106,8 +106,7 @@ button:disabled {
 .brand,
 .dataset-pill,
 .top-actions,
-.footer-actions,
-.validation-summary {
+.footer-actions {
   display: flex;
   align-items: center;
 }
@@ -376,25 +375,6 @@ button:disabled {
   flex: 0 0 auto;
 }
 
-.guide-close {
-  flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--faint);
-  display: grid;
-  place-items: center;
-  font-size: 18px;
-  transition: 0.2s;
-}
-
-.guide-close:hover {
-  background: rgba(99, 102, 241, 0.12);
-  color: var(--indigo);
-}
-
 /* ============================================================
    工作区三栏布局
    ============================================================ */
@@ -402,8 +382,16 @@ button:disabled {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 288px minmax(420px, 1fr) 340px;
+  /* 右侧参数面板为悬浮层，不占网格列 */
+  grid-template-columns: 288px minmax(420px, 1fr);
+  transition: grid-template-columns 0.25s ease;
   overflow: hidden;
+  position: relative;
+}
+
+/* 收起左侧组件库 */
+.workspace.sidebar-collapsed {
+  grid-template-columns: 0px minmax(420px, 1fr);
 }
 
 .layer-sidebar,
@@ -411,7 +399,6 @@ button:disabled {
   background: var(--panel);
   border-color: var(--border);
   border-style: solid;
-  position: relative;
   z-index: 40;
 }
 
@@ -420,10 +407,99 @@ button:disabled {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
 }
 
+/* 收起动画期间内容保持原宽度（被裁剪而不是挤压换行）：
+   用固定宽度的内包裹层，子元素的 margin/padding 不受影响 */
+.sidebar-inner {
+  width: 287px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace.sidebar-collapsed .layer-sidebar {
+  border-right-width: 0;
+}
+
+/* 右侧参数面板：悬浮于画布之上，滑入滑出，不改变画布尺寸 */
 .inspector-panel {
   border-width: 0 0 0 1px;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 340px;
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
+  overflow: visible;
+}
+
+.inspector-panel.open {
+  transform: translateX(0);
+  box-shadow: -16px 0 36px -20px rgba(35, 48, 74, 0.3);
+}
+
+/* 参数面板收起把手：方形贴条，贴在面板左缘，与面板无缝衔接
+   （右侧无边框且盖住面板的左边框线，视觉上从面板上长出） */
+.inspector-collapse {
+  position: absolute;
+  left: -17px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 56px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  background: var(--panel);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  box-shadow: -6px 0 12px -8px rgba(35, 48, 74, 0.18);
+  z-index: 5;
+  transition: color 0.15s ease;
+}
+
+.inspector-collapse:hover {
+  color: var(--indigo);
+}
+
+/* 左侧组件库收起/展开把手：方形贴条，贴在侧栏右缘并跟随收拢动画
+   （左侧无边框且盖住侧栏的右边框线） */
+.sidebar-toggle {
+  position: absolute;
+  left: 287px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 56px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  background: var(--panel);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  box-shadow: 6px 0 12px -8px rgba(35, 48, 74, 0.18);
+  z-index: 41;
+  transition: left 0.25s ease, color 0.15s ease;
+}
+
+.workspace.sidebar-collapsed .sidebar-toggle {
+  left: 0;
+}
+
+.sidebar-toggle:hover {
+  color: var(--indigo);
 }
 
 .sidebar-header {
@@ -617,7 +693,138 @@ button:disabled {
 /* ============================================================
    画布
    ============================================================ */
+/* 画布区：顶部多画布标签页 + 画布主体 */
+.canvas-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 浏览器式标签页：矩形圆顶角，激活标签与下方画布连成一体 */
+.canvas-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px 10px 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.canvas-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 120px;
+  max-width: 220px;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  position: relative;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.canvas-tab iconify-icon {
+  font-size: 15px;
+  flex: 0 0 auto;
+}
+
+.canvas-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.canvas-tab:hover {
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--text);
+}
+
+.canvas-tab.active {
+  background: var(--canvas);
+  border-color: var(--border);
+  color: var(--indigo);
+  font-weight: 700;
+  /* 盖住标签栏底边，与画布无缝衔接 */
+  margin-bottom: -1px;
+  padding-bottom: 9px;
+}
+
+/* 重命名输入框（双击标签名触发） */
+.canvas-tab-rename {
+  width: 96px;
+  border: none;
+  border-bottom: 1px dashed var(--border-2);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  outline: none;
+}
+
+/* 训练进行中的标签指示点 */
+.canvas-tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #f59e0b;
+  animation: canvas-tab-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes canvas-tab-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.canvas-tab-close {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  border-radius: 6px;
+  color: var(--faint);
+  font-size: 13px;
+  transition: 0.15s;
+}
+
+.canvas-tab-close:hover {
+  background: rgba(79, 70, 229, 0.15);
+  color: var(--indigo);
+}
+
+.canvas-tab-add {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  margin: 0 4px 5px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 17px;
+  transition: all 0.15s ease;
+}
+
+.canvas-tab-add:hover {
+  color: var(--indigo);
+  background: rgba(255, 255, 255, 0.8);
+}
+
 .canvas {
+  flex: 1;
+  min-height: 0;
   position: relative;
   /* 自由画布：不使用滚动条，平移通过 transform 实现，无边界限制 */
   overflow: hidden;
@@ -930,8 +1137,7 @@ button:disabled {
   font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
-.zoom-control i,
-.footer-divider {
+.zoom-control i {
   width: 1px;
   height: 18px;
   background: var(--border-2);
@@ -1245,24 +1451,6 @@ button:disabled {
   gap: 16px;
 }
 
-.validation-summary {
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.validation-summary.success {
-  color: var(--emerald);
-}
-
-.validation-summary.error {
-  color: var(--rose);
-}
-
-.validation-summary.warning {
-  color: var(--amber);
-}
-
 .training-job-panel {
   width: 360px;
   min-height: 48px;
@@ -1370,12 +1558,43 @@ button:disabled {
   gap: 10px;
 }
 
+/* 训练轮次输入 */
+.epochs-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.epochs-field input {
+  width: 64px;
+  padding: 8px 6px 8px 10px;
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.epochs-field input:focus {
+  outline: none;
+  border-color: var(--indigo);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+}
+
 /* ============================================================
    按钮
    ============================================================ */
 .secondary-button,
 .primary-button,
 .success-button,
+.danger-button,
 .text-button,
 .copy-button {
   min-height: 38px;
@@ -1413,6 +1632,18 @@ button:disabled {
   background: linear-gradient(135deg, #5558ea, #4338ca);
   transform: translateY(-1px);
   box-shadow: 0 6px 16px rgba(79, 70, 229, 0.4);
+}
+
+.danger-button {
+  border: 0;
+  background: linear-gradient(135deg, #f43f5e, #e11d48);
+  box-shadow: 0 4px 12px rgba(225, 29, 72, 0.3);
+}
+
+.danger-button:hover {
+  background: linear-gradient(135deg, #e93553, #be123c);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(225, 29, 72, 0.4);
 }
 
 .success-button {
@@ -1846,6 +2077,131 @@ button:disabled {
 .tm-dot { width: 8px; height: 8px; border-radius: 999px; background: currentColor; animation: pulse-dot 1.4s ease-in-out infinite; }
 @keyframes pulse-dot { 0%, 100% { opacity: 0.45; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.1); } }
 
+/* 顶栏轮次内进度条（每个 batch 实时推进，无需滚动即可看到） */
+.tm-topbar-center { display: flex; align-items: center; justify-content: center; gap: 14px; }
+
+.tm-epoch-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tm-ep-track {
+  width: 200px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.tm-ep-track i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6366f1, #22d3ee);
+  transition: width 0.4s ease;
+}
+
+.tm-ep-value {
+  min-width: 36px;
+  color: var(--indigo);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+/* 训练进度总览（新手友好主视觉区） */
+.tm-progress-hero {
+  background: linear-gradient(120deg, #eef0ff 0%, #f4f8ff 60%, #f0fdfa 100%);
+  border-color: #dfe3fc;
+}
+
+.tm-progress-hero.done {
+  background: linear-gradient(120deg, #ecfdf5 0%, #f2fbff 100%);
+  border-color: #bbe9d5;
+}
+
+.tm-progress-hero.failed {
+  background: linear-gradient(120deg, #fff1f2 0%, #fff7f7 100%);
+  border-color: #fecdd3;
+}
+
+.tm-hero-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.tm-hero-icon {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  color: var(--indigo);
+  box-shadow: var(--shadow-sm);
+}
+
+.tm-progress-hero.done .tm-hero-icon { color: var(--emerald); }
+.tm-progress-hero.failed .tm-hero-icon { color: var(--rose); }
+
+.tm-hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.tm-hero-text strong {
+  font-size: 16px;
+  color: var(--text);
+}
+
+.tm-hero-text span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tm-hero-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.tm-hero-bar {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.tm-ep-track.big {
+  width: auto;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.tm-ep-track.overall i {
+  background: linear-gradient(90deg, #10b981, #22d3ee);
+}
+
+.tm-hero-bar-value {
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: nowrap;
+}
+
 .tm-body { min-height: 0; display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 16px; padding: 16px; overflow: hidden; }
 .tm-sidebar, .tm-main { min-height: 0; overflow-y: auto; }
 .tm-sidebar { display: grid; align-content: start; gap: 12px; }
@@ -1861,7 +2217,22 @@ button:disabled {
 .tm-card h3, .tm-logs h3 { margin: 0; font-size: 13px; font-weight: 700; }
 
 .tm-minimap { display: grid; justify-items: center; gap: 4px; margin-top: 16px; }
-.tm-mini-node { width: 140px; border: 1px solid var(--border-2); border-radius: 8px; padding: 7px 10px; text-align: center; font-size: 12px; font-weight: 800; background: var(--panel-2); }
+.tm-mini-node { width: 140px; border: 1px solid var(--border-2); border-radius: 8px; padding: 7px 10px; text-align: center; font-size: 12px; font-weight: 800; background: var(--panel-2); transition: box-shadow 0.2s ease, transform 0.2s ease; }
+
+/* 训练进行中：按数据流动方向依次高亮闪烁当前层 */
+.tm-mini-node.running-layer {
+  animation: tm-layer-pulse 0.55s ease-in-out infinite;
+  transform: scale(1.04);
+}
+
+@keyframes tm-layer-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25), 0 0 10px rgba(99, 102, 241, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.5), 0 0 18px rgba(99, 102, 241, 0.6);
+  }
+}
 .tm-mini-node.emerald { color: #047857; border-color: #a7f3d0; background: #ecfdf5; }
 .tm-mini-node.rose { color: #be123c; border-color: #fecdd3; background: #fff1f2; }
 .tm-mini-node.blue { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
@@ -1904,9 +2275,12 @@ button:disabled {
 .tm-grid { stroke: #e4e9f4; stroke-width: 1; }
 .tm-axis-label { fill: var(--faint); font-size: 11px; }
 .tm-placeholder { fill: rgba(37, 99, 235, 0.03); }
+/* 曲线只描边不填充（fill 会把折线下方渲染成面积） */
 .tm-series { fill: none; stroke-width: 3; }
-.tm-series.train, .tm-point.train { stroke: #2563eb; fill: #2563eb; }
-.tm-series.val, .tm-point.val { stroke: #ea580c; fill: #ea580c; }
+.tm-series.train { stroke: #2563eb; }
+.tm-series.val { stroke: #ea580c; }
+.tm-point.train { stroke: #2563eb; fill: #2563eb; }
+.tm-point.val { stroke: #ea580c; fill: #ea580c; }
 .tm-guide { stroke: var(--border-2); stroke-dasharray: 4 4; }
 .tm-tooltip { position: absolute; top: 16px; min-width: 120px; transform: translateX(-50%); border: 1px solid var(--border); border-radius: 10px; background: var(--panel); padding: 10px; font-size: 12px; pointer-events: none; box-shadow: var(--shadow-lg); }
 .tm-tt-title { margin-bottom: 6px; color: var(--text); font-weight: 800; }
@@ -1936,7 +2310,12 @@ button:disabled {
 }
 
 @media (max-width: 1100px) {
-  .workspace { grid-template-columns: 240px minmax(360px, 1fr) 300px; }
+  .workspace { grid-template-columns: 240px minmax(360px, 1fr); }
+  .workspace.sidebar-collapsed { grid-template-columns: 0px minmax(360px, 1fr); }
+  .sidebar-inner { width: 239px; }
+  .sidebar-toggle { left: 239px; }
+  .workspace.sidebar-collapsed .sidebar-toggle { left: 0; }
+  .inspector-panel { width: 300px; }
   .dataset-pill { display: none; }
   .training-job-panel { width: 280px; }
   .guide-strip { display: none; }

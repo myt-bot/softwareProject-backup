@@ -17,7 +17,6 @@ import type {
 } from "./types";
 
 export const GUIDE_VISITED_KEY = "model-workshop-visited";
-export const GUIDE_STRIP_HIDDEN_KEY = "model-workshop-guide-hidden";
 
 export const datasetOptions: Record<string, { shapeLabel: string }> = {
   MNIST: { shapeLabel: "(1x28x28)" },
@@ -159,31 +158,80 @@ const initialConnections: Connection[] = [
 export type ValidationStatus = "unvalidated" | "passing" | "failed";
 export type NodeBadgeState = "none" | "passed" | "pending";
 
-export interface ValidationSummary {
-  visible: boolean;
-  kind: "success" | "error" | "warning";
-  icon: string;
-  text: string;
+// 一个独立画布：模型图、选中态、校验态、训练任务、导出结果、视口都相互隔离，
+// 使各画布可以并行进行结构检查 / 保存 / 导出 / 训练。
+// 异步操作在发起时捕获画布引用，完成时把结果写回原画布（即使用户已切换标签页）。
+export interface WorkCanvas {
+  id: number;
+  name: string;
+  // 模型图
+  nodes: GraphNode[];
+  connections: Connection[];
+  edgeControls: Record<string, Point>;
+  nodeCounters: Record<string, number>;
+  // 选中态
+  selectedNodeId: string | null;
+  selectedConnectionKey: string | null;
+  // 结构校验（结果通过 toast 弹窗提示）
+  validationStatus: ValidationStatus;
+  nodeBadge: NodeBadgeState;
+  inFeatures: number;
+  validating: boolean;
+  // 训练任务
+  epochs: number;
+  trainStarting: boolean;
+  trainingJob: TrainingJob | null;
+  jobId: string | null;
+  // 代码导出
+  lastExportCode: string;
+  exportCodeDisplay: string;
+  // 视口
+  zoom: number;
+  panX: number;
+  panY: number;
+  hasCenteredInitialGraph: boolean;
+}
+
+export function createCanvas(
+  id: number,
+  name: string,
+  nodes: GraphNode[] = [],
+  connections: Connection[] = []
+): WorkCanvas {
+  return {
+    id,
+    name,
+    nodes,
+    connections,
+    edgeControls: {},
+    nodeCounters: {},
+    selectedNodeId: null,
+    selectedConnectionKey: null,
+    validationStatus: "unvalidated",
+    nodeBadge: "none",
+    inFeatures: 1024,
+    validating: false,
+    epochs: 1,
+    trainStarting: false,
+    trainingJob: null,
+    jobId: null,
+    lastExportCode: "",
+    exportCodeDisplay: "点击“导出代码”后会从后端生成 PyTorch 代码。",
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    // 新建的空画布无需初始居中；带初始示例图的画布需要
+    hasCenteredInitialGraph: nodes.length === 0,
+  };
 }
 
 export const store = reactive({
   dataset: "MNIST",
-  nodes: initialNodes as GraphNode[],
-  connections: initialConnections as Connection[],
-  selectedNodeId: null as string | null,
-  validationStatus: "unvalidated" as ValidationStatus,
-  nodeBadge: "none" as NodeBadgeState,
-  validationSummary: {
-    visible: false,
-    kind: "warning",
-    icon: "mdi:alert-circle",
-    text: "尚未检查",
-  } as ValidationSummary,
-  inFeatures: 1024,
-  jobId: null as string | null,
-  lastExportCode: "",
-  exportCodeDisplay: "点击“导出代码”后会从后端生成 PyTorch 代码。",
-  trainingJob: null as TrainingJob | null,
+  // 多画布：标签页切换，至少保留一个
+  canvases: [createCanvas(1, "画布 1", initialNodes, initialConnections)] as WorkCanvas[],
+  activeCanvasId: 1,
+  canvasSeq: 1,
+  // 以下为全局交互状态（只作用于当前激活画布的瞬时操作）
   isConnecting: false,
   connectSourceId: null as string | null,
   connectTargetId: null as string | null,
@@ -191,21 +239,32 @@ export const store = reactive({
   menuNodeId: null as string | null,
   connectionMenu: { visible: false, x: 0, y: 0 },
   nodeMenu: { visible: false, x: 0, y: 0 },
-  selectedConnectionKey: null as string | null,
-  edgeControls: {} as Record<string, Point>,
-  nodeCounters: {} as Record<string, number>,
-  zoom: 1,
-  hasCenteredInitialGraph: false,
   suppressNextClick: false,
   draggingNodeId: null as string | null,
   draggingEdgeControlKey: null as string | null,
 });
 
-// UI 开关（弹窗、引导条）
+export function activeCanvas(): WorkCanvas {
+  return store.canvases.find(canvas => canvas.id === store.activeCanvasId) ?? store.canvases[0]!;
+}
+
+// 新画布名称取最小未占用编号：关闭"画布 2"后再新建，名称仍为"画布 2"。
+// （内部 id 由 canvasSeq 单调递增保证唯一，与显示名称无关）
+export function nextCanvasName(): string {
+  const names = new Set(store.canvases.map(canvas => canvas.name));
+  let n = 1;
+  while (names.has(`画布 ${n}`)) n += 1;
+  return `画布 ${n}`;
+}
+
+// UI 开关（弹窗、面板收起状态）
 export const ui = reactive({
   helpModalOpen: false,
-  guideStripHidden: false,
   exportModalOpen: false,
+  // 左侧组件库收起
+  sidebarCollapsed: false,
+  // 右侧参数面板被用户手动收起（点击节点卡片时自动重新展开）
+  inspectorCollapsed: false,
 });
 
 
@@ -236,9 +295,6 @@ export function showToast(type: ToastType, message: string) {
 
 export function initializeBeginnerGuide() {
   try {
-    if (localStorage.getItem(GUIDE_STRIP_HIDDEN_KEY)) {
-      ui.guideStripHidden = true;
-    }
     // 第一次访问时自动打开新手指南
     if (!localStorage.getItem(GUIDE_VISITED_KEY)) {
       ui.helpModalOpen = true;
@@ -256,15 +312,6 @@ export function closeHelpModal() {
   ui.helpModalOpen = false;
   try {
     localStorage.setItem(GUIDE_VISITED_KEY, "1");
-  } catch {
-    // ignore
-  }
-}
-
-export function dismissGuideStrip() {
-  ui.guideStripHidden = true;
-  try {
-    localStorage.setItem(GUIDE_STRIP_HIDDEN_KEY, "1");
   } catch {
     // ignore
   }
@@ -419,10 +466,9 @@ export function getLayerConfig(layerType: string): LayerConfig {
 }
 
 
-export function resetValidationAfterGraphChange() {
-  store.validationStatus = "unvalidated";
-  store.nodeBadge = "none";
-  store.validationSummary.visible = false;
+export function resetValidationAfterGraphChange(canvas: WorkCanvas = activeCanvas()) {
+  canvas.validationStatus = "unvalidated";
+  canvas.nodeBadge = "none";
 }
 
 
@@ -450,7 +496,8 @@ export function updateNodeDisplay(node: GraphNode) {
 
 
 export function updateNodeParam(nodeId: string, key: string, value: unknown) {
-  const node = store.nodes.find(item => item.id === nodeId);
+  const canvas = activeCanvas();
+  const node = canvas.nodes.find(item => item.id === nodeId);
   if (!node) return;
 
   node.params = {
@@ -459,12 +506,12 @@ export function updateNodeParam(nodeId: string, key: string, value: unknown) {
   };
 
   updateNodeDisplay(node);
-  resetValidationAfterGraphChange();
+  resetValidationAfterGraphChange(canvas);
 }
 
 
 // 校验通过后为初始示例图的节点填充尺寸提示
-export function updateShapeHints() {
+export function updateShapeHints(canvas: WorkCanvas = activeCanvas()) {
   const hints: Record<string, string> = {
     conv: "26x26x16",
     pool: "13x13x16",
@@ -474,7 +521,7 @@ export function updateShapeHints() {
   };
 
   Object.entries(hints).forEach(([id, value]) => {
-    const node = store.nodes.find(item => item.id === id);
+    const node = canvas.nodes.find(item => item.id === id);
     if (node) {
       node.hint = value;
     }
@@ -520,8 +567,8 @@ function getExportParams(
   return params;
 }
 
-function buildBackendModelGraph() {
-  const addNodeIds = new Set(store.nodes.filter(node => node.type === "Add").map(node => node.id));
+function buildBackendModelGraph(canvas: WorkCanvas) {
+  const addNodeIds = new Set(canvas.nodes.filter(node => node.type === "Add").map(node => node.id));
   const addTargetIds = new Set<string>();
   const exportConnections: ModelGraphConnection[] = [];
   const seenConnections = new Set<string>();
@@ -536,18 +583,18 @@ function buildBackendModelGraph() {
     exportConnections.push({ source, target });
   }
 
-  store.connections.forEach(([source, target]) => {
+  canvas.connections.forEach(([source, target]) => {
     if (!addNodeIds.has(source) && !addNodeIds.has(target)) {
       addExportConnection(source, target);
     }
   });
 
   addNodeIds.forEach(addNodeId => {
-    const sources = store.connections
+    const sources = canvas.connections
       .filter(([, target]) => target === addNodeId)
       .map(([source]) => source)
       .filter(source => !addNodeIds.has(source));
-    const targets = store.connections
+    const targets = canvas.connections
       .filter(([source]) => source === addNodeId)
       .map(([, target]) => target)
       .filter(target => !addNodeIds.has(target));
@@ -564,11 +611,11 @@ function buildBackendModelGraph() {
   };
 }
 
-export function getCurrentModelGraph(): ModelGraph {
-  const backendGraph = buildBackendModelGraph();
+export function getCurrentModelGraph(canvas: WorkCanvas = activeCanvas()): ModelGraph {
+  const backendGraph = buildBackendModelGraph(canvas);
 
   return {
-    layers: store.nodes
+    layers: canvas.nodes
       .filter(node => node.type !== "Add")
       .map(node => ({
         id: node.id,
@@ -581,10 +628,11 @@ export function getCurrentModelGraph(): ModelGraph {
 }
 
 
-export function getTrainConfig(): TrainConfig {
+export function getTrainConfig(canvas: WorkCanvas = activeCanvas()): TrainConfig {
   return {
     dataset_name: store.dataset,
-    epochs: 1,
+    // 训练轮次由用户在底部操作栏按画布设置
+    epochs: canvas.epochs,
     batch_size: 64,
     rate: 0.001,
     device: "cpu",
@@ -594,8 +642,8 @@ export function getTrainConfig(): TrainConfig {
 }
 
 
-export function getTrainingLayers(): MonitorLayer[] {
-  return store.nodes
+export function getTrainingLayers(canvas: WorkCanvas = activeCanvas()): MonitorLayer[] {
+  return canvas.nodes
     .filter(node => node.type !== "Add")
     .map(node => ({
       type: node.badge || node.type,
@@ -617,10 +665,11 @@ export function getTrainingStatusLabel(status: string | undefined) {
 }
 
 
-export function setTrainingJob(job: TrainingJob) {
-  store.trainingJob = {
-    ...(store.trainingJob || {}),
+// 把训练任务状态写回它所属的画布（并行训练时各画布互不影响）
+export function setTrainingJob(canvas: WorkCanvas, job: TrainingJob) {
+  canvas.trainingJob = {
+    ...(canvas.trainingJob || {}),
     ...job,
   };
-  store.jobId = store.trainingJob.job_id || store.jobId;
+  canvas.jobId = canvas.trainingJob.job_id || canvas.jobId;
 }

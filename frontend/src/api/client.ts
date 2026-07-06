@@ -1,4 +1,5 @@
 import type {
+  CancelTrainingResponse,
   CreateProjectPayload,
   CreateProjectResponse,
   DevicesResponse,
@@ -151,6 +152,13 @@ export async function fetchTrainingStatus(jobId: string): Promise<TrainingStatus
 
 export async function fetchTrainingResult(jobId: string): Promise<TrainingResult> {
   return request(`/train/${encodeURIComponent(jobId)}/result`);
+}
+
+
+export async function cancelTraining(jobId: string): Promise<CancelTrainingResponse> {
+  return request(`/train/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST",
+  });
 }
 
 
