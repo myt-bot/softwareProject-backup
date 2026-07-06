@@ -16,6 +16,7 @@ import {
   startTraining,
   validateModel,
 } from "./api/client";
+import { auth, isLoggedIn } from "./auth";
 import { applyTemplateGraph } from "./canvas";
 import { openTrainingMonitor } from "./monitor";
 import {
@@ -27,6 +28,7 @@ import {
   setTrainingJob,
   showToast,
   store,
+  templateLibrary,
   ui,
   updateShapeHints,
 } from "./store";
@@ -58,8 +60,14 @@ function canvasExists(canvas: WorkCanvas) {
 export async function loadDevices() {
   try {
     const devices = await fetchDevices();
+    // 同步设备可用性到顶栏设备选择器
+    store.cudaAvailable = Boolean(devices?.cuda_available);
     if (devices?.default_device) {
+      store.device = devices.default_device;
       showToast("success", `后端设备已连接: ${devices.default_device}`);
+    }
+    if (!store.cudaAvailable && store.device !== "cpu") {
+      store.device = "cpu";
     }
   } catch (error) {
     showBackendError(error, "设备接口暂未实现。");
@@ -70,6 +78,9 @@ export async function loadDevices() {
 export async function loadProjectTemplates() {
   try {
     const result = await fetchProjectTemplates();
+    if (result?.data?.length) {
+      templateLibrary.items = result.data;
+    }
     if (result?.count) {
       showToast("info", `已连接模板库: ${result.count} 个模板`);
     }
@@ -79,9 +90,9 @@ export async function loadProjectTemplates() {
 }
 
 
-export async function loadTemplateToCanvas(templateName: string) {
+export async function loadTemplateToCanvas(templateKey: string, templateName?: string) {
   try {
-    const result = await fetchProjectTemplate(templateName);
+    const result = await fetchProjectTemplate(templateKey);
     const graph = result?.model;
     if (!graph) {
       showToast("error", "模板数据为空，无法加载。");
@@ -89,7 +100,8 @@ export async function loadTemplateToCanvas(templateName: string) {
     }
 
     applyTemplateGraph(graph);
-    showToast("success", `已加载模板: ${templateName}`);
+    ui.templateGalleryOpen = false;
+    showToast("success", `已加载模板: ${templateName || templateKey}`);
   } catch (error) {
     showBackendError(error, "模板加载接口暂未实现。");
   }
@@ -145,13 +157,13 @@ function applyValidationResult(canvas: WorkCanvas, result: ValidationResult) {
 export async function handleSaveProject() {
   const canvas = activeCanvas();
 
-  const userId = window.prompt("请输入 user_id，用于保存到 /projects：");
-  if (!userId) {
-    showToast("warning", "已取消保存。");
+  // 保存接口需要登录（正常情况下主界面只在登录后可见，此处为兜底）
+  if (!isLoggedIn() || !auth.user?.id) {
+    showToast("warning", "登录状态已失效，请重新登录。");
     return;
   }
 
-  const name = window.prompt("请输入项目名称：", "Untitled Model");
+  const name = window.prompt("请输入项目名称：", canvas.name || "Untitled Model");
   if (!name) {
     showToast("warning", "已取消保存。");
     return;
@@ -159,14 +171,14 @@ export async function handleSaveProject() {
 
   try {
     const result = await createProject({
-      user_id: userId,
+      user_id: auth.user.id,
       name,
       model_graph: getCurrentModelGraph(canvas),
       description: "Created from visual model editor",
     });
     showToast("success", `项目已保存: ${result?.data?.name || name}`);
   } catch (error) {
-    showBackendError(error, "保存项目失败，请确认用户已创建。");
+    showBackendError(error, "保存项目失败。");
   }
 }
 

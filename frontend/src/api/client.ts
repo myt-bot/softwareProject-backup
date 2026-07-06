@@ -4,13 +4,17 @@ import type {
   CreateProjectResponse,
   DevicesResponse,
   ExportCodeResponse,
+  LoginPayload,
   ModelGraph,
+  RegisterPayload,
   TemplateResponse,
   TemplatesResponse,
+  TokenResponse,
   TrainConfig,
   TrainingResult,
   TrainingStatus,
   TrainStartResponse,
+  AuthUser,
   ValidationResult,
 } from "../types";
 
@@ -40,6 +44,14 @@ export class BackendUnavailableError extends Error {
 }
 
 
+// 登录后由 auth 模块注入的 JWT，自动附加到所有请求头
+let authToken: string | null = null;
+
+export function setAuthToken(token: string | null) {
+  authToken = token;
+}
+
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
@@ -47,6 +59,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       ...options,
       headers: {
         "Content-Type": "application/json",
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         ...(options.headers || {}),
       },
       signal: options.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -68,8 +81,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!response.ok) {
-    const detail = (data as { detail?: unknown } | null)?.detail ?? data ?? response.statusText;
-    throw new Error(`后端请求失败 (${response.status}): ${detail}`);
+    const body = data as { detail?: unknown; message?: unknown } | null;
+    // FastAPI 校验错误在 detail，业务错误在 message
+    const detail = body?.detail ?? body?.message ?? data ?? response.statusText;
+    const message = typeof detail === "string" ? detail : JSON.stringify(detail);
+    throw new Error(`后端请求失败 (${response.status}): ${message}`);
   }
 
   if (data === null || data === undefined || data === "") {
@@ -92,6 +108,31 @@ export function isBackendUnavailable(error: unknown): boolean {
 
 export async function fetchHealth(): Promise<unknown> {
   return request("/health");
+}
+
+
+// —————————————————————————————————————————————
+// 认证（M1 模块）
+// —————————————————————————————————————————————
+
+export async function registerUser(payload: RegisterPayload): Promise<TokenResponse> {
+  return request("/auth/register", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+
+export async function loginUser(payload: LoginPayload): Promise<TokenResponse> {
+  return request("/auth/login", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+
+export async function fetchCurrentUser(): Promise<{ status?: string; data?: AuthUser }> {
+  return request("/auth/me");
 }
 
 

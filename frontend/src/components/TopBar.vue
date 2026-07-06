@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { datasetChoices, datasetOptions, openHelpModal, store } from "../store";
+import { onBeforeUnmount, onMounted, ref } from "vue";
+import { auth, handleLogout } from "../auth";
+import { datasetChoices, openHelpModal, store, ui } from "../store";
+import DeviceSelector from "./DeviceSelector.vue";
 
 const dropdownOpen = ref(false);
 const dropdownRef = ref<HTMLElement | null>(null);
-
-const shapeLabel = computed(() => datasetOptions[store.dataset]?.shapeLabel || "");
 
 function toggleDropdown(event: MouseEvent) {
   event.stopPropagation();
@@ -38,6 +38,7 @@ onBeforeUnmount(() => document.removeEventListener("click", handleDocumentClick)
       <h1>模型工坊<span>深度学习可视化搭建平台</span></h1>
     </div>
 
+    <div class="topbar-middle">
     <div class="dataset-pill">
       <span class="dataset-label">训练数据集</span>
 
@@ -67,9 +68,11 @@ onBeforeUnmount(() => document.removeEventListener("click", handleDocumentClick)
             @click="selectDataset($event, choice.value)"
           >{{ choice.label }}</div>
         </div>
-
-        <span id="dataset-shape" class="shape-badge">{{ shapeLabel }}</span>
       </div>
+    </div>
+
+    <!-- 训练设备选择（CPU / GPU） -->
+    <DeviceSelector />
     </div>
 
     <div class="top-actions">
@@ -77,7 +80,20 @@ onBeforeUnmount(() => document.removeEventListener("click", handleDocumentClick)
         <iconify-icon icon="mdi:school-outline"></iconify-icon>
         新手指南
       </button>
-      <div class="avatar"></div>
+
+      <!-- 存储位置设置（数据集下载 / 结果保存目录） -->
+      <button class="icon-button" id="btn-storage-settings" title="存储位置设置" @click="ui.storageSettingsOpen = true">
+        <iconify-icon icon="mdi:folder-cog-outline"></iconify-icon>
+      </button>
+
+      <!-- 当前登录用户（退出后回到登录页） -->
+      <div class="user-chip" id="user-chip" :title="auth.user?.email || ''">
+        <div class="avatar"></div>
+        <span class="user-name">{{ auth.user?.username || auth.user?.email }}</span>
+        <button class="icon-button" id="btn-logout" title="退出登录" @click="handleLogout">
+          <iconify-icon icon="mdi:logout-variant"></iconify-icon>
+        </button>
+      </div>
     </div>
   </header>
 </template>

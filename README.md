@@ -189,6 +189,7 @@ project/
       main.ts           # 应用入口，挂载 Vue 根组件
       App.vue           # 根组件，组织页面整体布局
       store.ts          # 全局响应式状态与纯数据逻辑
+      auth.ts           # 登录状态管理（token 持久化与会话恢复）
       canvas.ts         # 画布交互引擎（拖拽/连线/SVG 绘制/缩放）
       actions.ts        # 后端交互动作（校验/保存/导出/训练）
       monitor.ts        # 训练监控页状态机与轮询
@@ -197,6 +198,8 @@ project/
         client.ts       # 后端接口调用封装
       components/       # Vue 组件
         TopBar.vue          # 顶栏与数据集下拉
+        DeviceSelector.vue  # 训练设备选择（CPU / GPU）
+        StorageSettings.vue # 存储位置设置（数据集下载 / 结果保存目录）
         GuideStrip.vue      # 新手引导条
         LayerSidebar.vue    # 左侧组件库与模板
         CanvasBoard.vue     # 中间模型画布
@@ -205,6 +208,7 @@ project/
         ActionBar.vue       # 底部操作栏与训练任务面板
         ExportModal.vue     # 导出代码弹窗
         HelpModal.vue       # 新手指南弹窗
+        AuthPage.vue        # 登录 / 注册独立页（登录后才进入主界面）
         ContextMenus.vue    # 节点/连线右键菜单
         ToastContainer.vue  # 消息提示
         TrainingMonitor.vue # 训练监控页
@@ -594,6 +598,10 @@ MySQL 数据库存储层（SQLAlchemy 实现）。连接串由环境变量 `DATA
 | fetchTrainingStatus | 查询训练任务的当前状态和进度                     |
 | fetchTrainingResult | 查询已完成训练任务的最终指标和产物信息           |
 | cancelTraining      | 请求停止进行中的训练任务                         |
+| registerUser        | 注册新账号并获取 JWT 令牌                        |
+| loginUser           | 邮箱密码登录并获取 JWT 令牌                      |
+| fetchCurrentUser    | 通过令牌获取当前登录用户信息                     |
+| setAuthToken        | 注入 JWT，之后所有请求自动携带 Authorization 头  |
 | exportPytorchCode   | 向后端请求根据模型图生成的 PyTorch 模型代码      |
 
 ## 增量开发计划

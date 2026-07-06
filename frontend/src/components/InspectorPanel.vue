@@ -22,11 +22,104 @@ const linearShapeError = computed(
   () => canvas.value.validationStatus === "failed" && canvas.value.inFeatures !== 2704
 );
 
-function setParam(key: string, value: number) {
+function setParam(key: string, value: number | boolean) {
   if (!selectedNode.value) return;
   updateNodeParam(selectedNode.value.id, key, value);
   // 节点卡片上的 note 可能变化导致高度变化，需要重绘连线
   void redrawAfterDomUpdate();
+}
+
+// 序列与高级层的参数编辑配置（与后端 model_builder 支持的参数一致）
+interface AdvancedField {
+  key: string;
+  label: string;
+  kind: "number" | "boolean";
+}
+
+interface AdvancedInspector {
+  icon: string;
+  color: string;
+  title: string;
+  intro: string;
+  fields: AdvancedField[];
+}
+
+const ADVANCED_INSPECTORS: Record<string, AdvancedInspector> = {
+  LSTM: {
+    icon: "mdi:repeat",
+    color: "text-cyan",
+    title: "LSTM 参数",
+    intro: "循环神经网络层，擅长处理序列数据；hidden_size 决定记忆容量。",
+    fields: [
+      { key: "hidden_size", label: "Hidden Size 隐藏维度", kind: "number" },
+      { key: "num_layers", label: "Num Layers 堆叠层数", kind: "number" },
+      { key: "return_sequences", label: "Return Sequences 返回完整序列", kind: "boolean" },
+      { key: "bidirectional", label: "Bidirectional 双向", kind: "boolean" },
+    ],
+  },
+  Seq2Seq: {
+    icon: "mdi:swap-horizontal",
+    color: "text-indigo",
+    title: "Seq2Seq 参数",
+    intro: "编码器-解码器结构，把一个序列翻译为另一个序列。",
+    fields: [
+      { key: "hidden_size", label: "Hidden Size 隐藏维度", kind: "number" },
+      { key: "output_size", label: "Output Size 输出维度", kind: "number" },
+      { key: "target_length", label: "Target Length 目标序列长度", kind: "number" },
+      { key: "num_layers", label: "Num Layers 堆叠层数", kind: "number" },
+    ],
+  },
+  TransformerEncoder: {
+    icon: "mdi:layers-outline",
+    color: "text-purple",
+    title: "Transformer 参数",
+    intro: "自注意力编码器；d_model 需能被 num_heads 整除。",
+    fields: [
+      { key: "d_model", label: "d_model 特征维度", kind: "number" },
+      { key: "num_heads", label: "Num Heads 注意力头数", kind: "number" },
+      { key: "num_layers", label: "Num Layers 编码器层数", kind: "number" },
+      { key: "dim_feedforward", label: "FFN 维度", kind: "number" },
+      { key: "dropout", label: "Dropout 比例", kind: "number" },
+    ],
+  },
+  SelfAttention: {
+    icon: "mdi:eye-outline",
+    color: "text-blue",
+    title: "Self Attention 参数",
+    intro: "多头自注意力；embed_dim 需能被 num_heads 整除。",
+    fields: [
+      { key: "embed_dim", label: "Embed Dim 嵌入维度", kind: "number" },
+      { key: "num_heads", label: "Num Heads 注意力头数", kind: "number" },
+      { key: "dropout", label: "Dropout 比例", kind: "number" },
+    ],
+  },
+  VAE: {
+    icon: "mdi:creation",
+    color: "text-rose",
+    title: "VAE 参数",
+    intro: "变分自编码器，把输入压缩到 latent_dim 维隐空间再重建。",
+    fields: [
+      { key: "latent_dim", label: "Latent Dim 隐空间维度", kind: "number" },
+      { key: "output_features", label: "Output Features 重建维度", kind: "number" },
+    ],
+  },
+  GraphConv: {
+    icon: "mdi:graph",
+    color: "text-emerald",
+    title: "GraphConv 参数",
+    intro: "图卷积层，沿邻接关系聚合节点特征。",
+    fields: [
+      { key: "out_features", label: "Out Features 输出特征数", kind: "number" },
+    ],
+  },
+};
+
+const advancedInspector = computed(() =>
+  selectedNode.value ? ADVANCED_INSPECTORS[selectedNode.value.type] ?? null : null
+);
+
+function handleBooleanChange(key: string, event: Event) {
+  setParam(key, (event.target as HTMLInputElement).checked);
 }
 
 function autoFix() {
@@ -175,6 +268,37 @@ const inputShapeValue = computed(() => {
       </div>
       <section class="info-card">
         <p>Add 节点会在导出给后端时折叠为目标节点的 add 合并方式。</p>
+      </section>
+    </div>
+
+    <!-- 序列与高级层（LSTM / Seq2Seq / Transformer / Attention / VAE / GCN） -->
+    <div v-else-if="advancedInspector" class="inspector-scroll">
+      <div class="inspector-title">
+        <iconify-icon :class="advancedInspector.color" :icon="advancedInspector.icon"></iconify-icon>
+        <h2>{{ advancedInspector.title }}</h2>
+      </div>
+
+      <div class="field-stack">
+        <template v-for="field in advancedInspector.fields" :key="field.key">
+          <ParamNumberField
+            v-if="field.kind === 'number'"
+            :label="field.label"
+            :value="selectedNode.params[field.key]"
+            @change="setParam(field.key, $event)"
+          />
+          <label v-else class="form-field switch-field">
+            <span>{{ field.label }}</span>
+            <input
+              type="checkbox"
+              :checked="Boolean(selectedNode.params[field.key])"
+              @change="handleBooleanChange(field.key, $event)"
+            >
+          </label>
+        </template>
+      </div>
+
+      <section class="info-card">
+        <p>{{ advancedInspector.intro }}</p>
       </section>
     </div>
 

@@ -6,6 +6,7 @@ import {
   activeCanvas,
   clamp,
   createCanvas,
+  formatLayerNote,
   getConnectionKey,
   getLayerConfig,
   isKnownLayerType,
@@ -1138,7 +1139,8 @@ function createNodeConfig(layerType: string, x: number, y: number): GraphNode {
     title: config.title,
     badge: config.badge,
     color: config.color,
-    note: config.note,
+    // 配置未提供说明时，用参数摘要生成（序列与高级层）
+    note: config.note ?? (Object.keys(config.params).length ? formatLayerNote({ params: config.params }) : undefined),
     hint: config.hint || "?",
     x: canvasX,
     y: canvasY,
@@ -1172,17 +1174,6 @@ export function applyTemplateGraph(modelGraph: ModelGraph) {
   activeCanvas().hasCenteredInitialGraph = true;
   void redrawAfterDomUpdate().then(centerGraphHorizontally);
   resetValidationAfterGraphChange();
-}
-
-
-function formatLayerNote(layer: { params?: Record<string, unknown> }) {
-  const params = layer.params || {};
-  const entries = Object.entries(params)
-    .filter(([, value]) => typeof value !== "object")
-    .slice(0, 3)
-    .map(([key, value]) => `${key}=${value}`);
-
-  return entries.join(", ");
 }
 
 

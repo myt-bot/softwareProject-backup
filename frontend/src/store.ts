@@ -10,6 +10,7 @@ import type {
   ModelGraphConnection,
   MonitorLayer,
   Point,
+  TemplateMeta,
   Toast,
   ToastType,
   TrainConfig,
@@ -17,14 +18,6 @@ import type {
 } from "./types";
 
 export const GUIDE_VISITED_KEY = "model-workshop-visited";
-
-export const datasetOptions: Record<string, { shapeLabel: string }> = {
-  MNIST: { shapeLabel: "(1x28x28)" },
-  FashionMNIST: { shapeLabel: "(1x28x28)" },
-  KMNIST: { shapeLabel: "(1x28x28)" },
-  CIFAR10: { shapeLabel: "(3x32x32)" },
-  CIFAR100: { shapeLabel: "(3x32x32)" },
-};
 
 export const datasetChoices = [
   { value: "MNIST", label: "MNIST · 手写数字" },
@@ -59,20 +52,32 @@ export const layerGroups: LayerGroup[] = [
       { type: "Dropout", desc: "随机失活防过拟合", icon: "mdi:filter-off-outline", color: "amber" },
     ],
   },
+  {
+    title: "序列与高级 / Sequence & Advanced",
+    layers: [
+      { type: "LSTM", desc: "循环网络处理序列", icon: "mdi:repeat", color: "cyan" },
+      { type: "Seq2Seq", desc: "序列到序列生成", icon: "mdi:swap-horizontal", color: "indigo" },
+      { type: "TransformerEncoder", desc: "自注意力编码器", icon: "mdi:layers-outline", color: "purple" },
+      { type: "SelfAttention", desc: "自注意力机制", icon: "mdi:eye-outline", color: "blue" },
+      { type: "VAE", desc: "变分自编码器", icon: "mdi:creation", color: "rose" },
+      { type: "GraphConv", desc: "图卷积层", icon: "mdi:graph", color: "emerald" },
+    ],
+  },
 ];
 
-export const templateChoices = [
-  { key: "linear", label: "Linear", title: "最简单的单层线性模型" },
-  { key: "mlp", label: "MLP", title: "多层感知机——最基础的神经网络" },
-  { key: "perceptron", label: "Perceptron", title: "感知机——神经网络的起点" },
-  { key: "lenet", label: "LeNet", title: "经典卷积网络，手写数字识别首选" },
-  { key: "resnet", label: "ResNet Tiny", title: "带残差连接的小型 ResNet" },
-  { key: "lstm", label: "LSTM", title: "循环网络，擅长处理序列数据" },
-  { key: "seq2seq", label: "Seq2Seq", title: "序列到序列模型" },
-  { key: "transformer", label: "Transformer", title: "Transformer 编码器" },
-  { key: "attention", label: "Attention", title: "自注意力机制" },
-  { key: "vae", label: "VAE", title: "变分自编码器" },
-  { key: "gcn", label: "GCN", title: "图卷积网络" },
+// 后端不可用时模板库的兜底列表（正常情况下由 /projects/templates 提供完整元数据）
+export const fallbackTemplates: TemplateMeta[] = [
+  { key: "linear", name: "Linear Classifier", description: "最简单的单层线性模型。", family: "feedforward" },
+  { key: "mlp", name: "MLP", description: "多层感知机——最基础的神经网络。", family: "feedforward" },
+  { key: "perceptron", name: "Perceptron", description: "感知机——神经网络的起点。", family: "feedforward" },
+  { key: "lenet", name: "LeNet", description: "经典卷积网络，手写数字识别首选。", family: "cnn" },
+  { key: "resnet", name: "ResNet Tiny", description: "带残差连接的小型 ResNet。", family: "cnn" },
+  { key: "lstm", name: "LSTM", description: "循环网络，擅长处理序列数据。", family: "sequence" },
+  { key: "seq2seq", name: "Seq2Seq", description: "序列到序列模型。", family: "sequence" },
+  { key: "transformer", name: "Transformer", description: "Transformer 编码器。", family: "attention" },
+  { key: "attention", name: "Attention", description: "自注意力机制。", family: "attention" },
+  { key: "vae", name: "VAE", description: "变分自编码器。", family: "generative" },
+  { key: "gcn", name: "GCN", description: "图卷积网络。", family: "graph" },
 ];
 
 const initialNodes: GraphNode[] = [
@@ -227,6 +232,9 @@ export function createCanvas(
 
 export const store = reactive({
   dataset: "MNIST",
+  // 训练设备（cpu / cuda），由顶栏设备选择器切换；GPU 可用性来自后端 /devices
+  device: "cpu",
+  cudaAvailable: false,
   // 多画布：标签页切换，至少保留一个
   canvases: [createCanvas(1, "画布 1", initialNodes, initialConnections)] as WorkCanvas[],
   activeCanvasId: 1,
@@ -248,6 +256,42 @@ export function activeCanvas(): WorkCanvas {
   return store.canvases.find(canvas => canvas.id === store.activeCanvasId) ?? store.canvases[0]!;
 }
 
+// 模板库（从后端 /projects/templates 拉取，失败时用兜底列表）
+export const templateLibrary = reactive<{ items: TemplateMeta[] }>({ items: [...fallbackTemplates] });
+
+// —————————————————————————————————————————————
+// 存储位置设置（数据集下载 / 训练产物保存，持久化到 localStorage）
+// —————————————————————————————————————————————
+
+const STORAGE_PATHS_KEY = "model-workshop-storage-paths";
+
+export const storagePaths = reactive({
+  // 留空表示使用后端默认位置
+  dataDir: "",
+  artifactsDir: "",
+});
+
+try {
+  const saved = JSON.parse(localStorage.getItem(STORAGE_PATHS_KEY) || "{}");
+  if (typeof saved.dataDir === "string") storagePaths.dataDir = saved.dataDir;
+  if (typeof saved.artifactsDir === "string") storagePaths.artifactsDir = saved.artifactsDir;
+} catch {
+  // localStorage 不可用或数据损坏时使用默认值
+}
+
+export function saveStoragePaths(dataDir: string, artifactsDir: string) {
+  storagePaths.dataDir = dataDir.trim();
+  storagePaths.artifactsDir = artifactsDir.trim();
+  try {
+    localStorage.setItem(
+      STORAGE_PATHS_KEY,
+      JSON.stringify({ dataDir: storagePaths.dataDir, artifactsDir: storagePaths.artifactsDir })
+    );
+  } catch {
+    // ignore
+  }
+}
+
 // 新画布名称取最小未占用编号：关闭"画布 2"后再新建，名称仍为"画布 2"。
 // （内部 id 由 canvasSeq 单调递增保证唯一，与显示名称无关）
 export function nextCanvasName(): string {
@@ -261,6 +305,10 @@ export function nextCanvasName(): string {
 export const ui = reactive({
   helpModalOpen: false,
   exportModalOpen: false,
+  // 快速开始模板库弹窗
+  templateGalleryOpen: false,
+  // 存储位置设置弹窗
+  storageSettingsOpen: false,
   // 左侧组件库收起
   sidebarCollapsed: false,
   // 右侧参数面板被用户手动收起（点击节点卡片时自动重新展开）
@@ -415,7 +463,7 @@ const LAYER_CONFIGS: Record<string, LayerConfig> = {
     title: "LSTM",
     badge: "LSTM",
     color: "cyan",
-    params: { hidden_size: 32, num_layers: 1, return_sequences: false },
+    params: { hidden_size: 32, num_layers: 1, return_sequences: false, bidirectional: false },
   },
   Seq2Seq: {
     type: "Seq2Seq",
@@ -491,6 +539,11 @@ export function updateNodeDisplay(node: GraphNode) {
 
   if (node.type === "Dropout") {
     node.note = `p=${node.params.p}`;
+  }
+
+  // 序列与高级层：用参数摘要作为节点说明
+  if (["LSTM", "Seq2Seq", "TransformerEncoder", "SelfAttention", "VAE", "GraphConv"].includes(node.type)) {
+    node.note = formatLayerNote({ params: node.params });
   }
 }
 
@@ -635,9 +688,13 @@ export function getTrainConfig(canvas: WorkCanvas = activeCanvas()): TrainConfig
     epochs: canvas.epochs,
     batch_size: 64,
     rate: 0.001,
-    device: "cpu",
+    // 训练设备由顶栏设备选择器决定
+    device: store.device,
     loss_fn: "cross_entropy",
     optimizer: "sgd",
+    // 存储位置设置（留空使用后端默认位置）
+    data_dir: storagePaths.dataDir,
+    artifacts_dir: storagePaths.artifactsDir,
   };
 }
 

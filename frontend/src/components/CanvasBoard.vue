@@ -36,6 +36,11 @@ const statusBadgeClass = computed(() =>
   canvas.value.nodeBadge === "passed" ? "status-badge passed" : "status-badge"
 );
 
+// 节点输出尺寸的新手友好显示：未推导时提示去检查结构，已推导时用 × 分隔（如 28×28×1）
+function shapeHintText(hint: string) {
+  return hint === "?" ? "检查结构后显示" : hint.replace(/x/gi, "×");
+}
+
 function onNodeClick(event: MouseEvent, nodeId: string) {
   if (store.isConnecting) {
     event.preventDefault();
@@ -137,9 +142,9 @@ onBeforeUnmount(() => {
         </div>
         <h4>{{ node.title }}</h4>
         <p v-if="node.note" class="node-note">{{ node.note }}</p>
-        <div class="shape-row">
-          <span>Shape Hint:</span>
-          <strong class="shape-value">{{ node.hint }}</strong>
+        <div class="shape-row" title="这一层输出数据的尺寸，点击底部“检查结构”后自动推导">
+          <span>输出尺寸</span>
+          <strong class="shape-value" :class="{ pending: node.hint === '?' }">{{ shapeHintText(node.hint) }}</strong>
         </div>
       </article>
     </div>

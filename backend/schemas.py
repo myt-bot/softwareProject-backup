@@ -165,6 +165,9 @@ class TrainConfig(BaseModel):
     device: str = "cpu"
     loss_fn: str = "cross_entropy"
     optimizer: str = "sgd"
+    # 数据集下载目录与训练产物保存目录；留空使用默认位置
+    data_dir: str = ""
+    artifacts_dir: str = ""
 
     def check_dataset_name(self) -> List[str]:
         """检查数据集名称是否为非空字符串。"""

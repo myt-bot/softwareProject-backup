@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
 import { addCanvas, closeCanvas, switchCanvas } from "../canvas";
-import { store } from "../store";
+import { store, ui } from "../store";
 import type { WorkCanvas } from "../store";
 
 // 有进行中训练任务的标签显示脉冲圆点，便于并行训练时一眼看到状态
@@ -71,6 +71,12 @@ function cancelRename() {
     </button>
     <button class="canvas-tab-add" title="新建画布" @click="addCanvas">
       <iconify-icon icon="mdi:plus"></iconify-icon>
+    </button>
+
+    <!-- 快速开始模板入口（打开模板库弹窗，加载到当前画布） -->
+    <button class="template-gallery-button" id="btn-template-gallery" title="从经典网络模板快速开始" @click="ui.templateGalleryOpen = true">
+      <iconify-icon icon="mdi:lightning-bolt"></iconify-icon>
+      快速开始模板
     </button>
   </div>
 </template>

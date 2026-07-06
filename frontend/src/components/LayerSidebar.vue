@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { loadTemplateToCanvas } from "../actions";
-import { layerGroups, templateChoices } from "../store";
+import { layerGroups } from "../store";
 
 const searchQuery = ref("");
 
@@ -36,18 +35,6 @@ function handleDragStart(event: DragEvent, layerType: string) {
     <div class="sidebar-search">
       <iconify-icon icon="mdi:magnify"></iconify-icon>
       <input type="text" id="layer-search-input" placeholder="搜索组件，例如 Conv" v-model="searchQuery">
-    </div>
-    <div class="template-section">
-      <h3><iconify-icon icon="mdi:lightning-bolt"></iconify-icon>快速开始模板</h3>
-      <div class="template-tabs">
-        <button
-          v-for="template in templateChoices"
-          :key="template.key"
-          :data-template="template.key"
-          :title="template.title"
-          @click="loadTemplateToCanvas(template.key)"
-        >{{ template.label }}</button>
-      </div>
     </div>
     <div class="layer-list" id="layer-palette">
       <section

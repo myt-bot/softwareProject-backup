@@ -64,6 +64,9 @@ export interface TrainConfig {
   device: string;
   loss_fn: string;
   optimizer: string;
+  // 数据集下载目录与训练产物保存目录（留空使用后端默认位置）
+  data_dir?: string;
+  artifacts_dir?: string;
 }
 
 export interface ValidationResult {
@@ -106,6 +109,35 @@ export interface CancelTrainingResponse {
   status?: string;
 }
 
+// —————————————————————————————————————————————
+// 认证（M1 模块）
+// —————————————————————————————————————————————
+
+export interface AuthUser {
+  id?: string;
+  username?: string;
+  email?: string;
+  [key: string]: unknown;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+  user: AuthUser;
+}
+
+export interface RegisterPayload {
+  username: string;
+  email: string;
+  password: string;
+  confirm_password: string;
+}
+
+export interface LoginPayload {
+  email: string;
+  password: string;
+}
+
 // 前端本地维护的训练任务（底部任务面板）
 export interface TrainingJob extends TrainingStatus {
   trainConfig?: TrainConfig;
@@ -113,10 +145,24 @@ export interface TrainingJob extends TrainingStatus {
 
 export interface DevicesResponse {
   default_device?: string;
+  available_devices?: string[];
+  cuda_available?: boolean;
+  cuda_device_count?: number;
+  cuda_devices?: string[];
+}
+
+export interface TemplateMeta {
+  key: string;
+  name: string;
+  description?: string;
+  family?: string;
+  input_shape?: number[];
+  output_shape?: number[];
 }
 
 export interface TemplatesResponse {
   count?: number;
+  data?: TemplateMeta[];
 }
 
 export interface TemplateResponse {

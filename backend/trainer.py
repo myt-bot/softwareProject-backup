@@ -139,6 +139,7 @@ def run_training_job(job_id):
         train_loader, test_loader = prepare_dataset(
             dataset_name=dataset_name,
             batch_size=batch_size,
+            data_dir=train_config.get("data_dir") or None,
         )
 
         metrics = []
@@ -184,7 +185,10 @@ def run_training_job(job_id):
             job["result"] = cancelled_result
             return cancelled_result
 
-        artifacts = save_training_artifacts(job_id, model, metrics)
+        artifacts = save_training_artifacts(
+            job_id, model, metrics,
+            artifacts_dir=train_config.get("artifacts_dir") or None,
+        )
         job["status"] = "completed"
         completed_result = {
             "job_id": job_id,
@@ -315,12 +319,13 @@ def _build_optimizer(optimizer_config, model, rate):
     raise ValueError(f"暂不支持的优化器配置: {optimizer_config}")
 
 
-def prepare_dataset(dataset_name, batch_size):
+def prepare_dataset(dataset_name, batch_size, data_dir=None):
     """加载并预处理用户选择的内置数据集。
 
     参数：
         dataset_name：数据集名称，例如 "MNIST"、"FashionMNIST" 或 "CIFAR10"。
         batch_size：每个训练批次的数据量，用于构造 DataLoader。
+        data_dir：数据集下载/缓存目录；为空时使用各数据集的默认位置。
 
     返回：
         训练集 DataLoader 和测试集 DataLoader。
@@ -330,15 +335,20 @@ def prepare_dataset(dataset_name, batch_size):
     dataset_class = dataset_spec["class"]
     transform = _build_dataset_transform(dataset_key)
 
+    if data_dir:
+        dataset_root = os.path.join(os.path.expanduser(data_dir), dataset_key)
+    else:
+        dataset_root = dataset_spec["root"]
+
     train_data = dataset_class(
-        root=dataset_spec["root"],
+        root=dataset_root,
         train=True,
         transform=transform,
         download=True
     )
 
     test_data = dataset_class(
-        root=dataset_spec["root"],
+        root=dataset_root,
         train=False,
         transform=transform
     )
@@ -492,18 +502,20 @@ def evaluate_model(model, test_loader, loss_fn, device):
     }
 
 
-def save_training_artifacts(job_id, model, metrics):
+def save_training_artifacts(job_id, model, metrics, artifacts_dir=None):
     """保存训练产生的模型权重、指标和日志。
 
     参数：
         job_id：训练任务编号，用于生成保存目录或文件名。
         model：训练完成后的 PyTorch 模型对象。
         metrics：训练过程产生的指标数据，例如每轮 loss 和 accuracy。
+        artifacts_dir：产物保存根目录；为空时使用默认的 training_artifacts。
 
     返回：
         dict：保存产物信息，包含模型权重文件路径和指标文件路径。
     """
-    artifact_dir = os.path.join(ARTIFACTS_ROOT, job_id)
+    artifacts_root = os.path.expanduser(artifacts_dir) if artifacts_dir else ARTIFACTS_ROOT
+    artifact_dir = os.path.join(artifacts_root, job_id)
     os.makedirs(artifact_dir, exist_ok=True)
 
     model_path = os.path.join(artifact_dir, "model.pt")
