@@ -1,12 +1,13 @@
 import type {
+  AgentStatus,
   CancelTrainingResponse,
   CreateProjectPayload,
   CreateProjectResponse,
-  DevicesResponse,
-  ExportCodeResponse,
   LoginPayload,
   ModelGraph,
   RegisterPayload,
+  ProjectResponse,
+  ProjectsResponse,
   TemplateResponse,
   TemplatesResponse,
   TokenResponse,
@@ -15,10 +16,20 @@ import type {
   TrainingStatus,
   TrainStartResponse,
   AuthUser,
-  ValidationResult,
 } from "../types";
 
 const API_BASE_URL = "http://127.0.0.1:8000";
+
+// 浏览器与云端服务器的持久化 WebSocket 地址（接收 Agent 状态与训练进度）
+export function clientWebSocketUrl(token: string): string {
+  const wsBase = API_BASE_URL.replace(/^http/, "ws");
+  return `${wsBase}/client/ws?token=${encodeURIComponent(token)}`;
+}
+
+// 本机训练 Agent 完整程序的下载地址（首次使用的用户从这里获取 Agent）
+export function agentDownloadUrl(): string {
+  return `${API_BASE_URL}/agent/download`;
+}
 
 // 请求超时：后端接口都是快速返回的（训练在后台线程执行），
 // 超过该时间视为后端未启动或无响应，避免按钮永远卡在加载态。
@@ -136,18 +147,8 @@ export async function fetchCurrentUser(): Promise<{ status?: string; data?: Auth
 }
 
 
-export async function fetchDevices(): Promise<DevicesResponse> {
-  return request("/devices");
-}
-
-
-export async function validateModel(modelGraph: ModelGraph): Promise<ValidationResult> {
-  return request("/validate", {
-    method: "POST",
-    body: JSON.stringify({ model: modelGraph }),
-  });
-}
-
+// 注：结构校验 /validate、设备查询 /devices、代码导出 /export 已迁移到
+// 用户本机 Agent（云端不含 PyTorch），前端改为通过 WebSocket 的 requestAgent 调用。
 
 export async function fetchProjectTemplates(): Promise<TemplatesResponse> {
   return request("/projects/templates");
@@ -175,8 +176,30 @@ export async function createProjectFromTemplate(templateProject: unknown): Promi
 }
 
 
-export async function startTraining(modelGraph: ModelGraph, trainConfig: TrainConfig): Promise<TrainStartResponse> {
-  return request("/train", {
+export async function listProjects(userId: string): Promise<ProjectsResponse> {
+  return request(`/projects?user_id=${encodeURIComponent(userId)}`);
+}
+
+
+export async function getProject(projectId: string): Promise<ProjectResponse> {
+  return request(`/projects/${encodeURIComponent(projectId)}`);
+}
+
+
+export async function deleteProject(projectId: string): Promise<{ status?: string; message?: string }> {
+  return request(`/projects/${encodeURIComponent(projectId)}`, {
+    method: "DELETE",
+  });
+}
+
+
+// 云端只做任务中转，训练在用户本机 Agent 执行；这些接口都需要 user_id。
+export async function startTraining(
+  modelGraph: ModelGraph,
+  trainConfig: TrainConfig,
+  userId: string,
+): Promise<TrainStartResponse> {
+  return request(`/train?user_id=${encodeURIComponent(userId)}`, {
     method: "POST",
     body: JSON.stringify({
       model: modelGraph,
@@ -186,29 +209,23 @@ export async function startTraining(modelGraph: ModelGraph, trainConfig: TrainCo
 }
 
 
-export async function fetchTrainingStatus(jobId: string): Promise<TrainingStatus> {
-  return request(`/train/${encodeURIComponent(jobId)}/status`);
+export async function fetchTrainingStatus(jobId: string, userId: string): Promise<TrainingStatus> {
+  return request(`/train/${encodeURIComponent(jobId)}/status?user_id=${encodeURIComponent(userId)}`);
 }
 
 
-export async function fetchTrainingResult(jobId: string): Promise<TrainingResult> {
-  return request(`/train/${encodeURIComponent(jobId)}/result`);
+export async function fetchTrainingResult(jobId: string, userId: string): Promise<TrainingResult> {
+  return request(`/train/${encodeURIComponent(jobId)}/result?user_id=${encodeURIComponent(userId)}`);
 }
 
 
-export async function cancelTraining(jobId: string): Promise<CancelTrainingResponse> {
-  return request(`/train/${encodeURIComponent(jobId)}/cancel`, {
+export async function cancelTraining(jobId: string, userId: string): Promise<CancelTrainingResponse> {
+  return request(`/train/${encodeURIComponent(jobId)}/cancel?user_id=${encodeURIComponent(userId)}`, {
     method: "POST",
   });
 }
 
 
-export async function exportPytorchCode(modelGraph: ModelGraph): Promise<ExportCodeResponse> {
-  return request("/export/pytorch", {
-    method: "POST",
-    body: JSON.stringify({
-      model: modelGraph,
-      class_name: "MNIST_CNN",
-    }),
-  });
+export async function fetchAgentStatus(userId: string): Promise<AgentStatus> {
+  return request(`/agents/status?user_id=${encodeURIComponent(userId)}`);
 }

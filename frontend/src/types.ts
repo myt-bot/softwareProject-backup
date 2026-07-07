@@ -101,6 +101,63 @@ export interface TrainingResult extends TrainingStatus {
 
 export interface TrainStartResponse extends TrainingStatus {
   job_status?: string;
+  // 云端中转架构：任务下发的 Agent 在线状态
+  agent_status?: "online" | "offline";
+  agent_id?: string;
+  message?: string;
+}
+
+// —————————————————————————————————————————————
+// 云端中转 / 本机 Agent（分布式训练）
+// —————————————————————————————————————————————
+
+export interface DeviceSummary {
+  available_devices?: string[];
+  default_device?: string;
+  cuda_available?: boolean;
+  cuda_device_count?: number;
+  cuda_devices?: string[];
+}
+
+export interface AgentStatus {
+  type?: string;
+  online: boolean;
+  agent_id?: string;
+  runtime_version?: string;
+  platform?: string;
+  device_summary?: DeviceSummary;
+}
+
+// 服务器通过客户端 WebSocket 推送的消息
+export interface WsMessage {
+  type: string;
+  job_id?: string;
+  status?: string;
+  current_epoch?: number;
+  total_epochs?: number;
+  current_step?: number;
+  total_steps?: number;
+  progress?: number;
+  metrics?: EpochMetrics[];
+  loss?: number;
+  accuracy?: number;
+  device?: string;
+  artifacts?: unknown;
+  error?: string;
+  // agent_status
+  online?: boolean;
+  agent_id?: string;
+  runtime_version?: string;
+  platform?: string;
+  device_summary?: DeviceSummary;
+  // command_ack
+  command?: string;
+  accepted?: boolean;
+  message?: string;
+  // agent_response（校验/设备/导出的请求-响应）
+  request_id?: string;
+  ok?: boolean;
+  data?: unknown;
 }
 
 export interface CancelTrainingResponse {
@@ -178,6 +235,28 @@ export interface CreateProjectPayload {
 
 export interface CreateProjectResponse {
   data?: { name?: string };
+}
+
+// 已保存的项目（模型）
+export interface ProjectMeta {
+  id: string;
+  user_id?: string;
+  name: string;
+  description?: string;
+  model_graph?: ModelGraph;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ProjectsResponse {
+  status?: string;
+  data?: ProjectMeta[];
+  count?: number;
+}
+
+export interface ProjectResponse {
+  status?: string;
+  data?: ProjectMeta;
 }
 
 export type ExportCodeResponse =

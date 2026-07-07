@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { auth, handleLogout } from "../auth";
-import { datasetChoices, openHelpModal, store, ui } from "../store";
+import { agent, datasetChoices, openHelpModal, store, ui } from "../store";
 import DeviceSelector from "./DeviceSelector.vue";
 
 const dropdownOpen = ref(false);
@@ -76,6 +76,18 @@ onBeforeUnmount(() => document.removeEventListener("click", handleDocumentClick)
     </div>
 
     <div class="top-actions">
+      <!-- 本机训练 Agent 连接状态（点击查看如何启动本地 Agent） -->
+      <button
+        class="agent-chip"
+        :class="agent.online ? 'online' : 'offline'"
+        id="btn-agent-status"
+        :title="agent.online ? '本机训练 Agent 已连接' : '本机训练 Agent 未连接，点击查看如何启动'"
+        @click="ui.agentModalOpen = true"
+      >
+        <span class="agent-dot"></span>
+        {{ agent.online ? "本机训练已连接" : "本机训练未连接" }}
+      </button>
+
       <button class="guide-button" id="btn-help" title="打开新手指南" @click="openHelpModal">
         <iconify-icon icon="mdi:school-outline"></iconify-icon>
         新手指南

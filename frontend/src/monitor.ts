@@ -73,8 +73,6 @@ function emptySeries(totalEpochs: number): MonitorSeries {
 export interface OpenMonitorOptions {
   live?: boolean;
   jobId?: string;
-  fetchStatus?: (jobId: string) => Promise<TrainingStatus>;
-  fetchResult?: (jobId: string) => Promise<TrainingResult>;
   cancelJob?: (jobId: string) => Promise<CancelTrainingResponse>;
   onBackToBuilder?: () => void;
   onRerun?: () => Promise<{ jobId?: string } | undefined>;
@@ -83,13 +81,10 @@ export interface OpenMonitorOptions {
   paramCount?: number;
 }
 
-// 非响应式的回调与定时器
-let fetchStatusFn: OpenMonitorOptions["fetchStatus"] = undefined;
-let fetchResultFn: OpenMonitorOptions["fetchResult"] = undefined;
+// 非响应式的回调（live 进度由客户端 WebSocket 推送，不再轮询）
 let cancelJobFn: OpenMonitorOptions["cancelJob"] = undefined;
 let onBackToBuilderFn: OpenMonitorOptions["onBackToBuilder"] = undefined;
 let onRerunFn: OpenMonitorOptions["onRerun"] = undefined;
-let pollTimer: number | null = null;
 
 export const monitor = reactive({
   visible: false,
@@ -115,8 +110,6 @@ export const monitor = reactive({
 export function openTrainingMonitor(options: OpenMonitorOptions = {}) {
   monitor.live = Boolean(options.live);
   monitor.jobId = options.jobId || null;
-  fetchStatusFn = options.fetchStatus;
-  fetchResultFn = options.fetchResult;
   cancelJobFn = options.cancelJob;
   onBackToBuilderFn = options.onBackToBuilder;
   onRerunFn = options.onRerun;
@@ -137,15 +130,11 @@ export function openTrainingMonitor(options: OpenMonitorOptions = {}) {
   monitor.pollAttempt = 0;
 
   monitor.visible = true;
-
-  if (monitor.live && monitor.jobId && fetchStatusFn) {
-    startPolling();
-  }
+  // live 进度由客户端 WebSocket 推送到 applyStatusMessage / applyResultMessage
 }
 
 
 export function closeTrainingMonitor() {
-  stopPolling();
   monitor.visible = false;
 }
 
@@ -219,7 +208,6 @@ export function computeResults() {
 // —————————————————————————————————————————————
 
 export function handleBack() {
-  stopPolling();
   closeTrainingMonitor();
   onBackToBuilderFn?.();
 }
@@ -246,7 +234,6 @@ export async function handleStopTraining() {
 
 
 export async function handleRerun() {
-  stopPolling();
   monitor.stopping = false;
   monitor.state = "running";
   monitor.visibleEpochs = 3;
@@ -261,11 +248,11 @@ export async function handleRerun() {
   if (onRerunFn) {
     try {
       const res = await onRerunFn();
-      if (res?.jobId && fetchStatusFn) {
+      if (res?.jobId) {
         monitor.jobId = res.jobId;
         monitor.live = true;
         showToast("info", "已重新提交训练任务。");
-        startPolling();
+        // 进度将通过客户端 WebSocket 推送
       } else {
         showToast("warning", "重新训练未返回任务号，进入原型演示。");
       }
@@ -280,7 +267,6 @@ export async function handleRerun() {
 
 export function handleSimulateComplete() {
   // 仅 demo 模式提供，用于演示 Running → Completed 切换。
-  stopPolling();
   monitor.state = "completed";
   monitor.visibleEpochs = MOCK.totalEpochs;
   monitor.progress = 1;
@@ -293,77 +279,19 @@ export function handleSimulateComplete() {
 
 
 // —————————————————————————————————————————————
-// 真实后端轮询（live 模式）
+// WebSocket 推送驱动（live 模式）
 // —————————————————————————————————————————————
+// 客户端 WebSocket 收到本机 Agent 回传的 training_update / training_result
+// 时调用下面两个函数，把进度渲染到监控页。仅当监控页正在展示该任务时生效。
 
-function startPolling() {
-  stopPolling();
-  monitor.pollAttempt = 0;
-  void poll();
-}
-
-
-function stopPolling() {
-  if (pollTimer) {
-    clearTimeout(pollTimer);
-    pollTimer = null;
-  }
-}
-
-
-async function poll() {
-  const MAX = 3600; // 最长约 1 小时（每秒一次）
-  if (!fetchStatusFn || !monitor.jobId) return;
-  try {
-    const status = await fetchStatusFn(monitor.jobId);
-    applyLiveStatus(status);
-
-    const s = status?.status;
-    if (s === "completed") {
-      monitor.stopping = false;
-      try {
-        const result = await fetchResultFn!(monitor.jobId);
-        applyLiveResult(result);
-      } catch {
-        // 结果接口异常时，用最后一次 status 的 metrics 收尾。
-        monitor.state = "completed";
-        showToast("warning", "训练已完成，但结果接口读取失败。");
-      }
-      return;
-    }
-    if (s === "failed") {
-      monitor.stopping = false;
-      monitor.error = status?.error || "未知错误";
-      monitor.state = "completed";
-      showToast("error", `训练失败: ${monitor.error}`);
-      return;
-    }
-    if (s === "cancelled") {
-      monitor.stopping = false;
-      monitor.state = "completed";
-      showToast("warning", "训练任务已取消。");
-      return;
-    }
-    if (monitor.pollAttempt >= MAX) {
-      showToast("warning", "训练轮询超时，请稍后手动查看结果。");
-      return;
-    }
-    monitor.pollAttempt += 1;
-    pollTimer = window.setTimeout(() => void poll(), 1000);
-  } catch (error) {
-    showToast("error", (error as Error)?.message || "训练状态查询失败");
-  }
-}
-
-
-function applyLiveStatus(status: TrainingStatus) {
+export function applyStatusMessage(status: TrainingStatus) {
   const total = status?.total_epochs || monitor.hyperparams.epochs;
   const current = status?.current_epoch ?? 0;
 
   ingestMetrics(status?.metrics, total);
   monitor.currentEpoch = current;
   monitor.hyperparams.epochs = total;
-  // 轮次内 step 进度（后端每个 batch 更新一次）
+  // 轮次内 step 进度（Agent 每个 batch 更新一次）
   monitor.currentStep = status?.current_step ?? 0;
   monitor.totalSteps = status?.total_steps ?? 0;
   monitor.progress = typeof status?.progress === "number"
@@ -374,7 +302,8 @@ function applyLiveStatus(status: TrainingStatus) {
 }
 
 
-function applyLiveResult(result: TrainingResult) {
+export function applyResultMessage(result: TrainingResult) {
+  monitor.stopping = false;
   monitor.result = result;
   ingestMetrics(result?.metrics, result?.metrics?.length || monitor.hyperparams.epochs);
   monitor.state = "completed";
@@ -383,10 +312,6 @@ function applyLiveResult(result: TrainingResult) {
   if (result?.device) {
     monitor.hyperparams.device = String(result.device).toUpperCase();
   }
-
-  const acc = typeof result?.accuracy === "number" ? `${(result.accuracy * 100).toFixed(1)}%` : "未知";
-  const loss = typeof result?.loss === "number" ? result.loss.toFixed(4) : "未知";
-  showToast("success", `训练完成，accuracy=${acc}，loss=${loss}`);
 }
 
 

@@ -245,6 +245,192 @@ button:disabled {
   gap: 14px;
 }
 
+/* 本机训练 Agent 连接状态徽标 */
+.agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--panel-2);
+  color: var(--muted);
+  transition: all 0.15s ease;
+}
+
+.agent-chip .agent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.agent-chip.online {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+  color: var(--emerald);
+}
+
+.agent-chip.online .agent-dot {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+.agent-chip.offline {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: var(--orange);
+}
+
+.agent-chip:hover {
+  filter: brightness(0.98);
+}
+
+/* 本机 Agent 指引弹窗 */
+.agent-card {
+  width: min(560px, 100%);
+}
+
+.agent-body {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.agent-status-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.agent-status-row .agent-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.agent-status-row.online { background: #ecfdf5; border-color: #a7f3d0; }
+.agent-status-row.online .agent-dot { background: var(--emerald); }
+.agent-status-row.offline { background: #fff7ed; border-color: #fed7aa; }
+.agent-status-row.offline .agent-dot { background: var(--orange); }
+
+.agent-status-row strong { display: block; font-size: 14px; color: var(--text); }
+.agent-status-detail { font-size: 12px; color: var(--muted); }
+
+/* 下载本机 Agent 的醒目入口 */
+.agent-download {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #bae6fd;
+  border-radius: 12px;
+  background: linear-gradient(120deg, #e0f2fe, #f0f9ff);
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.agent-download:hover {
+  border-color: var(--indigo);
+  box-shadow: 0 6px 16px -8px rgba(14, 165, 233, 0.4);
+  transform: translateY(-1px);
+}
+
+.agent-download > iconify-icon {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  background: var(--indigo);
+  color: white;
+}
+
+.agent-download strong {
+  display: block;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.agent-download span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.agent-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.agent-steps code {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+
+.agent-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  background: #0f172a;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.agent-command code {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  color: #e2e8f0;
+  font-size: 12px;
+}
+
+.agent-command .icon-button {
+  flex: 0 0 auto;
+  color: #cbd5e1;
+}
+
+.agent-command .icon-button:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.agent-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.agent-note iconify-icon {
+  color: var(--emerald);
+  font-size: 16px;
+}
+
 /* 顶栏中部：数据集 + 训练设备 */
 .topbar-middle {
   display: flex;
@@ -311,6 +497,258 @@ button:disabled {
   display: grid;
   gap: 18px;
   padding: 20px 24px;
+}
+
+/* 保存模型弹窗 */
+.save-card {
+  width: min(460px, 100%);
+}
+
+.save-body {
+  display: grid;
+  gap: 16px;
+  padding: 20px 24px;
+}
+
+.save-body textarea {
+  width: 100%;
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  outline: none;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.save-body textarea:focus {
+  border-color: var(--indigo);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
+}
+
+/* 存储路径输入 + 浏览按钮 */
+.path-input {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.path-input input {
+  flex: 1;
+  min-width: 0;
+}
+
+.path-browse {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+
+/* 目录选择器 */
+.dir-picker-card {
+  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+}
+
+.dir-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 24px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.dir-current iconify-icon {
+  color: var(--indigo);
+  flex: 0 0 auto;
+}
+
+.dir-current code {
+  font-size: 12px;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.dir-list {
+  margin: 12px 24px 0;
+  max-height: 46vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dir-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  transition: background 0.12s ease;
+}
+
+.dir-entry iconify-icon {
+  font-size: 18px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.dir-entry:hover {
+  background: var(--panel-2);
+}
+
+.dir-entry.up iconify-icon {
+  color: var(--indigo);
+}
+
+.dir-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 30px;
+  color: var(--faint);
+  font-size: 13px;
+}
+
+/* 我的项目弹窗 */
+.projects-card {
+  width: min(600px, 100%);
+}
+
+.projects-body {
+  padding: 16px 24px 24px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.projects-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 20px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.projects-empty iconify-icon {
+  font-size: 40px;
+  color: var(--faint);
+}
+
+.projects-empty p {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.projects-empty span {
+  font-size: 12px;
+}
+
+.projects-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.project-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.project-item:hover {
+  border-color: var(--border-2);
+  box-shadow: var(--shadow-sm);
+}
+
+.project-icon {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-size: 21px;
+  background: #e0f2fe;
+  color: var(--indigo);
+}
+
+.project-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.project-info strong {
+  display: block;
+  font-size: 14px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-info p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-meta {
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.project-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-actions .secondary-button {
+  padding: 6px 12px;
+  min-height: 32px;
+  font-size: 12px;
+}
+
+.project-delete:hover {
+  color: var(--rose);
+  background: #fff1f2;
+}
+
+.project-delete.confirming {
+  color: var(--rose);
+  background: #fff1f2;
 }
 
 /* “新手指南”按钮：显眼、友好 */
@@ -844,7 +1282,13 @@ button:disabled {
   padding: 6px 10px 0;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+  /* 标签过多时仍可横向滚动，但隐藏滚动条以保持整洁 */
   overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.canvas-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .canvas-tab {

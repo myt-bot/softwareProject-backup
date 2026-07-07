@@ -3,7 +3,9 @@
 
 import { reactive } from "vue";
 import type {
+  AgentStatus,
   Connection,
+  DeviceSummary,
   GraphNode,
   LayerGroup,
   ModelGraph,
@@ -260,6 +262,35 @@ export function activeCanvas(): WorkCanvas {
 export const templateLibrary = reactive<{ items: TemplateMeta[] }>({ items: [...fallbackTemplates] });
 
 // —————————————————————————————————————————————
+// 本机训练 Agent 状态（分布式训练：训练在用户本机执行）
+// —————————————————————————————————————————————
+
+export const agent = reactive({
+  online: false,
+  agentId: "",
+  runtimeVersion: "",
+  platform: "",
+  deviceSummary: null as DeviceSummary | null,
+});
+
+export function setAgentStatus(status: AgentStatus) {
+  agent.online = Boolean(status.online);
+  agent.agentId = status.agent_id || "";
+  agent.runtimeVersion = status.runtime_version || "";
+  agent.platform = status.platform || "";
+  agent.deviceSummary = status.device_summary || null;
+
+  // 设备可用性来自本机 Agent 上报的设备信息（离线时回落到 CPU）
+  store.cudaAvailable = Boolean(status.device_summary?.cuda_available);
+  if (!store.cudaAvailable && store.device !== "cpu") {
+    store.device = "cpu";
+  }
+  if (status.device_summary?.default_device && agent.online) {
+    store.device = status.device_summary.default_device;
+  }
+}
+
+// —————————————————————————————————————————————
 // 存储位置设置（数据集下载 / 训练产物保存，持久化到 localStorage）
 // —————————————————————————————————————————————
 
@@ -309,6 +340,12 @@ export const ui = reactive({
   templateGalleryOpen: false,
   // 存储位置设置弹窗
   storageSettingsOpen: false,
+  // 本机训练 Agent 指引弹窗（如何启动本地 Agent）
+  agentModalOpen: false,
+  // 保存模型弹窗
+  saveModalOpen: false,
+  // 我的项目（加载已保存模型）弹窗
+  projectsModalOpen: false,
   // 左侧组件库收起
   sidebarCollapsed: false,
   // 右侧参数面板被用户手动收起（点击节点卡片时自动重新展开）

@@ -11,6 +11,7 @@ import {
 } from "./api/client";
 import { showToast } from "./store";
 import type { LoginPayload, RegisterPayload, AuthUser } from "./types";
+import { connectClientWebSocket, disconnectClientWebSocket } from "./ws";
 
 const AUTH_TOKEN_KEY = "model-workshop-token";
 
@@ -31,6 +32,8 @@ function applySession(token: string, user: AuthUser) {
   auth.token = token;
   auth.user = user;
   setAuthToken(token);
+  // 建立与云端的持久化 WebSocket（接收 Agent 状态与训练进度）
+  connectClientWebSocket(token);
   try {
     localStorage.setItem(AUTH_TOKEN_KEY, token);
   } catch {
@@ -43,6 +46,7 @@ function clearSession() {
   auth.token = null;
   auth.user = null;
   setAuthToken(null);
+  disconnectClientWebSocket();
   try {
     localStorage.removeItem(AUTH_TOKEN_KEY);
   } catch {
@@ -68,6 +72,8 @@ export async function initializeAuth() {
     const result = await fetchCurrentUser();
     if (result?.data) {
       auth.user = result.data;
+      // 会话恢复成功后建立持久化 WebSocket
+      connectClientWebSocket(token);
       return;
     }
     clearSession();

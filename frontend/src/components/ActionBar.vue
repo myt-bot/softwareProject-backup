@@ -7,7 +7,7 @@ import {
   handleValidateModel,
   openCurrentTrainingMonitor,
 } from "../actions";
-import { activeCanvas, clamp, getTrainingStatusLabel, showToast } from "../store";
+import { activeCanvas, clamp, getTrainingStatusLabel, showToast, ui } from "../store";
 
 // 底部操作栏跟随当前激活画布：各画布的校验/训练状态相互独立、并行进行
 const canvas = computed(() => activeCanvas());
@@ -96,6 +96,10 @@ const trainDisabled = computed(
       <button class="secondary-button" id="btn-save" title="把当前模型保存到我的项目" @click="handleSaveProject">
         <iconify-icon icon="mdi:content-save-outline"></iconify-icon>
         保存模型
+      </button>
+      <button class="secondary-button" id="btn-my-projects" title="加载已保存的模型" @click="ui.projectsModalOpen = true">
+        <iconify-icon icon="mdi:folder-open-outline"></iconify-icon>
+        我的项目
       </button>
       <button class="secondary-button" id="btn-export" title="生成可直接运行的 PyTorch 代码" @click="handleExportCode">
         <iconify-icon icon="mdi:code-json"></iconify-icon>

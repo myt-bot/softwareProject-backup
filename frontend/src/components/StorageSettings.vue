@@ -1,9 +1,15 @@
 <script setup lang="ts">
-import { reactive, watch } from "vue";
-import { saveStoragePaths, showToast, storagePaths, ui } from "../store";
+import { reactive, ref, watch } from "vue";
+import { agent, saveStoragePaths, showToast, storagePaths, ui } from "../store";
+import DirectoryPicker from "./DirectoryPicker.vue";
 
 // 表单草稿：打开弹窗时从已保存的设置同步
 const form = reactive({ dataDir: storagePaths.dataDir, artifactsDir: storagePaths.artifactsDir });
+
+// 目录选择器：picking 记录当前正在为哪个字段选择目录
+const pickerOpen = ref(false);
+const picking = ref<"dataDir" | "artifactsDir">("dataDir");
+const pickerTitle = ref("");
 
 watch(
   () => ui.storageSettingsOpen,
@@ -14,6 +20,22 @@ watch(
     }
   }
 );
+
+function openPicker(field: "dataDir" | "artifactsDir") {
+  if (!agent.online) {
+    showToast("warning", "浏览目录需要本机训练 Agent，请先启动本地 Agent。");
+    ui.agentModalOpen = true;
+    return;
+  }
+  picking.value = field;
+  pickerTitle.value = field === "dataDir" ? "选择数据集下载位置" : "选择结果文件存储位置";
+  pickerOpen.value = true;
+}
+
+function onPicked(path: string) {
+  form[picking.value] = path;
+  pickerOpen.value = false;
+}
 
 function close() {
   ui.storageSettingsOpen = false;
@@ -40,7 +62,7 @@ function resetDefaults() {
           <iconify-icon icon="mdi:folder-cog-outline"></iconify-icon>
           <div>
             <h2>存储位置设置</h2>
-            <p>路径位于运行后端服务的电脑上，留空则使用默认位置</p>
+            <p>路径位于运行本机训练 Agent 的电脑上（即你的电脑），留空则使用默认位置</p>
           </div>
         </div>
         <button class="icon-button" id="btn-close-storage" @click="close"><iconify-icon icon="mdi:close"></iconify-icon></button>
@@ -49,23 +71,35 @@ function resetDefaults() {
       <div class="storage-body">
         <label class="form-field">
           <span>数据集下载位置</span>
-          <input
-            id="storage-data-dir"
-            type="text"
-            v-model="form.dataDir"
-            placeholder="默认：项目目录下（如 ./MNIST）"
-          >
+          <div class="path-input">
+            <input
+              id="storage-data-dir"
+              type="text"
+              v-model="form.dataDir"
+              placeholder="默认：项目目录下（如 ./MNIST）"
+            >
+            <button class="secondary-button path-browse" id="browse-data-dir" @click="openPicker('dataDir')">
+              <iconify-icon icon="mdi:folder-search-outline"></iconify-icon>
+              浏览
+            </button>
+          </div>
           <small>训练数据集（MNIST、CIFAR10 等）将下载并缓存到该目录，例如 ~/datasets</small>
         </label>
 
         <label class="form-field">
           <span>结果文件存储位置</span>
-          <input
-            id="storage-artifacts-dir"
-            type="text"
-            v-model="form.artifactsDir"
-            placeholder="默认：项目目录下的 training_artifacts"
-          >
+          <div class="path-input">
+            <input
+              id="storage-artifacts-dir"
+              type="text"
+              v-model="form.artifactsDir"
+              placeholder="默认：项目目录下的 training_artifacts"
+            >
+            <button class="secondary-button path-browse" id="browse-artifacts-dir" @click="openPicker('artifactsDir')">
+              <iconify-icon icon="mdi:folder-search-outline"></iconify-icon>
+              浏览
+            </button>
+          </div>
           <small>每次训练的模型权重（model.pt）和指标（metrics.json）将保存到该目录，例如 ~/model_results</small>
         </label>
       </div>
@@ -79,5 +113,14 @@ function resetDefaults() {
         </button>
       </div>
     </div>
+
+    <!-- 目录选择器（浏览本机文件夹） -->
+    <DirectoryPicker
+      :open="pickerOpen"
+      :title="pickerTitle"
+      :start-path="form[picking]"
+      @select="onPicked"
+      @close="pickerOpen = false"
+    />
   </div>
 </template>

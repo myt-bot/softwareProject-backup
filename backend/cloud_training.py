@@ -3,194 +3,572 @@
 该模块只属于服务器部署。它负责创建训练任务、匹配用户在线的本机
 Agent、通过 WebSocket 下发训练指令，并接收 Agent 回传的训练进度。
 真正的 PyTorch 训练逻辑必须在用户本机 Agent 中执行。
+
+拓扑：
+    浏览器 <--(客户端 WebSocket /client/ws)--> 云端服务器
+    云端服务器 <--(Agent WebSocket /agents/ws)--> 用户本机 Agent
+
+云端只做「任务登记 + 指令转发 + 进度中转」，不执行任何 PyTorch 代码。
+状态为进程内内存态（课设单进程部署），进程重启后训练任务不保留。
 """
 
-from typing import Any
+import asyncio
+import hashlib
+import io
+import os
+import time
+import uuid
+import zipfile
+from pathlib import Path
+from typing import Any, Optional
 
-from fastapi import APIRouter, WebSocket
+from fastapi import APIRouter, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse, Response
 
 from .schemas import CloudTrainRequest
+from .security import verify_access_token
 
 
 router = APIRouter(tags=["cloud-training"])
 
+# 当前云端提供的训练运行时版本；Agent 据此判断是否需要下载/更新本机训练代码
+RUNTIME_VERSION = "1.0.0"
+MIN_AGENT_VERSION = "1.0.0"
+
+# 本机训练运行时源码目录（打包后供 Agent 首次下载）
+_RUNTIME_SOURCE_DIR = Path(__file__).resolve().parent.parent / "local_agent" / "runtime"
+# 本机 Agent 完整源码目录（首次使用的用户可从云端下载整个 Agent 程序）
+_AGENT_SOURCE_DIR = Path(__file__).resolve().parent.parent / "local_agent"
+
+# 下载版 Agent 需要的 Python 依赖（不含云端 MySQL/JWT 等服务器依赖）
+_AGENT_REQUIREMENTS = """\
+# VisualDL 本机训练 Agent 依赖
+websockets
+torch
+torchvision
+numpy
+fastapi
+pydantic
+"""
+
+# 下载版 Agent 的使用说明（随包附带）
+_AGENT_README = """\
+VisualDL 本机训练 Agent
+========================
+
+这是运行在你自己电脑上的训练程序。系统的训练在本机进行，云端只负责界面、
+登录和任务中转。请按以下步骤启动它。
+
+前置要求：已安装 Python 3.10 及以上版本。
+
+1. 解压本压缩包，进入解压后的目录（含 local_agent 文件夹的那一层）。
+
+2. 安装依赖（首次，网络较慢时请耐心等待 torch 下载）：
+
+       pip install -r requirements-agent.txt
+
+3. 启动 Agent（把 <令牌> 换成网页「本机训练 Agent」弹窗里的令牌）：
+
+       python -m local_agent.main --server {server} --token <令牌>
+
+启动成功后，网页顶部会显示「本机训练已连接」，即可进行结构校验、训练与代码
+导出。首次运行时 Agent 会自动从云端下载最新训练运行时代码。
+
+提示：令牌用于把本机 Agent 绑定到你的账号，请勿分享给他人。
+"""
+
+
+# —————————————————————————————————————————————
+# 进程内注册表：在线 Agent、浏览器客户端、训练任务
+# —————————————————————————————————————————————
+
+class AgentSession:
+    """一个用户本机 Agent 的在线会话。"""
+
+    def __init__(self, user_id: str, websocket: WebSocket):
+        self.user_id = user_id
+        self.websocket = websocket
+        self.agent_id: str = ""
+        self.runtime_version: str = ""
+        self.platform: str = ""
+        self.device_summary: dict[str, Any] = {}
+        self.connected_at = time.time()
+        self.last_heartbeat_at = time.time()
+        self._send_lock = asyncio.Lock()
+
+    async def send(self, message: dict[str, Any]) -> None:
+        async with self._send_lock:
+            await self.websocket.send_json(message)
+
+    def meta(self) -> dict[str, Any]:
+        return {
+            "agent_id": self.agent_id,
+            "user_id": self.user_id,
+            "runtime_version": self.runtime_version,
+            "platform": self.platform,
+            "device_summary": self.device_summary,
+            "connected_at": self.connected_at,
+            "last_heartbeat_at": self.last_heartbeat_at,
+        }
+
+
+class Registry:
+    """在线 Agent、浏览器客户端与训练任务的进程内注册表。"""
+
+    def __init__(self):
+        # 每个用户同一时间只保留一个在线 Agent（后连接覆盖旧连接）
+        self.agents: dict[str, AgentSession] = {}
+        # 每个用户可有多个浏览器标签页同时在线
+        self.clients: dict[str, set[WebSocket]] = {}
+        # 训练任务记录（job_id -> record）
+        self.jobs: dict[str, dict[str, Any]] = {}
+
+    def add_client(self, user_id: str, websocket: WebSocket) -> None:
+        self.clients.setdefault(user_id, set()).add(websocket)
+
+    def remove_client(self, user_id: str, websocket: WebSocket) -> None:
+        conns = self.clients.get(user_id)
+        if conns:
+            conns.discard(websocket)
+            if not conns:
+                self.clients.pop(user_id, None)
+
+    async def broadcast_to_clients(self, user_id: str, message: dict[str, Any]) -> None:
+        """把一条消息推送给该用户所有在线浏览器标签页。"""
+        for websocket in list(self.clients.get(user_id, set())):
+            try:
+                await websocket.send_json(message)
+            except Exception:
+                self.remove_client(user_id, websocket)
+
+
+registry = Registry()
+
+
+# —————————————————————————————————————————————
+# WebSocket 鉴权工具
+# —————————————————————————————————————————————
+
+def _authenticate_ws_token(token: Optional[str]) -> Optional[str]:
+    """校验 WebSocket 握手令牌，返回 user_id；失败返回 None。"""
+    if not token:
+        return None
+    try:
+        payload = verify_access_token(token)
+        return payload.get("sub")
+    except Exception:
+        return None
+
+
+def _agent_status_payload(user_id: str) -> dict[str, Any]:
+    """构造给浏览器的 Agent 在线状态消息。"""
+    agent = registry.agents.get(user_id)
+    if agent is None:
+        return {"type": "agent_status", "online": False}
+    return {
+        "type": "agent_status",
+        "online": True,
+        "agent_id": agent.agent_id,
+        "runtime_version": agent.runtime_version,
+        "platform": agent.platform,
+        "device_summary": agent.device_summary,
+    }
+
+
+# —————————————————————————————————————————————
+# REST：训练任务中转
+# —————————————————————————————————————————————
 
 @router.post("/train")
-def create_cloud_training_job(request: CloudTrainRequest, user_id: str | None = None) -> dict[str, Any]:
-    """创建云端训练任务，并准备下发给用户本机 Agent。
+async def create_cloud_training_job(request: CloudTrainRequest, user_id: str = Query(...)) -> dict[str, Any]:
+    """创建云端训练任务，并下发给用户本机 Agent。
 
-    TODO：实现云端任务创建、任务持久化、在线 Agent 检查和 WebSocket 下发。
+    云端只保存和转发该请求，不能在服务器本机执行 PyTorch 训练。
 
     参数：
-        request：前端提交的训练请求，包含模型图 model 和训练配置
-            train_config。云端只保存和转发该请求，不能在服务器本机执行
-            PyTorch 训练。
-        user_id：任务所属用户 id。当前先作为可选参数占位，正式实现时
-            应从 JWT 登录态中获取，而不是由前端直接传入。
+        request：前端提交的训练请求，包含模型图 model 和训练配置 train_config。
+        user_id：任务所属用户 id（当前作为查询参数占位，后续应从 JWT 获取）。
 
     返回：
-        dict，至少应包含：
-            status：请求是否被接收，例如 "ok"。
-            job_id：云端生成的训练任务 id。
-            job_status：任务初始状态，例如 "pending_agent"。
-            agent_status：该用户是否存在在线本机 Agent。
-            message：给前端展示的人类可读提示。
+        status / job_id / job_status / agent_status / message。
     """
+    agent = registry.agents.get(user_id)
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    train_config = dict(request.train_config or {})
+
+    record = {
+        "job_id": job_id,
+        "user_id": user_id,
+        "status": "pending_agent",
+        "model": request.model.model_dump(),
+        "train_config": train_config,
+        "current_epoch": 0,
+        "total_epochs": train_config.get("epochs", 1),
+        "current_step": 0,
+        "total_steps": 0,
+        "progress": 0.0,
+        "metrics": [],
+        "result": None,
+        "error": None,
+        "created_at": time.time(),
+    }
+    registry.jobs[job_id] = record
+
+    if agent is None:
+        record["status"] = "no_agent"
+        return {
+            "status": "ok",
+            "job_id": job_id,
+            "job_status": "no_agent",
+            "agent_status": "offline",
+            "message": "未检测到在线的本机训练 Agent，请先在本地启动训练 Agent。",
+        }
+
+    dispatch = await dispatch_training_job_to_agent(job_id, user_id, {
+        "job_id": job_id,
+        "model": record["model"],
+        "train_config": train_config,
+        "runtime_version": RUNTIME_VERSION,
+    })
+
+    record["status"] = "dispatched"
     return {
-        "status": "not_implemented",
-        "message": "TODO：创建云端任务并下发给本机 Agent",
+        "status": "ok",
+        "job_id": job_id,
+        "job_status": "dispatched",
+        "agent_status": "online",
+        "agent_id": dispatch.get("agent_id"),
+        "message": "训练任务已下发到本机 Agent。",
     }
 
 
 @router.get("/train/{job_id}/status")
-def get_cloud_training_status(job_id: str, user_id: str | None = None) -> dict[str, Any]:
-    """查询云端记录的训练任务状态。
+def get_cloud_training_status(job_id: str, user_id: str = Query(...)) -> dict[str, Any]:
+    """查询云端记录的训练任务状态。"""
+    record = registry.jobs.get(job_id)
+    if record is None or record["user_id"] != user_id:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "训练任务不存在"})
 
-    TODO：实现从数据库或任务状态表中读取训练进度。
-
-    参数：
-        job_id：由 /train 创建的训练任务 id。
-        user_id：任务所属用户 id。正式实现时应校验当前登录用户是否拥有
-            该任务。
-
-    返回：
-        dict，至少应包含：
-            job_id：训练任务 id。
-            status：任务状态，例如 "pending_agent"、"running"、
-                "completed"、"failed" 或 "cancelled"。
-            current_epoch：本机 Agent 回传的已完成 epoch 数。
-            total_epochs：用户请求的总 epoch 数。
-            progress：0 到 1 之间的整体进度。
-            metrics：本机 Agent 回传的逐轮训练指标。
-            error：训练失败时的错误信息。
-    """
     return {
         "job_id": job_id,
-        "status": "not_implemented",
-        "message": "TODO：查询云端训练任务状态",
+        "status": record["status"],
+        "current_epoch": record["current_epoch"],
+        "total_epochs": record["total_epochs"],
+        "current_step": record["current_step"],
+        "total_steps": record["total_steps"],
+        "progress": record["progress"],
+        "metrics": record["metrics"],
+        "error": record["error"],
     }
 
 
 @router.post("/train/{job_id}/cancel")
-def cancel_cloud_training_job(job_id: str, user_id: str | None = None) -> dict[str, Any]:
-    """请求取消一个正在执行或等待执行的训练任务。
+async def cancel_cloud_training_job(job_id: str, user_id: str = Query(...)) -> dict[str, Any]:
+    """请求取消一个正在执行或等待执行的训练任务。"""
+    record = registry.jobs.get(job_id)
+    if record is None or record["user_id"] != user_id:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "训练任务不存在"})
 
-    TODO：实现取消请求记录，并通过 WebSocket 转发给用户本机 Agent。
+    if record["status"] in ("completed", "failed", "cancelled"):
+        return {"job_id": job_id, "cancelled": False, "status": record["status"], "message": "任务已结束，无需取消。"}
 
-    参数：
-        job_id：需要取消的训练任务 id。
-        user_id：任务所属用户 id。正式实现时应校验当前登录用户是否拥有
-            该任务。
+    agent = registry.agents.get(user_id)
+    if agent is None:
+        record["status"] = "cancelled"
+        return {"job_id": job_id, "cancelled": True, "status": "cancelled", "message": "本机 Agent 已离线，任务已在云端标记为取消。"}
 
-    返回：
-        dict，至少应包含：
-            job_id：训练任务 id。
-            cancelled：取消请求是否被接受。
-            status：任务最新状态。
-            message：给前端展示的提示信息。
-    """
-    return {
-        "job_id": job_id,
-        "cancelled": False,
-        "status": "not_implemented",
-        "message": "TODO：向本机 Agent 转发取消请求",
-    }
+    await agent.send({"type": "cancel_training", "job_id": job_id})
+    return {"job_id": job_id, "cancelled": True, "status": record["status"], "message": "已向本机 Agent 转发取消请求。"}
 
 
 @router.get("/train/{job_id}/result")
-def get_cloud_training_result(job_id: str, user_id: str | None = None) -> dict[str, Any]:
-    """查询本机 Agent 回传的最终训练结果。
+def get_cloud_training_result(job_id: str, user_id: str = Query(...)) -> dict[str, Any]:
+    """查询本机 Agent 回传的最终训练结果。"""
+    record = registry.jobs.get(job_id)
+    if record is None or record["user_id"] != user_id:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "训练任务不存在"})
 
-    TODO：实现任务完成后的结果查询。
-
-    参数：
-        job_id：训练任务 id。
-        user_id：任务所属用户 id。正式实现时应校验当前登录用户是否拥有
-            该任务。
-
-    返回：
-        dict，至少应包含：
-            job_id：训练任务 id。
-            status：最终任务状态。
-            loss：最终验证损失。
-            accuracy：最终验证准确率。
-            metrics：完整训练指标历史。
-            device：本机 Agent 实际使用的设备，例如 "cpu" 或 "cuda"。
-            artifacts：本机训练产物元信息。默认只保存本机路径或摘要，
-                不强制上传 model.pt。
-            error：训练失败时的错误信息。
-    """
+    result = record.get("result") or {}
     return {
         "job_id": job_id,
-        "status": "not_implemented",
-        "message": "TODO：查询最终训练结果",
+        "status": record["status"],
+        "loss": result.get("loss"),
+        "accuracy": result.get("accuracy"),
+        "metrics": record["metrics"],
+        "device": result.get("device"),
+        "artifacts": result.get("artifacts"),
+        "error": record["error"],
     }
 
 
+@router.get("/agents/status")
+def get_agent_status(user_id: str = Query(...)) -> dict[str, Any]:
+    """查询某用户当前本机 Agent 的在线状态（供前端首次加载查询）。"""
+    return _agent_status_payload(user_id)
+
+
+# —————————————————————————————————————————————
+# WebSocket：本机 Agent 连接
+# —————————————————————————————————————————————
+
 @router.websocket("/agents/ws")
-async def agent_websocket_endpoint(websocket: WebSocket) -> None:
+async def agent_websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(default=None)) -> None:
     """接收用户本机 Agent 主动建立的 WebSocket 连接。
 
-    TODO：实现 Agent 身份认证、心跳、训练指令下发、进度消息接收、
-    结果消息接收和断线重连处理。
-
-    参数：
-        websocket：由本机 Agent 主动连接到服务器的 WebSocket 对象。
-            Agent 应在握手阶段或首条消息中携带身份令牌、Agent id 和
-            当前训练运行时版本。
-
-    返回：
-        None。正式实现中该函数应保持连接，循环收发 Agent 消息。
+    Agent 在握手时通过查询参数 token 携带用户 JWT，认证成功后注册为该
+    用户的在线 Agent，随后循环接收 Agent 上报的进度/结果消息并中转给
+    对应用户的浏览器。
     """
+    user_id = _authenticate_ws_token(token)
+    if user_id is None:
+        await websocket.close(code=1008, reason="Agent 令牌无效")
+        return
+
     await websocket.accept()
-    await websocket.close(code=1011, reason="TODO：Agent WebSocket 尚未实现")
+    session = AgentSession(user_id, websocket)
+    registry.agents[user_id] = session
+    await websocket.send_json({"type": "welcome", "runtime_version": RUNTIME_VERSION})
+
+    try:
+        while True:
+            message = await websocket.receive_json()
+            await _handle_agent_message(session, message)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        # 仅在当前会话仍是该用户注册的 Agent 时移除（避免误删新连接）
+        if registry.agents.get(user_id) is session:
+            registry.agents.pop(user_id, None)
+            await registry.broadcast_to_clients(user_id, {"type": "agent_status", "online": False})
 
 
-def dispatch_training_job_to_agent(job_id: str, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """将训练任务下发给用户在线的本机 Agent。
+async def _handle_agent_message(session: AgentSession, message: dict[str, Any]) -> None:
+    """处理本机 Agent 上报的一条消息。"""
+    msg_type = message.get("type")
+    user_id = session.user_id
 
-    TODO：实现在线 Agent 查询，并通过对应 WebSocket 发送 start_training
-    指令。
+    if msg_type == "hello":
+        session.agent_id = message.get("agent_id") or f"agent_{uuid.uuid4().hex[:8]}"
+        session.runtime_version = message.get("runtime_version", "")
+        session.platform = message.get("platform", "")
+        session.device_summary = message.get("device_summary", {}) or {}
+        # 通知该用户所有浏览器：本机 Agent 已上线
+        await registry.broadcast_to_clients(user_id, _agent_status_payload(user_id))
+        return
 
-    参数：
-        job_id：云端训练任务 id。
-        user_id：任务所属用户 id，用于选择该用户当前在线的 Agent。
-        payload：需要发送给 Agent 的训练载荷，应包含模型图、训练配置、
-            期望运行时版本和任务元信息。
+    if msg_type == "heartbeat":
+        session.last_heartbeat_at = time.time()
+        return
 
-    返回：
-        dict，至少应包含 dispatch_status、agent_id、sent_at 和 message。
+    if msg_type in ("training_update", "training_result"):
+        handle_agent_training_update(session.agent_id, message)
+        # 原样中转给浏览器
+        await registry.broadcast_to_clients(user_id, message)
+        return
+
+    if msg_type == "command_ack":
+        # 命令回执：记录到任务上，也转发给前端便于提示
+        job = registry.jobs.get(message.get("job_id", ""))
+        if job is not None and not message.get("accepted", True):
+            job["status"] = "failed"
+            job["error"] = message.get("message", "本机 Agent 拒绝了训练指令")
+        await registry.broadcast_to_clients(user_id, message)
+        return
+
+    if msg_type == "agent_response":
+        # 校验/设备/导出等请求-响应的回执，原样中转给浏览器
+        await registry.broadcast_to_clients(user_id, message)
+        return
+
+
+# —————————————————————————————————————————————
+# WebSocket：浏览器客户端连接
+# —————————————————————————————————————————————
+
+@router.websocket("/client/ws")
+async def client_websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(default=None)) -> None:
+    """接收浏览器建立的持久化 WebSocket 连接。
+
+    连接建立后立即推送当前 Agent 在线状态；之后由服务器把 Agent 回传的
+    训练进度/结果实时推送给浏览器。浏览器侧通常只接收，无需上行。
     """
-    raise NotImplementedError("TODO：将训练任务下发给本机 Agent")
+    user_id = _authenticate_ws_token(token)
+    if user_id is None:
+        await websocket.close(code=1008, reason="令牌无效")
+        return
+
+    await websocket.accept()
+    registry.add_client(user_id, websocket)
+    await websocket.send_json(_agent_status_payload(user_id))
+
+    try:
+        while True:
+            message = await websocket.receive_json()
+            await _handle_client_message(user_id, message)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        registry.remove_client(user_id, websocket)
+
+
+async def _handle_client_message(user_id: str, message: dict[str, Any]) -> None:
+    """处理浏览器上行消息（校验/设备/导出等需要 Agent 执行的请求）。"""
+    if message.get("type") != "agent_request":
+        return
+
+    request_id = message.get("request_id", "")
+    agent = registry.agents.get(user_id)
+    if agent is None:
+        # 无在线 Agent，直接回错误响应给浏览器
+        await registry.broadcast_to_clients(user_id, {
+            "type": "agent_response",
+            "request_id": request_id,
+            "ok": False,
+            "error": "未检测到在线的本机训练 Agent，请先在本地启动训练 Agent。",
+        })
+        return
+
+    # 转发给该用户的本机 Agent 执行
+    await agent.send({
+        "type": "agent_request",
+        "request_id": request_id,
+        "action": message.get("action"),
+        "payload": message.get("payload", {}),
+    })
+
+
+# —————————————————————————————————————————————
+# 运行时下载（首次使用需下载本机训练代码）
+# —————————————————————————————————————————————
+
+def _build_runtime_package() -> tuple[bytes, str]:
+    """把本机训练运行时源码打包为 zip，返回 (数据, sha256)。"""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in sorted(_RUNTIME_SOURCE_DIR.rglob("*.py")):
+            archive.write(path, arcname=f"runtime/{path.relative_to(_RUNTIME_SOURCE_DIR)}")
+    data = buffer.getvalue()
+    return data, hashlib.sha256(data).hexdigest()
+
+
+@router.get("/runtime/manifest")
+def get_runtime_manifest() -> dict[str, Any]:
+    """返回最新训练运行时的元信息，供 Agent 判断是否需要下载。"""
+    data, sha256 = _build_runtime_package()
+    return {
+        "version": RUNTIME_VERSION,
+        "download_url": "/runtime/download",
+        "sha256": sha256,
+        "size_bytes": len(data),
+        "min_agent_version": MIN_AGENT_VERSION,
+        "release_notes": "可视化深度学习训练运行时",
+    }
+
+
+@router.get("/runtime/download")
+def download_runtime() -> Response:
+    """下载训练运行时 zip 包。"""
+    data, _ = _build_runtime_package()
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="trainer-runtime-{RUNTIME_VERSION}.zip"'},
+    )
+
+
+# —————————————————————————————————————————————
+# 本机 Agent 下载（首次使用的用户从这里获取整个 Agent 程序）
+# —————————————————————————————————————————————
+
+@router.get("/agent/download")
+def download_agent(request: Request) -> Response:
+    """打包并下载完整的本机训练 Agent（含 local_agent 源码、依赖清单和说明）。
+
+    首次使用系统、本机还没有 Agent 程序的用户，通过网页「本机训练 Agent」
+    弹窗点击下载即可获取。解压后按 README 安装依赖并启动，即可连接云端。
+    """
+    # 根据当前请求推断云端地址，写进 README 的启动命令里
+    server_url = str(request.base_url).rstrip("/")
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        # 打包整个 local_agent 包（含 runtime 训练代码），保持包结构
+        for path in sorted(_AGENT_SOURCE_DIR.rglob("*.py")):
+            rel = path.relative_to(_AGENT_SOURCE_DIR.parent)  # 保留 local_agent/ 前缀
+            archive.writestr(f"visualdl-agent/{rel}", path.read_text(encoding="utf-8"))
+        archive.writestr("visualdl-agent/requirements-agent.txt", _AGENT_REQUIREMENTS)
+        archive.writestr("visualdl-agent/README.txt", _AGENT_README.format(server=server_url))
+
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="visualdl-agent-{RUNTIME_VERSION}.zip"'},
+    )
+
+
+# —————————————————————————————————————————————
+# 内部辅助
+# —————————————————————————————————————————————
+
+async def dispatch_training_job_to_agent(job_id: str, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """将训练任务下发给用户在线的本机 Agent。"""
+    agent = registry.agents.get(user_id)
+    if agent is None:
+        return {"dispatch_status": "no_agent", "agent_id": None, "sent_at": time.time(), "message": "无在线 Agent"}
+
+    await agent.send({"type": "start_training", **payload})
+    return {
+        "dispatch_status": "sent",
+        "agent_id": agent.agent_id,
+        "sent_at": time.time(),
+        "message": "训练指令已发送",
+    }
 
 
 def handle_agent_training_update(agent_id: str, message: dict[str, Any]) -> dict[str, Any]:
-    """处理本机 Agent 回传的训练进度或最终结果。
+    """处理本机 Agent 回传的训练进度或最终结果，更新云端任务状态。"""
+    job_id = message.get("job_id")
+    record = registry.jobs.get(job_id or "")
+    if record is None:
+        return {"status": "ignored", "job_id": job_id, "accepted": False, "message": "未知任务"}
 
-    TODO：实现消息校验、任务状态更新和指标持久化。
+    msg_type = message.get("type")
+    record["status"] = message.get("status", record["status"])
+    if "current_epoch" in message:
+        record["current_epoch"] = message["current_epoch"]
+    if "total_epochs" in message:
+        record["total_epochs"] = message["total_epochs"]
+    if "current_step" in message:
+        record["current_step"] = message["current_step"]
+    if "total_steps" in message:
+        record["total_steps"] = message["total_steps"]
+    if "progress" in message:
+        record["progress"] = message["progress"]
+    if message.get("metrics") is not None:
+        record["metrics"] = message["metrics"]
+    if message.get("error") is not None:
+        record["error"] = message["error"]
 
-    参数：
-        agent_id：发送该消息的本机 Agent id。
-        message：Agent 上报的消息，按类型可包含 job_id、status、metrics、
-            progress、artifacts、error 或 heartbeat 等字段。
+    if msg_type == "training_result":
+        record["result"] = {
+            "loss": message.get("loss"),
+            "accuracy": message.get("accuracy"),
+            "device": message.get("device"),
+            "artifacts": message.get("artifacts"),
+        }
 
-    返回：
-        dict，至少应包含 status、job_id、accepted 和 message。
-    """
-    raise NotImplementedError("TODO：保存 Agent 回传的训练状态")
+    return {"status": "ok", "job_id": job_id, "accepted": True, "message": "已更新"}
 
 
-def get_online_agent_for_user(user_id: str) -> dict[str, Any] | None:
-    """查询某个用户当前在线的本机 Agent。
+def get_online_agent_for_user(user_id: str) -> Optional[dict[str, Any]]:
+    """查询某个用户当前在线的本机 Agent 元信息。"""
+    agent = registry.agents.get(user_id)
+    return agent.meta() if agent is not None else None
 
-    TODO：实现在线 Agent 注册表查询。
 
-    参数：
-        user_id：需要查询本机 Agent 的用户 id。
-
-    返回：
-        如果用户有在线 Agent，返回 Agent 元信息 dict；否则返回 None。
-        Agent 元信息建议包含 agent_id、user_id、runtime_version、
-        connected_at、last_heartbeat_at、platform 和 device_summary。
-    """
-    raise NotImplementedError("TODO：查询用户在线 Agent")
+# 供 Docker/环境变量覆盖：训练产物默认目录（仅当 Agent 未指定时使用）
+DEFAULT_ARTIFACTS_ROOT = os.getenv("ARTIFACTS_ROOT", "training_artifacts")

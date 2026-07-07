@@ -1,31 +1,46 @@
-"""本机 Agent 连接云端服务器的 WebSocket 客户端。"""
+"""本机 Agent 连接云端服务器的 WebSocket 客户端。
 
-from typing import Any
+Agent 主动连接云端，注册为某用户的在线训练节点，接收云端下发的训练
+指令，在本机用 PyTorch 执行训练，并把进度与最终结果实时回传给云端。
+真正的训练循环运行在本机 runtime（local_agent.runtime.trainer）中。
+"""
+
+import asyncio
+import json
+import platform
+import threading
+import time
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+import websockets
+
+from .runtime import trainer as runtime_trainer
+from .runtime.device import get_device_summary
 
 
-def connect_to_cloud_server(
-    server_url: str,
-    auth_token: str,
-    agent_id: str | None = None,
-    runtime_version: str | None = None,
-) -> None:
-    """连接云端 WebSocket 服务。
+# —————————————————————————————————————————————
+# Agent 运行态（单进程内单连接）
+# —————————————————————————————————————————————
 
-    TODO：实现 WebSocket 建连、身份认证、心跳、断线重连、命令接收、
-    训练进度上报和最终结果上报。
+class AgentState:
+    def __init__(self):
+        self.websocket: Optional[Any] = None
+        self.agent_id: str = ""
+        self.runtime_version: str = ""
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self.send_lock = asyncio.Lock()
+        # 云端 job_id -> 本机 runtime job_id
+        self.job_map: dict[str, str] = {}
+        self.cancelled: set[str] = set()
 
-    参数：
-        server_url：云端 WebSocket 地址，例如
-            "wss://example.com/agents/ws"。
-        auth_token：用于绑定用户或设备的身份令牌。
-        agent_id：本机 Agent 的稳定 id。为空时应读取或生成本地 id。
-        runtime_version：当前已安装的 trainer-runtime 版本。
 
-    返回：
-        None。正式实现中该函数应持续运行，直到用户停止 Agent 或进程
-        收到关闭信号。
-    """
-    raise NotImplementedError("TODO：连接本机 Agent 到云端服务器")
+state = AgentState()
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def build_agent_hello_message(
@@ -36,70 +51,287 @@ def build_agent_hello_message(
 ) -> dict[str, Any]:
     """构造 Agent 连接云端后的首条注册消息。
 
-    TODO：实现 hello 消息构造。若协议改为在请求头中传递令牌，则首条
-    消息中不应重复发送敏感 token。
-
-    参数：
-        agent_id：本机 Agent 的稳定 id。
-        auth_token：用于绑定用户或设备的身份令牌。
-        runtime_version：当前安装的训练运行时版本。
-        device_summary：本机 CPU/GPU 能力摘要。
-
-    返回：
-        dict，包含消息类型、Agent id、身份信息或身份引用、运行时版本、
-        设备摘要、平台信息和时间戳。
+    令牌通过 WebSocket 握手 URL 的查询参数传递，因此 hello 消息里不再
+    重复携带敏感 token。
     """
-    raise NotImplementedError("TODO：构造 Agent hello 消息")
+    return {
+        "type": "hello",
+        "agent_id": agent_id,
+        "runtime_version": runtime_version,
+        "device_summary": device_summary,
+        "platform": f"{platform.system()} {platform.release()}",
+        "sent_at": _now_iso(),
+    }
 
 
-def handle_cloud_command(command: dict[str, Any]) -> dict[str, Any]:
-    """处理云端服务器下发的指令。
-
-    TODO：实现命令分发。预期指令类型包括 start_training、
-    cancel_training、check_runtime、download_runtime 和 ping。
-
-    参数：
-        command：云端服务器下发的消息，必须包含 type 字段，并根据指令
-            类型携带 job_id、模型图、训练配置或运行时版本等数据。
-
-    返回：
-        dict，说明该指令是否被接受，以及需要立即回传给云端的响应数据。
-    """
-    raise NotImplementedError("TODO：处理云端下发指令")
-
-
-def start_local_training_job(job_id: str, model_graph: dict[str, Any], train_config: dict[str, Any]) -> dict[str, Any]:
-    """在用户本机启动 PyTorch 训练任务。
-
-    TODO：对接 local_agent.runtime.trainer。训练循环必须在本机执行，并
-    通过 WebSocket 将进度、指标和最终结果回传给云端。
-
-    参数：
-        job_id：云端训练任务 id，用于关联进度、结果和训练产物。
-        model_graph：云端下发的可视化模型图结构。
-        train_config：训练配置，例如 dataset_name、epochs、batch_size、
-            学习率、device、data_dir 和 artifacts_dir。
-
-    返回：
-        dict，包含 job_id、accepted、local_job_id、status 和 message。
-    """
-    raise NotImplementedError("TODO：启动本机训练任务")
+async def _send(message: dict[str, Any]) -> None:
+    """通过当前活跃连接发送一条消息（串行化，避免并发写交错）。"""
+    if state.websocket is None:
+        return
+    async with state.send_lock:
+        await state.websocket.send(json.dumps(message))
 
 
 def send_training_update(job_id: str, status: str, payload: dict[str, Any]) -> None:
-    """向云端服务器发送训练进度或最终结果。
+    """向云端服务器发送训练进度或最终结果（线程安全，跨线程投递到事件循环）。
 
-    TODO：使用当前活跃的 WebSocket 连接发送消息，必要时加入本地队列以
-    支持断线后的补发。
+    训练循环运行在独立线程中，这里把发送协程调度回 Agent 的事件循环。
+    """
+    message = {"job_id": job_id, "status": status, **payload}
+    loop = state.loop
+    if loop is None:
+        return
+    asyncio.run_coroutine_threadsafe(_send(message), loop)
+
+
+def handle_cloud_command(command: dict[str, Any]) -> dict[str, Any]:
+    """处理云端服务器下发的指令，返回是否接受及回执数据。"""
+    cmd_type = command.get("type")
+
+    if cmd_type == "start_training":
+        job_id = command.get("job_id", "")
+        model_graph = command.get("model", {})
+        train_config = command.get("train_config", {})
+        return start_local_training_job(job_id, model_graph, train_config)
+
+    if cmd_type == "cancel_training":
+        job_id = command.get("job_id", "")
+        local_job_id = state.job_map.get(job_id)
+        state.cancelled.add(job_id)
+        if local_job_id:
+            try:
+                runtime_trainer.stop_training_job(local_job_id)
+            except Exception:
+                pass
+        return {"type": "command_ack", "job_id": job_id, "command": "cancel_training", "accepted": True, "message": "已请求停止本机训练"}
+
+    if cmd_type == "agent_request":
+        return _handle_agent_request(command)
+
+    if cmd_type == "ping":
+        return {"type": "pong"}
+
+    return {"type": "command_ack", "command": cmd_type, "accepted": False, "message": f"未知指令：{cmd_type}"}
+
+
+def _handle_agent_request(command: dict[str, Any]) -> dict[str, Any]:
+    """处理云端转发的请求-响应类指令（结构校验 / 设备查询 / 代码导出）。"""
+    request_id = command.get("request_id", "")
+    action = command.get("action")
+    payload = command.get("payload", {}) or {}
+
+    def ok(data: Any) -> dict[str, Any]:
+        return {"type": "agent_response", "request_id": request_id, "ok": True, "data": data}
+
+    def fail(error: str) -> dict[str, Any]:
+        return {"type": "agent_response", "request_id": request_id, "ok": False, "error": error}
+
+    try:
+        if action == "validate":
+            from .runtime.validator import validate_model_graph
+            return ok(validate_model_graph(payload.get("model", {})))
+
+        if action == "devices":
+            return ok(get_device_summary())
+
+        if action == "export":
+            from .runtime.code_exporter import export_to_pytorch
+            code = export_to_pytorch(payload.get("model", {}), payload.get("class_name", "GeneratedModel"))
+            if not code:
+                return fail("本机训练运行时暂未实现代码导出。")
+            return ok({"code": code})
+
+        if action == "list_dir":
+            return ok(_list_directory(payload.get("path")))
+
+        return fail(f"未知请求：{action}")
+    except Exception as exc:
+        return fail(str(exc))
+
+
+def _list_directory(path: Optional[str]) -> dict[str, Any]:
+    """列出本机某目录下的子目录，供前端浏览选择存储位置。"""
+    import os
+
+    base = os.path.expanduser(path) if path else os.path.expanduser("~")
+    base = os.path.abspath(base)
+    if not os.path.isdir(base):
+        base = os.path.expanduser("~")
+
+    entries = []
+    try:
+        for name in sorted(os.listdir(base), key=str.lower):
+            if name.startswith("."):
+                continue  # 隐藏以点开头的目录，界面更清爽
+            full = os.path.join(base, name)
+            if os.path.isdir(full):
+                entries.append({"name": name, "path": full})
+    except PermissionError:
+        pass
+
+    parent = os.path.dirname(base)
+    return {
+        "path": base,
+        "parent": parent if parent != base else None,
+        "entries": entries,
+    }
+
+
+def start_local_training_job(job_id: str, model_graph: dict[str, Any], train_config: dict[str, Any]) -> dict[str, Any]:
+    """在用户本机启动 PyTorch 训练任务，并在后台线程流式上报进度。"""
+    try:
+        created = runtime_trainer.create_training_job(model_graph=model_graph, train_config=train_config)
+    except Exception as exc:
+        send_training_update(job_id, "failed", {"type": "training_result", "error": f"创建训练任务失败：{exc}"})
+        return {"type": "command_ack", "job_id": job_id, "command": "start_training", "accepted": False, "message": str(exc)}
+
+    local_job_id = created["job_id"]
+    state.job_map[job_id] = local_job_id
+
+    thread = threading.Thread(target=_run_and_stream, args=(job_id, local_job_id), daemon=True)
+    thread.start()
+
+    return {
+        "type": "command_ack",
+        "job_id": job_id,
+        "command": "start_training",
+        "accepted": True,
+        "local_job_id": local_job_id,
+        "status": "running",
+        "message": "本机已开始训练",
+    }
+
+
+def _run_and_stream(job_id: str, local_job_id: str) -> None:
+    """在后台线程运行训练，并周期性把状态流式回传给云端。"""
+    # 轮询线程：训练在另一线程阻塞执行，这里定时读取 runtime 任务状态并上报
+    def poll_loop():
+        last_signature = None
+        while True:
+            try:
+                status = runtime_trainer.get_job_status(local_job_id)
+            except Exception:
+                break
+            signature = (status.get("status"), status.get("current_epoch"), status.get("current_step"), len(status.get("metrics", [])))
+            if signature != last_signature:
+                last_signature = signature
+                send_training_update(job_id, status.get("status", "running"), {
+                    "type": "training_update",
+                    "current_epoch": status.get("current_epoch", 0),
+                    "total_epochs": status.get("total_epochs", 0),
+                    "current_step": status.get("current_step", 0),
+                    "total_steps": status.get("total_steps", 0),
+                    "progress": status.get("progress", 0.0),
+                    "metrics": status.get("metrics", []),
+                })
+            if status.get("status") in ("completed", "failed", "cancelled"):
+                break
+            time.sleep(0.8)
+
+    poller = threading.Thread(target=poll_loop, daemon=True)
+    poller.start()
+
+    # 在当前线程阻塞执行真实训练（PyTorch）
+    try:
+        runtime_trainer.run_training_job(local_job_id)
+    except Exception:
+        pass  # 失败状态由 trainer 写入任务，poll_loop 会读取并上报
+
+    poller.join(timeout=5)
+
+    # 汇总最终结果并回传
+    try:
+        result = runtime_trainer.get_job_result(local_job_id)
+    except Exception as exc:
+        send_training_update(job_id, "failed", {"type": "training_result", "error": str(exc)})
+        return
+
+    metrics = result.get("metrics", [])
+    final = _summarize_metrics(metrics)
+    send_training_update(job_id, result.get("status", "completed"), {
+        "type": "training_result",
+        "loss": final.get("loss"),
+        "accuracy": final.get("accuracy"),
+        "device": result.get("device"),
+        "metrics": metrics,
+        "artifacts": result.get("artifacts"),
+        "error": result.get("error"),
+    })
+
+
+def _summarize_metrics(metrics: list) -> dict[str, Any]:
+    """从逐轮指标里取最后一轮的验证 loss/accuracy 作为最终结果摘要。"""
+    if not metrics:
+        return {"loss": None, "accuracy": None}
+    last = metrics[-1] or {}
+    eval_m = last.get("eval") or {}
+    return {"loss": eval_m.get("loss"), "accuracy": eval_m.get("accuracy")}
+
+
+async def connect_to_cloud_server(
+    server_url: str,
+    auth_token: str,
+    agent_id: Optional[str] = None,
+    runtime_version: Optional[str] = None,
+) -> None:
+    """连接云端 WebSocket 服务并持续运行（断线自动重连）。
 
     参数：
-        job_id：云端训练任务 id。
-        status：当前任务状态，例如 running、completed、failed 或
-            cancelled。
-        payload：状态对应的数据。训练中通常包含 current_epoch、progress
-            和 metrics；训练完成时通常包含最终指标和产物元信息。
-
-    返回：
-        None。正式实现中该函数应发送或排队一条 WebSocket 消息。
+        server_url：云端 WebSocket 地址，例如 ws://127.0.0.1:8000。
+        auth_token：绑定用户身份的 JWT 令牌。
+        agent_id：本机 Agent 稳定 id，为空则自动生成。
+        runtime_version：当前训练运行时版本。
     """
-    raise NotImplementedError("TODO：向云端发送训练状态")
+    state.agent_id = agent_id or f"agent_{uuid.uuid4().hex[:8]}"
+    state.runtime_version = runtime_version or ""
+    state.loop = asyncio.get_running_loop()
+
+    ws_base = server_url.rstrip("/")
+    if ws_base.startswith("http://"):
+        ws_base = "ws://" + ws_base[len("http://"):]
+    elif ws_base.startswith("https://"):
+        ws_base = "wss://" + ws_base[len("https://"):]
+    ws_url = f"{ws_base}/agents/ws?token={auth_token}"
+
+    device_summary = get_device_summary()
+
+    while True:
+        try:
+            async with websockets.connect(ws_url, max_size=32 * 1024 * 1024) as websocket:
+                state.websocket = websocket
+                await _send(build_agent_hello_message(
+                    agent_id=state.agent_id,
+                    auth_token=auth_token,
+                    runtime_version=state.runtime_version,
+                    device_summary=device_summary,
+                ))
+                heartbeat = asyncio.create_task(_heartbeat_loop())
+                try:
+                    async for raw in websocket:
+                        await _on_cloud_message(raw)
+                finally:
+                    heartbeat.cancel()
+        except Exception as exc:
+            print(f"[agent] 与云端连接中断，将在 3 秒后重连：{exc}")
+        finally:
+            state.websocket = None
+        await asyncio.sleep(3)
+
+
+async def _heartbeat_loop() -> None:
+    while True:
+        await asyncio.sleep(15)
+        await _send({"type": "heartbeat", "sent_at": _now_iso()})
+
+
+async def _on_cloud_message(raw: Any) -> None:
+    """收到云端一条指令：分发处理并回传回执。"""
+    try:
+        command = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return
+    if command.get("type") == "welcome":
+        return
+    response = handle_cloud_command(command)
+    if response:
+        await _send(response)

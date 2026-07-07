@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, watch } from "vue";
-import { loadDevices, loadProjectTemplates } from "./actions";
+import { loadProjectTemplates } from "./actions";
 import { auth, initializeAuth, isLoggedIn } from "./auth";
 import { cancelPendingConnection, hideConnectionMenu, hideNodeMenu } from "./canvas";
 import { closeHelpModal, initializeBeginnerGuide, ui } from "./store";
 import ActionBar from "./components/ActionBar.vue";
+import AgentModal from "./components/AgentModal.vue";
 import AuthPage from "./components/AuthPage.vue";
 import CanvasBoard from "./components/CanvasBoard.vue";
 import ContextMenus from "./components/ContextMenus.vue";
@@ -13,6 +14,8 @@ import GuideStrip from "./components/GuideStrip.vue";
 import HelpModal from "./components/HelpModal.vue";
 import InspectorPanel from "./components/InspectorPanel.vue";
 import LayerSidebar from "./components/LayerSidebar.vue";
+import MyProjectsModal from "./components/MyProjectsModal.vue";
+import SaveProjectModal from "./components/SaveProjectModal.vue";
 import StorageSettings from "./components/StorageSettings.vue";
 import TemplateGallery from "./components/TemplateGallery.vue";
 import ToastContainer from "./components/ToastContainer.vue";
@@ -35,14 +38,17 @@ function handleKeydown(event: KeyboardEvent) {
     closeHelpModal();
     ui.templateGalleryOpen = false;
     ui.storageSettingsOpen = false;
+    ui.agentModalOpen = false;
+    ui.saveModalOpen = false;
+    ui.projectsModalOpen = false;
   }
 }
 
 // 进入主界面后再加载后端资源与新手引导
 watch(loggedIn, entered => {
   if (entered) {
+    // 设备信息由本机 Agent 通过 WebSocket 上报，无需单独拉取
     initializeBeginnerGuide();
-    void loadDevices();
     void loadProjectTemplates();
   }
 }, { immediate: true });
@@ -97,6 +103,9 @@ onBeforeUnmount(() => {
     <HelpModal />
     <TemplateGallery />
     <StorageSettings />
+    <AgentModal />
+    <SaveProjectModal />
+    <MyProjectsModal />
     <TrainingMonitor />
   </template>
 

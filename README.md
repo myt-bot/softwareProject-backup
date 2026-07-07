@@ -103,13 +103,36 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 
 前端默认访问 `http://127.0.0.1:8000` 上的云端后端接口。若 `5173` 或 `8000` 端口被占用，需要先关闭占用该端口的旧服务，或同步修改前端接口地址和启动端口。
 
-终端三：启动用户本机 Agent（开发调试）。
+终端三：启动用户本机 Agent，连接云端并等待训练指令。
+
+**首次使用（纯网页用户，本机没有 Agent 代码）**：登录后点击网页顶栏「本机训练
+未连接」打开「本机训练 Agent」弹窗，点「下载本机 Agent」下载压缩包
+（云端 `GET /agent/download` 返回，含完整 `local_agent` 源码、依赖清单和说明），
+解压后按包内 `README.txt` 执行：
 
 ```bash
-python -m uvicorn local_agent.main:app --host 127.0.0.1 --port 18000
+pip install -r requirements-agent.txt
+python -m local_agent.main --server http://127.0.0.1:8000 --token <你的JWT令牌>
 ```
 
-本机 Agent 负责设备检测、模型结构校验、PyTorch 训练和代码导出。方案 B 中，Agent 启动后还会通过 `local_agent/runtime_manager.py` 检查并下载合适版本的 `trainer-runtime`；当前代码已预留函数和参数说明，具体下载、校验、安装逻辑尚待实现。
+**开发环境（已 clone 仓库）**：可直接在项目根目录运行（令牌可在弹窗复制或从
+浏览器 localStorage 的 `model-workshop-token` 取得）：
+
+```bash
+python -m local_agent.main --server http://127.0.0.1:8000 --token <你的JWT令牌>
+```
+
+本机 Agent 会：
+
+1. 首次运行时通过 `local_agent/runtime_manager.py` 从云端 `/runtime/manifest` 与
+   `/runtime/download` 下载训练运行时代码，做 SHA-256 校验后安装到
+   `~/.visualdl_agent/runtime`（已实现）。
+2. 主动用 WebSocket 连接云端 `/agents/ws`，注册为当前用户的在线训练节点。
+3. 接收云端下发的训练/校验/设备/导出指令，在本机用 PyTorch 执行，并把进度与结果
+   通过 WebSocket 实时回传给云端；云端再经 `/client/ws` 推送到浏览器。
+
+Agent 连接成功后，网页顶栏会显示「本机训练已连接」，此时才能进行结构校验、训练与
+代码导出（这些都需要本机的 PyTorch 运行时）。
 
 ## Docker Compose 一键部署（云端后端 + MySQL）
 
@@ -214,16 +237,18 @@ project/
     src/
       main.ts           # 应用入口，挂载 Vue 根组件
       App.vue           # 根组件，组织页面整体布局
-      store.ts          # 全局响应式状态与纯数据逻辑
-      auth.ts           # 登录状态管理（token 持久化与会话恢复）
+      store.ts          # 全局响应式状态与纯数据逻辑（含本机 Agent 在线状态）
+      auth.ts           # 登录状态管理（token 持久化与会话恢复，登录后建立 WebSocket）
+      ws.ts             # 与云端的持久化 WebSocket（Agent 状态、训练进度推送、校验/导出请求-响应）
       canvas.ts         # 画布交互引擎（拖拽/连线/SVG 绘制/缩放）
-      actions.ts        # 后端交互动作（校验/保存/导出/训练）
-      monitor.ts        # 训练监控页状态机与轮询
+      actions.ts        # 业务动作（校验/保存/导出/训练，经 WebSocket 转发到本机 Agent）
+      monitor.ts        # 训练监控页状态机（进度由 WebSocket 推送驱动）
       types.ts          # 共享类型定义
       api/
-        client.ts       # 后端接口调用封装
+        client.ts       # 云端 REST 接口与 WebSocket URL 封装
       components/       # Vue 组件
-        TopBar.vue          # 顶栏与数据集下拉
+        TopBar.vue          # 顶栏与数据集下拉、本机 Agent 连接状态
+        AgentModal.vue      # 本机训练 Agent 指引弹窗（启动命令、连接状态）
         DeviceSelector.vue  # 训练设备选择（CPU / GPU）
         StorageSettings.vue # 存储位置设置（数据集下载 / 结果保存目录）
         GuideStrip.vue      # 新手引导条
@@ -364,7 +389,12 @@ LSTM、SelfAttention、TransformerEncoder、Seq2Seq、VAE、GraphConv。
 | GET    | /train/{job_id}/status    | 查询云端记录的训练状态 | 云端中转 |
 | GET    | /train/{job_id}/result    | 查询本机 Agent 回传的训练结果 | 云端中转 |
 | POST   | /train/{job_id}/cancel    | 请求取消训练任务，并转发给本机 Agent | 云端中转 |
-| WS     | /agents/ws                | 本机 Agent 主动连接云端的 WebSocket | 云端中转 |
+| GET    | /agents/status            | 查询某用户本机 Agent 的在线状态 | 云端中转 |
+| WS     | /agents/ws                | 本机 Agent 主动连接云端的 WebSocket（下发指令 / 接收进度） | 云端中转 |
+| WS     | /client/ws                | 浏览器持久化连接（推送 Agent 状态与训练进度、转发校验/导出请求） | 云端中转 |
+| GET    | /agent/download           | 下载完整本机 Agent 程序 zip（首次使用的用户获取 Agent） | 云端中转 |
+| GET    | /runtime/manifest         | 训练运行时版本元信息（供 Agent 判断是否需要下载） | 云端中转 |
+| GET    | /runtime/download         | 下载训练运行时 zip 包（本机首次使用自动获取） | 云端中转 |
 | POST   | /auth/register            | 注册新用户（自动登录） | M1   |
 | POST   | /auth/login               | 用户登录（邮箱 + 密码） | M1   |
 | GET    | /auth/me                  | 获取当前登录用户信息   | M1   |
@@ -390,7 +420,11 @@ LSTM、SelfAttention、TransformerEncoder、Seq2Seq、VAE、GraphConv。
 | GET  | /devices    | 获取用户本机可用 CPU/GPU 设备 |
 | POST | /validate   | 在用户本机校验模型结构并推导维度 |
 
-本机 Agent 的训练启动、取消、进度上报和结果回传主要通过主动连接云端的 WebSocket 完成；本机 HTTP 接口用于开发调试和本地能力检查。
+本机 Agent 通过主动连接云端的 WebSocket（`/agents/ws`）接收指令并回传进度：训练的
+启动/取消/进度/结果，以及结构校验、设备查询、代码导出，都以 WebSocket 消息形式在
+「浏览器 ↔ 云端 ↔ 本机 Agent」之间中转。上表的本机 HTTP 接口仅用于开发调试和本地
+能力检查（`python -m local_agent.main` 启动的是 WebSocket 客户端，默认不对外提供
+这些 HTTP 接口）。
 
 ## 云端后端模块和函数说明
 
