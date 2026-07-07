@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "dev": "vite --configLoader runner",
+    "build": "vue-tsc --noEmit && vite build --configLoader runner",
     "typecheck": "vue-tsc --noEmit",
     "preview": "vite preview"
   },

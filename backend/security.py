@@ -15,6 +15,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
+from backend.env import load_dotenv_if_present
+
+load_dotenv_if_present()
+
 # ============================================================
 # 密码哈希配置
 # ============================================================

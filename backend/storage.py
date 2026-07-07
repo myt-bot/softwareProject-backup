@@ -44,6 +44,10 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 
+from backend.env import load_dotenv_if_present
+
+load_dotenv_if_present()
+
 
 # ============================================================
 # 连接配置
