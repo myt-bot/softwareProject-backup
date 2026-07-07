@@ -68,7 +68,7 @@ pip install -r requirements.txt
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 启动后在浏览器访问：
@@ -164,13 +164,13 @@ python -m backend.migrate_json_to_mysql
 
 ### 常用命令
 
-| 命令 | 作用 |
-| --- | --- |
-| `docker compose ps` | 查看服务状态 |
-| `docker compose logs -f api` | 跟踪后端日志 |
-| `docker compose down` | 停止并删除容器（**数据卷保留，数据不丢**） |
-| `docker compose down -v` | ⚠️ 连数据卷一起删除，数据库数据将清空 |
-| `docker compose up -d --build` | 代码更新后重新构建镜像并启动 |
+| 命令                             | 作用                                             |
+| -------------------------------- | ------------------------------------------------ |
+| `docker compose ps`            | 查看服务状态                                     |
+| `docker compose logs -f api`   | 跟踪后端日志                                     |
+| `docker compose down`          | 停止并删除容器（**数据卷保留，数据不丢**） |
+| `docker compose down -v`       | ⚠️ 连数据卷一起删除，数据库数据将清空          |
+| `docker compose up -d --build` | 代码更新后重新构建镜像并启动                     |
 
 ### 数据持久化与备份
 
@@ -190,12 +190,12 @@ docker exec -i vdl-mysql mysql -uroot -p密码 visual_dl < backup_2026-07-06.sql
 
 ### 环境变量
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `MYSQL_ROOT_PASSWORD` | `devroot` | MySQL root 密码（生产部署必改） |
-| `MYSQL_DATABASE` | `visual_dl` | 数据库名 |
-| `JWT_SECRET_KEY` | 开发默认值 | JWT 签名密钥（生产部署必改） |
-| `DATABASE_URL` | 指向本机 3306 | 后端数据库连接串；手动运行后端时可用它指向任意 MySQL |
+| 变量                    | 默认值        | 说明                                                 |
+| ----------------------- | ------------- | ---------------------------------------------------- |
+| `MYSQL_ROOT_PASSWORD` | `devroot`   | MySQL root 密码（生产部署必改）                      |
+| `MYSQL_DATABASE`      | `visual_dl` | 数据库名                                             |
+| `JWT_SECRET_KEY`      | 开发默认值    | JWT 签名密钥（生产部署必改）                         |
+| `DATABASE_URL`        | 指向本机 3306 | 后端数据库连接串；手动运行后端时可用它指向任意 MySQL |
 
 在项目根目录创建 `.env`（参考 `.env.example`）即可覆盖默认值；`.env` 已被
 `.gitignore` 忽略，不会提交到仓库。
@@ -363,13 +363,13 @@ project/
 
 本机 Agent 训练运行时目前支持以下 torchvision 内置数据集：
 
-| 数据集 | 输入形状 | 分类数 |
-| ------ | -------- | ------ |
-| MNIST | [1, 28, 28] | 10 |
-| FashionMNIST | [1, 28, 28] | 10 |
-| KMNIST | [1, 28, 28] | 10 |
-| CIFAR10 | [3, 32, 32] | 10 |
-| CIFAR100 | [3, 32, 32] | 100 |
+| 数据集       | 输入形状    | 分类数 |
+| ------------ | ----------- | ------ |
+| MNIST        | [1, 28, 28] | 10     |
+| FashionMNIST | [1, 28, 28] | 10     |
+| KMNIST       | [1, 28, 28] | 10     |
+| CIFAR10      | [3, 32, 32] | 10     |
+| CIFAR100     | [3, 32, 32] | 100    |
 
 ## 当前计划支持的层类型
 
@@ -391,43 +391,43 @@ LSTM、SelfAttention、TransformerEncoder、Seq2Seq、VAE、GraphConv。
 
 ### 云端后端接口
 
-| 方法   | 路径                      | 功能                   | 模块 |
-| ------ | ------------------------- | ---------------------- | ---- |
-| GET    | /health                   | 检查云端后端服务是否正常 | -    |
-| POST   | /train                    | 创建云端训练任务，并下发给用户本机 Agent | 云端中转 |
-| GET    | /train/{job_id}/status    | 查询云端记录的训练状态 | 云端中转 |
-| GET    | /train/{job_id}/result    | 查询本机 Agent 回传的训练结果 | 云端中转 |
-| POST   | /train/{job_id}/cancel    | 请求取消训练任务，并转发给本机 Agent | 云端中转 |
-| GET    | /agents/status            | 查询某用户本机 Agent 的在线状态 | 云端中转 |
-| WS     | /agents/ws                | 本机 Agent 主动连接云端的 WebSocket（下发指令 / 接收进度） | 云端中转 |
-| WS     | /client/ws                | 浏览器持久化连接（推送 Agent 状态与训练进度、转发校验/导出请求） | 云端中转 |
-| GET    | /agent/download           | 下载完整本机 Agent 程序 zip（首次使用的用户获取 Agent） | 云端中转 |
-| GET    | /runtime/manifest         | 训练运行时版本元信息（供 Agent 判断是否需要下载） | 云端中转 |
-| GET    | /runtime/download         | 下载训练运行时 zip 包（本机首次使用自动获取） | 云端中转 |
-| POST   | /auth/register            | 注册新用户（自动登录） | M1   |
-| POST   | /auth/login               | 用户登录（邮箱 + 密码） | M1   |
-| GET    | /auth/me                  | 获取当前登录用户信息   | M1   |
-| POST   | /users                    | 创建用户               | M1   |
-| GET    | /users                    | 获取所有用户列表       | M1   |
-| GET    | /users/{user_id}          | 获取指定用户信息       | M1   |
-| PUT    | /users/{user_id}          | 更新用户信息           | M1   |
-| DELETE | /users/{user_id}          | 删除用户及关联项目     | M1   |
-| POST   | /projects                 | 创建项目（保存模型）   | M1   |
-| GET    | /projects                 | 获取项目列表（支持 ?user_id= 按用户过滤） | M1 |
-| GET    | /projects/templates       | 获取内置模型模板列表   | M7   |
-| GET    | /projects/templates/{template_name} | 获取指定模板的完整模型图 | M7 |
-| POST   | /projects/from-template   | 基于内置模板创建项目   | M7   |
-| GET    | /projects/{project_id}    | 获取指定项目详情       | M1   |
-| PUT    | /projects/{project_id}    | 更新项目信息           | M1   |
-| DELETE | /projects/{project_id}    | 删除项目               | M1   |
+| 方法   | 路径                                | 功能                                                             | 模块     |
+| ------ | ----------------------------------- | ---------------------------------------------------------------- | -------- |
+| GET    | /health                             | 检查云端后端服务是否正常                                         | -        |
+| POST   | /train                              | 创建云端训练任务，并下发给用户本机 Agent                         | 云端中转 |
+| GET    | /train/{job_id}/status              | 查询云端记录的训练状态                                           | 云端中转 |
+| GET    | /train/{job_id}/result              | 查询本机 Agent 回传的训练结果                                    | 云端中转 |
+| POST   | /train/{job_id}/cancel              | 请求取消训练任务，并转发给本机 Agent                             | 云端中转 |
+| GET    | /agents/status                      | 查询某用户本机 Agent 的在线状态                                  | 云端中转 |
+| WS     | /agents/ws                          | 本机 Agent 主动连接云端的 WebSocket（下发指令 / 接收进度）       | 云端中转 |
+| WS     | /client/ws                          | 浏览器持久化连接（推送 Agent 状态与训练进度、转发校验/导出请求） | 云端中转 |
+| GET    | /agent/download                     | 下载完整本机 Agent 程序 zip（首次使用的用户获取 Agent）          | 云端中转 |
+| GET    | /runtime/manifest                   | 训练运行时版本元信息（供 Agent 判断是否需要下载）                | 云端中转 |
+| GET    | /runtime/download                   | 下载训练运行时 zip 包（本机首次使用自动获取）                    | 云端中转 |
+| POST   | /auth/register                      | 注册新用户（自动登录）                                           | M1       |
+| POST   | /auth/login                         | 用户登录（邮箱 + 密码）                                          | M1       |
+| GET    | /auth/me                            | 获取当前登录用户信息                                             | M1       |
+| POST   | /users                              | 创建用户                                                         | M1       |
+| GET    | /users                              | 获取所有用户列表                                                 | M1       |
+| GET    | /users/{user_id}                    | 获取指定用户信息                                                 | M1       |
+| PUT    | /users/{user_id}                    | 更新用户信息                                                     | M1       |
+| DELETE | /users/{user_id}                    | 删除用户及关联项目                                               | M1       |
+| POST   | /projects                           | 创建项目（保存模型）                                             | M1       |
+| GET    | /projects                           | 获取项目列表（支持 ?user_id= 按用户过滤）                        | M1       |
+| GET    | /projects/templates                 | 获取内置模型模板列表                                             | M7       |
+| GET    | /projects/templates/{template_name} | 获取指定模板的完整模型图                                         | M7       |
+| POST   | /projects/from-template             | 基于内置模板创建项目                                             | M7       |
+| GET    | /projects/{project_id}              | 获取指定项目详情                                                 | M1       |
+| PUT    | /projects/{project_id}              | 更新项目信息                                                     | M1       |
+| DELETE | /projects/{project_id}              | 删除项目                                                         | M1       |
 
 ### 本机 Agent 接口
 
-| 方法 | 路径        | 功能 |
-| ---- | ----------- | ---- |
-| GET  | /health     | 检查本机 Agent 是否启动，并返回本机设备摘要 |
-| GET  | /devices    | 获取用户本机可用 CPU/GPU 设备 |
-| POST | /validate   | 在用户本机校验模型结构并推导维度 |
+| 方法 | 路径      | 功能                                        |
+| ---- | --------- | ------------------------------------------- |
+| GET  | /health   | 检查本机 Agent 是否启动，并返回本机设备摘要 |
+| GET  | /devices  | 获取用户本机可用 CPU/GPU 设备               |
+| POST | /validate | 在用户本机校验模型结构并推导维度            |
 
 本机 Agent 通过主动连接云端的 WebSocket（`/agents/ws`）接收指令并回传进度：训练的
 启动/取消/进度/结果，以及结构校验、设备查询、代码导出，都以 WebSocket 消息形式在
@@ -439,105 +439,105 @@ LSTM、SelfAttention、TransformerEncoder、Seq2Seq、VAE、GraphConv。
 
 ### backend/main.py
 
-| 函数                  | 功能                                       |
-| --------------------- | ------------------------------------------ |
-| health_check          | 检查云端后端服务是否正常运行                  |
-| register              | 注册新用户并返回 JWT 令牌（M1）           |
-| login                 | 验证凭据后返回 JWT 令牌（M1）             |
-| get_current_user_info | 获取当前登录用户信息（M1）                |
-| create_user           | 创建新用户（M1）                          |
-| list_users            | 获取所有用户列表（M1）                    |
-| get_user              | 获取指定用户信息（M1）                    |
-| update_user           | 更新用户信息（M1）                        |
-| delete_user           | 删除用户及关联项目（M1）                  |
-| create_project        | 创建项目/保存模型（M1）                   |
-| list_project_templates | 获取内置模型模板列表（M7）               |
-| get_project_template  | 获取指定模板的完整模型图（M7）            |
-| create_project_from_template | 基于内置模板创建项目（M7）          |
-| list_projects         | 获取项目列表（M1）                        |
-| get_project           | 获取指定项目详情（M1）                    |
-| update_project        | 更新项目信息（M1）                        |
-| delete_project        | 删除项目（M1）                            |
+| 函数                         | 功能                            |
+| ---------------------------- | ------------------------------- |
+| health_check                 | 检查云端后端服务是否正常运行    |
+| register                     | 注册新用户并返回 JWT 令牌（M1） |
+| login                        | 验证凭据后返回 JWT 令牌（M1）   |
+| get_current_user_info        | 获取当前登录用户信息（M1）      |
+| create_user                  | 创建新用户（M1）                |
+| list_users                   | 获取所有用户列表（M1）          |
+| get_user                     | 获取指定用户信息（M1）          |
+| update_user                  | 更新用户信息（M1）              |
+| delete_user                  | 删除用户及关联项目（M1）        |
+| create_project               | 创建项目/保存模型（M1）         |
+| list_project_templates       | 获取内置模型模板列表（M7）      |
+| get_project_template         | 获取指定模板的完整模型图（M7）  |
+| create_project_from_template | 基于内置模板创建项目（M7）      |
+| list_projects                | 获取项目列表（M1）              |
+| get_project                  | 获取指定项目详情（M1）          |
+| update_project               | 更新项目信息（M1）              |
+| delete_project               | 删除项目（M1）                  |
 
 ### backend/cloud_training.py
 
-| 函数 | 功能 |
-| --- | --- |
-| create_cloud_training_job | 创建云端训练任务，并准备下发给用户本机 Agent |
-| get_cloud_training_status | 查询云端记录的训练任务状态 |
-| cancel_cloud_training_job | 请求取消训练任务，并转发给本机 Agent |
-| get_cloud_training_result | 查询本机 Agent 回传的最终训练结果 |
-| agent_websocket_endpoint | 接收本机 Agent 主动建立的 WebSocket 连接 |
-| dispatch_training_job_to_agent | 将训练任务下发给用户在线的本机 Agent（待实现） |
-| handle_agent_training_update | 处理本机 Agent 回传的训练进度或最终结果（待实现） |
-| get_online_agent_for_user | 查询某个用户当前在线的本机 Agent（待实现） |
+| 函数                           | 功能                                              |
+| ------------------------------ | ------------------------------------------------- |
+| create_cloud_training_job      | 创建云端训练任务，并准备下发给用户本机 Agent      |
+| get_cloud_training_status      | 查询云端记录的训练任务状态                        |
+| cancel_cloud_training_job      | 请求取消训练任务，并转发给本机 Agent              |
+| get_cloud_training_result      | 查询本机 Agent 回传的最终训练结果                 |
+| agent_websocket_endpoint       | 接收本机 Agent 主动建立的 WebSocket 连接          |
+| dispatch_training_job_to_agent | 将训练任务下发给用户在线的本机 Agent（待实现）    |
+| handle_agent_training_update   | 处理本机 Agent 回传的训练进度或最终结果（待实现） |
+| get_online_agent_for_user      | 查询某个用户当前在线的本机 Agent（待实现）        |
 
 ### backend/schemas.py
 
-| 类 | 功能 |
-| --- | --- |
-| CloudModelGraph | 云端保存和转发的轻量模型图结构 |
-| CloudTrainRequest | 云端训练中转接口请求体，包含模型图和训练配置字典 |
-| UserCreateRequest | 创建用户接口的请求体（M1） |
-| UserUpdateRequest | 更新用户接口的请求体（M1） |
-| UserRegisterRequest | 用户注册接口的请求体，含 confirm_password 确认密码（M1） |
-| UserLoginRequest | 用户登录接口的请求体（M1） |
-| TokenResponse | 认证成功后的 JWT 令牌响应（M1） |
-| ProjectCreateRequest | 创建项目接口的请求体（M1） |
-| ProjectTemplateCreateRequest | 基于内置模板创建项目的请求体（M7） |
-| ProjectUpdateRequest | 更新项目接口的请求体（M1） |
+| 类                           | 功能                                                     |
+| ---------------------------- | -------------------------------------------------------- |
+| CloudModelGraph              | 云端保存和转发的轻量模型图结构                           |
+| CloudTrainRequest            | 云端训练中转接口请求体，包含模型图和训练配置字典         |
+| UserCreateRequest            | 创建用户接口的请求体（M1）                               |
+| UserUpdateRequest            | 更新用户接口的请求体（M1）                               |
+| UserRegisterRequest          | 用户注册接口的请求体，含 confirm_password 确认密码（M1） |
+| UserLoginRequest             | 用户登录接口的请求体（M1）                               |
+| TokenResponse                | 认证成功后的 JWT 令牌响应（M1）                          |
+| ProjectCreateRequest         | 创建项目接口的请求体（M1）                               |
+| ProjectTemplateCreateRequest | 基于内置模板创建项目的请求体（M7）                       |
+| ProjectUpdateRequest         | 更新项目接口的请求体（M1）                               |
 
 ## 本机 Agent 模块和函数说明
 
 ### local_agent/main.py
 
-| 函数 | 功能 |
-| --- | --- |
-| health_check | 返回本机 Agent 健康状态和设备摘要 |
-| list_devices | 返回用户本机可用 CPU/GPU 设备 |
-| validate_model | 在用户本机校验模型结构并推导维度 |
-| start_agent | 启动本机 Agent，并主动连接云端服务器（待实现） |
+| 函数           | 功能                                           |
+| -------------- | ---------------------------------------------- |
+| health_check   | 返回本机 Agent 健康状态和设备摘要              |
+| list_devices   | 返回用户本机可用 CPU/GPU 设备                  |
+| validate_model | 在用户本机校验模型结构并推导维度               |
+| start_agent    | 启动本机 Agent，并主动连接云端服务器（待实现） |
 
 ### local_agent/agent_client.py
 
-| 函数 | 功能 |
-| --- | --- |
-| connect_to_cloud_server | 连接云端 WebSocket，处理认证、心跳、重连和消息收发（待实现） |
-| build_agent_hello_message | 构造 Agent 连接云端后的首条注册消息（待实现） |
-| handle_cloud_command | 处理云端下发的训练、取消、运行时检查等指令（待实现） |
-| start_local_training_job | 在用户本机启动 PyTorch 训练任务（待实现） |
-| send_training_update | 向云端发送训练进度或最终结果（待实现） |
+| 函数                      | 功能                                                         |
+| ------------------------- | ------------------------------------------------------------ |
+| connect_to_cloud_server   | 连接云端 WebSocket，处理认证、心跳、重连和消息收发（待实现） |
+| build_agent_hello_message | 构造 Agent 连接云端后的首条注册消息（待实现）                |
+| handle_cloud_command      | 处理云端下发的训练、取消、运行时检查等指令（待实现）         |
+| start_local_training_job  | 在用户本机启动 PyTorch 训练任务（待实现）                    |
+| send_training_update      | 向云端发送训练进度或最终结果（待实现）                       |
 
 ### local_agent/runtime_manager.py
 
-| 函数 | 功能 |
-| --- | --- |
+| 函数                          | 功能                                            |
+| ----------------------------- | ----------------------------------------------- |
 | get_installed_runtime_version | 读取本机已安装的 trainer-runtime 版本（待实现） |
-| fetch_runtime_manifest | 从云端获取最新兼容运行时元信息（待实现） |
-| download_runtime_package | 下载并校验 trainer-runtime 压缩包（待实现） |
-| install_runtime_package | 安装已下载的 trainer-runtime（待实现） |
-| ensure_runtime_ready | 确保本机已有可用训练运行时（待实现） |
+| fetch_runtime_manifest        | 从云端获取最新兼容运行时元信息（待实现）        |
+| download_runtime_package      | 下载并校验 trainer-runtime 压缩包（待实现）     |
+| install_runtime_package       | 安装已下载的 trainer-runtime（待实现）          |
+| ensure_runtime_ready          | 确保本机已有可用训练运行时（待实现）            |
 
 ### local_agent/runtime/*.py
 
-| 文件 | 功能 |
-| --- | --- |
-| schemas.py | 本机训练运行时数据结构，包括模型图、训练配置、校验请求、训练请求和代码导出请求 |
-| device.py | CPU/GPU 检测与训练设备选择 |
-| graph_utils.py | 模型图拓扑排序与前驱/后继映射 |
-| graph_model.py | 支持 DAG 前向传播的 PyTorch 图模型 |
-| model_builder.py | 根据模型 JSON 构建 PyTorch 模型 |
-| validator.py | 模型结构校验与张量维度推导 |
-| trainer.py | 本机 PyTorch 训练流程、指标计算和训练产物保存 |
-| code_exporter.py | 根据可视化模型图生成 PyTorch 模型源代码 |
+| 文件             | 功能                                                                           |
+| ---------------- | ------------------------------------------------------------------------------ |
+| schemas.py       | 本机训练运行时数据结构，包括模型图、训练配置、校验请求、训练请求和代码导出请求 |
+| device.py        | CPU/GPU 检测与训练设备选择                                                     |
+| graph_utils.py   | 模型图拓扑排序与前驱/后继映射                                                  |
+| graph_model.py   | 支持 DAG 前向传播的 PyTorch 图模型                                             |
+| model_builder.py | 根据模型 JSON 构建 PyTorch 模型                                                |
+| validator.py     | 模型结构校验与张量维度推导                                                     |
+| trainer.py       | 本机 PyTorch 训练流程、指标计算和训练产物保存                                  |
+| code_exporter.py | 根据可视化模型图生成 PyTorch 模型源代码                                        |
 
 ### backend/templates.py
 
-| 函数                    | 功能                                      |
-| ----------------------- | ----------------------------------------- |
-| get_available_templates | 返回前端可选择的全部内置模板元信息（共 11 个） |
+| 函数                    | 功能                                                                                                                                         |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| get_available_templates | 返回前端可选择的全部内置模板元信息（共 11 个）                                                                                               |
 | create_*_template 系列  | 各内置模板的模型图构建函数：线性分类器、MLP、感知机、LeNet、ResNet-tiny、LSTM、Seq2Seq、Transformer 编码器、自注意力演示、VAE、GCN-tiny、CNN |
-| apply_template          | 按模板名或别名返回模板图，供前端加载到画布中 |
+| apply_template          | 按模板名或别名返回模板图，供前端加载到画布中                                                                                                 |
 
 ### backend/storage.py（M1）
 
@@ -545,35 +545,35 @@ MySQL 数据库存储层（SQLAlchemy 实现）。连接串由环境变量 `DATA
 邮箱唯一、同用户项目名唯一、用户-项目外键级联等业务约束由数据库层保证。
 对外函数只进出普通字典，上层业务无需感知数据库细节。
 
-| 函数                    | 功能                   |
-| ----------------------- | ---------------------- |
+| 函数                    | 功能                                                        |
+| ----------------------- | ----------------------------------------------------------- |
 | configure_database      | 初始化/切换数据库引擎并建表（测试传入独立 SQLite 实现隔离） |
-| dispose_database        | 释放当前引擎，下次访问时按环境变量重新初始化 |
-| save_user               | 保存新用户记录         |
-| get_user                | 按 id 获取用户         |
-| list_users              | 列出所有用户，支持过滤 |
-| update_user             | 更新用户信息           |
-| delete_user             | 删除用户               |
-| user_exists             | 检查用户是否存在       |
-| save_project            | 保存新项目记录         |
-| get_project             | 按 id 获取项目         |
-| list_projects           | 列出所有项目，支持过滤 |
-| update_project          | 更新项目信息           |
-| delete_project          | 删除项目               |
-| project_exists          | 检查项目是否存在       |
-| delete_projects_by_user | 按用户 id 批量删除项目 |
+| dispose_database        | 释放当前引擎，下次访问时按环境变量重新初始化                |
+| save_user               | 保存新用户记录                                              |
+| get_user                | 按 id 获取用户                                              |
+| list_users              | 列出所有用户，支持过滤                                      |
+| update_user             | 更新用户信息                                                |
+| delete_user             | 删除用户                                                    |
+| user_exists             | 检查用户是否存在                                            |
+| save_project            | 保存新项目记录                                              |
+| get_project             | 按 id 获取项目                                              |
+| list_projects           | 列出所有项目，支持过滤                                      |
+| update_project          | 更新项目信息                                                |
+| delete_project          | 删除项目                                                    |
+| project_exists          | 检查项目是否存在                                            |
+| delete_projects_by_user | 按用户 id 批量删除项目                                      |
 
 ### backend/auth.py（M1）
 
-| 函数              | 功能                                 |
-| ----------------- | ------------------------------------ |
+| 函数              | 功能                                                 |
+| ----------------- | ---------------------------------------------------- |
 | register_user     | 注册新用户，校验邮箱唯一性、确认密码一致性并哈希密码 |
-| authenticate_user | 验证用户凭据（邮箱+密码）            |
-| get_user_by_email | 按邮箱查找用户                       |
-| get_user          | 按 id 获取用户信息                   |
-| list_users        | 获取所有用户列表                     |
-| update_user       | 更新用户信息（用户名/邮箱/密码）     |
-| delete_user       | 删除用户及关联的所有项目             |
+| authenticate_user | 验证用户凭据（邮箱+密码）                            |
+| get_user_by_email | 按邮箱查找用户                                       |
+| get_user          | 按 id 获取用户信息                                   |
+| list_users        | 获取所有用户列表                                     |
+| update_user       | 更新用户信息（用户名/邮箱/密码）                     |
+| delete_user       | 删除用户及关联的所有项目                             |
 
 ### backend/security.py（M1）
 
@@ -587,13 +587,13 @@ MySQL 数据库存储层（SQLAlchemy 实现）。连接串由环境变量 `DATA
 
 ### backend/projects.py（M1）
 
-| 函数              | 功能                                   |
-| ----------------- | -------------------------------------- |
-| create_project    | 创建新项目，校验用户存在性和模型图结构 |
-| get_project       | 按 id 获取项目详情                     |
-| list_projects     | 列出项目，支持按用户过滤               |
-| update_project    | 更新项目信息（名称/模型图/描述），校验项目所有权 |
-| delete_project    | 删除项目，校验项目所有权               |
+| 函数           | 功能                                             |
+| -------------- | ------------------------------------------------ |
+| create_project | 创建新项目，校验用户存在性和模型图结构           |
+| get_project    | 按 id 获取项目详情                               |
+| list_projects  | 列出项目，支持按用户过滤                         |
+| update_project | 更新项目信息（名称/模型图/描述），校验项目所有权 |
+| delete_project | 删除项目，校验项目所有权                         |
 
 ## 前端模块和函数说明
 
@@ -601,60 +601,60 @@ MySQL 数据库存储层（SQLAlchemy 实现）。连接串由环境变量 `DATA
 
 ### frontend/src/store.ts
 
-| 导出                           | 功能                                               |
-| ------------------------------ | -------------------------------------------------- |
-| store                          | 全局响应式状态（节点、连线、选中态、校验态等）     |
-| ui / toasts / showToast        | 弹窗开关、消息提示队列                             |
-| getCurrentModelGraph           | 将当前画布状态转换为后端需要的模型 JSON            |
-| getTrainConfig                 | 生成训练配置（数据集、超参数）                     |
-| updateNodeParam                | 更新节点参数并刷新节点摘要                         |
-| resetValidationAfterGraphChange | 图结构变化后重置校验状态                          |
+| 导出                            | 功能                                           |
+| ------------------------------- | ---------------------------------------------- |
+| store                           | 全局响应式状态（节点、连线、选中态、校验态等） |
+| ui / toasts / showToast         | 弹窗开关、消息提示队列                         |
+| getCurrentModelGraph            | 将当前画布状态转换为后端需要的模型 JSON        |
+| getTrainConfig                  | 生成训练配置（数据集、超参数）                 |
+| updateNodeParam                 | 更新节点参数并刷新节点摘要                     |
+| resetValidationAfterGraphChange | 图结构变化后重置校验状态                       |
 
 ### frontend/src/canvas.ts
 
-| 导出                 | 功能                                           |
-| -------------------- | ---------------------------------------------- |
-| drawLines            | 绘制节点间的贝塞尔连线（含交叉过桥、控制点）   |
-| beginConnection 等   | 连线模式的进入、预览、完成与取消               |
+| 导出                   | 功能                                         |
+| ---------------------- | -------------------------------------------- |
+| drawLines              | 绘制节点间的贝塞尔连线（含交叉过桥、控制点） |
+| beginConnection 等     | 连线模式的进入、预览、完成与取消             |
 | handleNodeMouseDown 等 | 节点拖拽                                     |
-| handleZoomAction     | 画布缩放                                       |
-| addNodeFromLayer     | 从组件库拖入新节点                             |
-| applyTemplateGraph   | 将后端模板提供的模型 JSON 加载到可视化画布中   |
+| handleZoomAction       | 画布缩放                                     |
+| addNodeFromLayer       | 从组件库拖入新节点                           |
+| applyTemplateGraph     | 将后端模板提供的模型 JSON 加载到可视化画布中 |
 
 ### frontend/src/actions.ts
 
-| 导出                      | 功能                                         |
-| ------------------------- | -------------------------------------------- |
-| handleValidateModel       | 将当前模型图发送到本机 Agent，并展示结构校验结果 |
-| handleSaveProject         | 保存当前模型到项目                           |
-| handleExportCode          | 向本机 Agent 请求生成的 PyTorch 代码，并展示给用户 |
-| handleStartTraining       | 将模型图和训练配置提交给云端任务中转，由本机 Agent 执行训练 |
-| openCurrentTrainingMonitor | 打开训练监控页并对接实时轮询                |
+| 导出                       | 功能                                                        |
+| -------------------------- | ----------------------------------------------------------- |
+| handleValidateModel        | 将当前模型图发送到本机 Agent，并展示结构校验结果            |
+| handleSaveProject          | 保存当前模型到项目                                          |
+| handleExportCode           | 向本机 Agent 请求生成的 PyTorch 代码，并展示给用户          |
+| handleStartTraining        | 将模型图和训练配置提交给云端任务中转，由本机 Agent 执行训练 |
+| openCurrentTrainingMonitor | 打开训练监控页并对接实时轮询                                |
 
 ### frontend/src/monitor.ts
 
-| 导出                          | 功能                                             |
-| ----------------------------- | ------------------------------------------------ |
-| openTrainingMonitor           | 打开训练监控页（live 轮询 / demo 演示两种模式）  |
-| activeSeries / computeResults | 训练指标序列与结果卡数值                         |
-| handleRerun 等                | 重新训练、模拟完成、图例切换等交互               |
+| 导出                          | 功能                                            |
+| ----------------------------- | ----------------------------------------------- |
+| openTrainingMonitor           | 打开训练监控页（live 轮询 / demo 演示两种模式） |
+| activeSeries / computeResults | 训练指标序列与结果卡数值                        |
+| handleRerun 等                | 重新训练、模拟完成、图例切换等交互              |
 
 ### frontend/src/api/client.ts
 
-| 函数                | 功能                                             |
-| ------------------- | ------------------------------------------------ |
-| fetchHealth         | 调用后端健康检查接口，确认服务是否可访问         |
-| fetchDevices        | 向本机 Agent 请求当前可用的 CPU/GPU 设备          |
+| 函数                | 功能                                                   |
+| ------------------- | ------------------------------------------------------ |
+| fetchHealth         | 调用后端健康检查接口，确认服务是否可访问               |
+| fetchDevices        | 向本机 Agent 请求当前可用的 CPU/GPU 设备               |
 | validateModel       | 将可视化模型图发送给本机 Agent，用于结构校验和维度推导 |
-| startTraining       | 向云端创建训练任务，并由云端下发给本机 Agent 执行 |
-| fetchTrainingStatus | 向云端查询训练任务的当前状态和进度               |
-| fetchTrainingResult | 向云端查询本机 Agent 回传的最终指标和产物信息     |
-| cancelTraining      | 请求停止进行中的训练任务                         |
-| registerUser        | 注册新账号并获取 JWT 令牌                        |
-| loginUser           | 邮箱密码登录并获取 JWT 令牌                      |
-| fetchCurrentUser    | 通过令牌获取当前登录用户信息                     |
-| setAuthToken        | 注入 JWT，之后所有请求自动携带 Authorization 头  |
-| exportPytorchCode   | 向本机 Agent 请求根据模型图生成的 PyTorch 模型代码 |
+| startTraining       | 向云端创建训练任务，并由云端下发给本机 Agent 执行      |
+| fetchTrainingStatus | 向云端查询训练任务的当前状态和进度                     |
+| fetchTrainingResult | 向云端查询本机 Agent 回传的最终指标和产物信息          |
+| cancelTraining      | 请求停止进行中的训练任务                               |
+| registerUser        | 注册新账号并获取 JWT 令牌                              |
+| loginUser           | 邮箱密码登录并获取 JWT 令牌                            |
+| fetchCurrentUser    | 通过令牌获取当前登录用户信息                           |
+| setAuthToken        | 注入 JWT，之后所有请求自动携带 Authorization 头        |
+| exportPytorchCode   | 向本机 Agent 请求根据模型图生成的 PyTorch 模型代码     |
 
 ## 增量开发计划
 
@@ -729,4 +729,3 @@ MySQL 数据库存储层（SQLAlchemy 实现）。连接串由环境变量 `DATA
 - 前端新增接口调用时优先封装到 frontend/src/api/client.ts，共享类型放在 frontend/src/types.ts。
 - 前端新增页面区块时拆分为 frontend/src/components/ 下的 Vue 组件，跨组件状态放在 frontend/src/store.ts。
 - 新增或修改函数后，需要同步更新本 README 中的函数说明。
-
