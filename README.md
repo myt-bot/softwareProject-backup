@@ -106,9 +106,18 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 终端三：运行用户本机训练应用，连接云端并等待训练指令。
 
 **首次使用（纯网页用户，本机没有训练程序）**：登录后点击网页顶栏「本机训练
-未连接」打开「本机训练应用」弹窗，点「下载本机训练应用」（云端
-`GET /agent/download?token=<JWT>` 返回，包内含**自举启动器 launcher.py + 编译后的
-`.pyc` Agent 代码 + 内置令牌的 config.json + 构建指引 build_app.md**）。
+未连接」打开「本机训练应用」弹窗，选择操作系统（默认按浏览器自动识别）后点
+「下载本机训练应用」。下载地址为 `GET /agent/download?token=<JWT>&platform=<os>`，
+按平台发放：
+
+- **服务器已放置该平台构建产物时** → 发放「已构建的应用（.exe/.app/二进制）+ 当次
+  生成的 config.json（内含你的令牌）+ 使用说明」。应用只需构建一次、不含令牌，
+  令牌通过同目录 `config.json` 注入，启动器从应用所在目录读取，故无需为每个用户
+  重新构建。产物放在 `backend/agent_dist/`（不入库，部署时放入；可用环境变量
+  `AGENT_DIST_DIR` 覆盖），详见该目录下 `README.md`。
+- **该平台尚无构建产物时** → 自动回退发放「自举启动器 launcher.py + 编译后的
+  `.pyc` Agent 代码 + 内置令牌 config.json + 构建指引 build_app.md」源码包，供开发或
+  自行打包使用。
 
 应用的设计（方案 A）：**用户双击即用，无需手敲命令、无需预装依赖**。启动器
 `local_agent/launcher.py`（只用标准库）在首次运行时：
@@ -119,9 +128,10 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 3. 已就绪 → 直接用该虚拟环境启动 Agent，用内置令牌连云端。之后每次打开都走
    「直接启动」，不再重装。
 
-打包成「用户双击、无需装 Python」的单文件应用：见下载包内 `build_app.md`
+打包成「用户双击、无需装 Python」的单文件应用：见源码回退包内 `build_app.md`
 （PyInstaller 冻结 launcher.py + 内置独立 Python，torch 不进可执行文件而在首次
-运行时装进虚拟环境，故可执行文件很小）。
+运行时装进虚拟环境，故可执行文件很小）。构建好后放入 `backend/agent_dist/<平台>/`
+即可让下载改为发放应用。
 
 **开发环境（已 clone 仓库）**：可直接运行启动器（令牌从弹窗或浏览器
 localStorage 的 `model-workshop-token` 取得，写入项目根目录的 `config.json`，或用
@@ -401,7 +411,7 @@ LSTM、SelfAttention、TransformerEncoder、Seq2Seq、VAE、GraphConv。
 | GET    | /agents/status                      | 查询某用户本机 Agent 的在线状态                                  | 云端中转 |
 | WS     | /agents/ws                          | 本机 Agent 主动连接云端的 WebSocket（下发指令 / 接收进度）       | 云端中转 |
 | WS     | /client/ws                          | 浏览器持久化连接（推送 Agent 状态与训练进度、转发校验/导出请求） | 云端中转 |
-| GET    | /agent/download                     | 下载完整本机 Agent 程序 zip（首次使用的用户获取 Agent）          | 云端中转 |
+| GET    | /agent/download                     | 按平台下载本机训练应用（有构建产物发应用、否则回退源码包；令牌注入 config.json） | 云端中转 |
 | GET    | /runtime/manifest                   | 训练运行时版本元信息（供 Agent 判断是否需要下载）                | 云端中转 |
 | GET    | /runtime/download                   | 下载训练运行时 zip 包（本机首次使用自动获取）                    | 云端中转 |
 | POST   | /auth/register                      | 注册新用户（自动登录）                                           | M1       |

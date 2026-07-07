@@ -53,4 +53,10 @@ demo.py
 MNIST/
 training_artifacts/
 
+# ============================================================
+# 已构建的本机训练应用产物（体积大、分平台，不入库；部署时放入）
+# ============================================================
+backend/agent_dist/*
+!backend/agent_dist/README.md
+
 software.code-workspace

@@ -44,6 +44,9 @@ _RUNTIME_SOURCE_DIR = Path(__file__).resolve().parent.parent / "local_agent" / "
 # 本机 Agent 完整源码目录（首次使用的用户可从云端下载整个 Agent 程序）
 _AGENT_SOURCE_DIR = Path(__file__).resolve().parent.parent / "local_agent"
 
+# 已构建应用产物的发布目录（不入库，部署时放入；按平台组织或用 manifest.json 索引）
+_AGENT_DIST_DIR = Path(os.environ.get("AGENT_DIST_DIR", str(Path(__file__).resolve().parent / "agent_dist")))
+
 # 编译 .pyc 时使用的 Python 版本（打包成单文件应用时内置的独立 Python 应与之一致）
 _PYC_PYTHON = f"{sys.version_info.major}.{sys.version_info.minor}"
 
@@ -528,28 +531,102 @@ def _compile_to_pyc(source_path: Path) -> bytes:
         Path(tmp_path).unlink(missing_ok=True)
 
 
-@router.get("/agent/download")
-def download_agent(request: Request, token: str = Query(...)) -> Response:
-    """打包并下载本机训练应用（自举启动器 + 编译后的 Agent 代码 + 内置令牌）。
+def _agent_config_json(server_url: str, token: str) -> str:
+    """生成随应用/源码包附带的 config.json（云端地址 + 用户令牌）。"""
+    return json.dumps({"server_url": server_url, "token": token}, ensure_ascii=False)
 
-    首次使用、本机还没有训练程序的用户，从网页「本机训练 Agent」弹窗点击下载
-    即可获取。包内：
-      - launcher.py：自举启动器（检测/创建专属虚拟环境、装依赖、启动 Agent）；
-      - local_agent/*.pyc：编译后的 Agent 与训练代码（不含明文源码）；
-      - config.json：云端地址与当前用户令牌（下载已按登录态注入，双击即连）；
-      - README.txt / build_app.md：使用说明与「打包成单文件应用」的构建指引。
 
-    参数：
-        token：当前用户的 JWT 令牌（查询参数，浏览器下载链接无法带请求头，
-            故用查询参数）。校验通过后注入 config.json。
+def _detect_platform(request: Request, override: Optional[str]) -> str:
+    """确定下载所用平台：优先 ?platform 参数，否则按 User-Agent 猜测。"""
+    if override:
+        value = override.strip().lower()
+        if value in ("windows", "macos", "linux"):
+            return value
+    ua = request.headers.get("user-agent", "").lower()
+    if "windows" in ua:
+        return "windows"
+    if "mac os" in ua or "macintosh" in ua:
+        return "macos"
+    if "linux" in ua or "x11" in ua:
+        return "linux"
+    return "windows"  # 无法识别时默认 Windows（占比最高）
+
+
+def _find_prebuilt_artifact(platform_name: str) -> Optional[Path]:
+    """在发布目录中查找该平台已构建好的应用产物；没有则返回 None。
+
+    优先读 manifest.json 的 artifacts 映射；否则在 <dist>/<platform>/ 下取第一个文件。
+    产物不入库，由运维在部署时放到 AGENT_DIST_DIR（默认 backend/agent_dist）。
     """
-    try:
-        verify_access_token(token)
-    except Exception:
-        return JSONResponse(status_code=401, content={"status": "error", "message": "令牌无效，无法下载应用"})
+    if not _AGENT_DIST_DIR.is_dir():
+        return None
 
-    server_url = str(request.base_url).rstrip("/")
+    manifest = _AGENT_DIST_DIR / "manifest.json"
+    if manifest.is_file():
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            rel = (data.get("artifacts") or {}).get(platform_name)
+            if rel:
+                candidate = _AGENT_DIST_DIR / rel
+                if candidate.is_file():
+                    return candidate
+        except (json.JSONDecodeError, OSError):
+            pass
 
+    platform_dir = _AGENT_DIST_DIR / platform_name
+    if platform_dir.is_dir():
+        files = sorted(p for p in platform_dir.iterdir() if p.is_file())
+        if files:
+            return files[0]
+    return None
+
+
+def _dist_version() -> str:
+    """发布产物的版本号（读 manifest.json 的 version，缺省用 RUNTIME_VERSION）。"""
+    manifest = _AGENT_DIST_DIR / "manifest.json"
+    if manifest.is_file():
+        try:
+            return str(json.loads(manifest.read_text(encoding="utf-8")).get("version") or RUNTIME_VERSION)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return RUNTIME_VERSION
+
+
+def _build_app_package(artifact: Path, platform_name: str, server_url: str, token: str) -> bytes:
+    """打包「已构建的应用产物 + 当次生成的 config.json + 简要说明」。
+
+    应用只需构建一次（通用、不含令牌）；令牌在下载时通过同目录的 config.json 注入，
+    启动器会从可执行文件所在目录读取它，从而绑定账号。
+    """
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        # 保留可执行权限（Linux/macOS 解压后可直接运行）
+        info = zipfile.ZipInfo(f"VisualDL-Agent/{artifact.name}")
+        info.external_attr = 0o755 << 16
+        info.compress_type = zipfile.ZIP_DEFLATED
+        archive.writestr(info, artifact.read_bytes())
+
+        archive.writestr("VisualDL-Agent/config.json", _agent_config_json(server_url, token))
+        archive.writestr(
+            "VisualDL-Agent/使用说明.txt",
+            "VisualDL 本机训练应用\n"
+            "======================\n\n"
+            "1. 把本文件夹整体解压到任意位置（config.json 必须与应用放在同一目录）。\n"
+            f"2. 双击运行 {artifact.name}。首次运行会自动准备训练环境（较慢、只需一次），\n"
+            "   之后每次打开都会直接连接云端。\n"
+            "3. 连接成功后，网页顶部会显示「本机训练已连接」。\n\n"
+            "提示：config.json 内含你的登录令牌，请勿分享给他人。\n",
+        )
+
+    return buffer.getvalue()
+
+
+def _build_source_package(server_url: str, token: str) -> bytes:
+    """打包「自举启动器源码 + 编译后的 Agent 代码(.pyc) + config.json + 构建指引」。
+
+    在服务器尚未放置对应平台的已构建应用时作为回退，供开发者用 Python 直接运行，
+    或据 build_app.md 自行打包成单文件应用。
+    """
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         # 启动器以源码形式放在顶层（它是打包单文件应用的入口，且只用标准库）
@@ -564,15 +641,47 @@ def download_agent(request: Request, token: str = Query(...)) -> Response:
             pyc_name = f"visualdl-agent/{rel.with_suffix('.pyc')}"
             archive.writestr(pyc_name, _compile_to_pyc(path))
 
-        # 内置令牌与云端地址：双击即自动连接、绑定账号
-        archive.writestr("visualdl-agent/config.json", json.dumps({"server_url": server_url, "token": token}, ensure_ascii=False))
+        archive.writestr("visualdl-agent/config.json", _agent_config_json(server_url, token))
         archive.writestr("visualdl-agent/README.txt", _AGENT_README.format(py=_PYC_PYTHON))
         archive.writestr("visualdl-agent/build_app.md", _BUILD_GUIDE.format(py=_PYC_PYTHON))
 
+    return buffer.getvalue()
+
+
+@router.get("/agent/download")
+def download_agent(request: Request, token: str = Query(...), platform: Optional[str] = Query(None)) -> Response:
+    """下载本机训练应用；令牌按登录态注入 config.json，绑定到当前账号。
+
+    优先发放服务器上「已构建好的应用产物」（按平台，来自 AGENT_DIST_DIR）：
+    应用只构建一次、不含令牌，令牌通过同目录 config.json 注入，启动器从应用所在
+    目录读取。若该平台尚无已构建产物，则回退发放「启动器源码 + .pyc + 构建指引」包，
+    供开发/自行打包使用。
+
+    参数：
+        token：当前用户 JWT 令牌（查询参数——浏览器下载链接无法带请求头）。
+        platform：可选，windows/macos/linux；缺省按 User-Agent 猜测。
+    """
+    try:
+        verify_access_token(token)
+    except Exception:
+        return JSONResponse(status_code=401, content={"status": "error", "message": "令牌无效，无法下载应用"})
+
+    server_url = str(request.base_url).rstrip("/")
+    platform_name = _detect_platform(request, platform)
+
+    artifact = _find_prebuilt_artifact(platform_name)
+    if artifact is not None:
+        content = _build_app_package(artifact, platform_name, server_url, token)
+        filename = f"VisualDL-Agent-{platform_name}-{_dist_version()}.zip"
+    else:
+        # 尚无该平台的已构建应用：回退发放源码包（含 .pyc 与打包指引）
+        content = _build_source_package(server_url, token)
+        filename = f"visualdl-agent-{platform_name}-{RUNTIME_VERSION}.zip"
+
     return Response(
-        content=buffer.getvalue(),
+        content=content,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="visualdl-agent-{RUNTIME_VERSION}.zip"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

@@ -324,6 +324,43 @@ button:disabled {
 .agent-status-row strong { display: block; font-size: 14px; color: var(--text); }
 .agent-status-detail { font-size: 12px; color: var(--muted); }
 
+/* 选择操作系统 */
+.agent-os-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.agent-os-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.agent-os-tab iconify-icon {
+  font-size: 17px;
+}
+
+.agent-os-tab:hover {
+  border-color: var(--border-2);
+  color: var(--text);
+}
+
+.agent-os-tab.active {
+  border-color: var(--indigo);
+  background: #e0f2fe;
+  color: var(--indigo);
+}
+
 /* 下载本机训练应用的醒目入口 */
 .agent-download {
   display: flex;

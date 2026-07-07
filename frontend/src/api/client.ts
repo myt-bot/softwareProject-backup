@@ -27,8 +27,9 @@ export function clientWebSocketUrl(token: string): string {
 }
 
 // 本机训练应用的下载地址（内含用户令牌，双击即自动连接绑定账号）
-export function agentDownloadUrl(token: string): string {
-  return `${API_BASE_URL}/agent/download?token=${encodeURIComponent(token)}`;
+export function agentDownloadUrl(token: string, platform?: string): string {
+  const base = `${API_BASE_URL}/agent/download?token=${encodeURIComponent(token)}`;
+  return platform ? `${base}&platform=${encodeURIComponent(platform)}` : base;
 }
 
 // 请求超时：后端接口都是快速返回的（训练在后台线程执行），
