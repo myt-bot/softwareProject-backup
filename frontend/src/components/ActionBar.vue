@@ -8,6 +8,8 @@ import {
   openCurrentTrainingMonitor,
 } from "../actions";
 import { activeCanvas, clamp, getTrainingStatusLabel, showToast, ui } from "../store";
+import DatasetSelector from "./DatasetSelector.vue";
+import DeviceSelector from "./DeviceSelector.vue";
 
 // 底部操作栏跟随当前激活画布：各画布的校验/训练状态相互独立、并行进行
 const canvas = computed(() => activeCanvas());
@@ -82,51 +84,62 @@ const trainDisabled = computed(
       </div>
     </div>
     <div class="footer-actions">
-      <button
-        class="secondary-button"
-        id="btn-validate"
-        title="自动检查每一层的尺寸是否匹配"
-        :disabled="canvas.validating"
-        @click="handleValidateModel"
-      >
-        <iconify-icon v-if="canvas.validating" icon="mdi:loading" class="spin"></iconify-icon>
-        <iconify-icon v-else icon="mdi:check-circle-outline"></iconify-icon>
-        {{ canvas.validating ? "正在校验..." : "检查结构" }}
-      </button>
-      <button class="secondary-button" id="btn-save" title="把当前模型保存到我的项目" @click="handleSaveProject">
-        <iconify-icon icon="mdi:content-save-outline"></iconify-icon>
-        保存模型
-      </button>
-      <button class="secondary-button" id="btn-my-projects" title="加载已保存的模型" @click="ui.projectsModalOpen = true">
-        <iconify-icon icon="mdi:folder-open-outline"></iconify-icon>
-        我的项目
-      </button>
-      <button class="secondary-button" id="btn-export" title="生成可直接运行的 PyTorch 代码" @click="handleExportCode">
-        <iconify-icon icon="mdi:code-json"></iconify-icon>
-        导出代码
-      </button>
-      <label class="epochs-field" title="完整遍历训练集的次数（1-100）">
-        <span>训练轮次</span>
-        <input
-          id="epochs-input"
-          type="number"
-          min="1"
-          :max="MAX_EPOCHS"
-          :value="canvas.epochs"
-          @change="handleEpochsChange"
+      <!-- 模型操作组：对当前模型做的事 -->
+      <div class="action-group model-group">
+        <button
+          class="secondary-button"
+          id="btn-validate"
+          title="自动检查每一层的尺寸是否匹配"
+          :disabled="canvas.validating"
+          @click="handleValidateModel"
         >
-      </label>
-      <button
-        class="success-button"
-        id="btn-train"
-        :disabled="trainDisabled"
-        title="先通过“检查结构”，此按钮才会亮起"
-        @click="handleStartTraining"
-      >
-        <iconify-icon v-if="canvas.trainStarting" icon="mdi:loading" class="spin"></iconify-icon>
-        <iconify-icon v-else icon="mdi:play"></iconify-icon>
-        {{ canvas.trainStarting ? "启动训练..." : "开始训练" }}
-      </button>
+          <iconify-icon v-if="canvas.validating" icon="mdi:loading" class="spin"></iconify-icon>
+          <iconify-icon v-else icon="mdi:check-circle-outline"></iconify-icon>
+          {{ canvas.validating ? "正在校验..." : "检查结构" }}
+        </button>
+        <button class="secondary-button" id="btn-save" title="把当前模型保存到我的项目" @click="handleSaveProject">
+          <iconify-icon icon="mdi:content-save-outline"></iconify-icon>
+          保存模型
+        </button>
+        <button class="secondary-button" id="btn-my-projects" title="加载已保存的模型" @click="ui.projectsModalOpen = true">
+          <iconify-icon icon="mdi:folder-open-outline"></iconify-icon>
+          我的项目
+        </button>
+        <button class="secondary-button" id="btn-export" title="生成可直接运行的 PyTorch 代码" @click="handleExportCode">
+          <iconify-icon icon="mdi:code-json"></iconify-icon>
+          导出代码
+        </button>
+      </div>
+
+      <div class="action-divider"></div>
+
+      <!-- 训练区：一处集齐训练设置并启动 -->
+      <div class="action-group train-group">
+        <DatasetSelector />
+        <DeviceSelector />
+        <label class="epochs-field" title="完整遍历训练集的次数（1-100）">
+          <span>轮次</span>
+          <input
+            id="epochs-input"
+            type="number"
+            min="1"
+            :max="MAX_EPOCHS"
+            :value="canvas.epochs"
+            @change="handleEpochsChange"
+          >
+        </label>
+        <button
+          class="success-button"
+          id="btn-train"
+          :disabled="trainDisabled"
+          title="先通过“检查结构”，此按钮才会亮起"
+          @click="handleStartTraining"
+        >
+          <iconify-icon v-if="canvas.trainStarting" icon="mdi:loading" class="spin"></iconify-icon>
+          <iconify-icon v-else icon="mdi:play"></iconify-icon>
+          {{ canvas.trainStarting ? "启动训练..." : "开始训练" }}
+        </button>
+      </div>
     </div>
   </footer>
 </template>

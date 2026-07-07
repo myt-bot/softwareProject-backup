@@ -219,6 +219,17 @@ button:disabled {
   transform: translateY(0);
 }
 
+/* 底栏内的数据集下拉：向上弹出，避免被屏幕底部裁切 */
+.dataset-card.drop-up .custom-options {
+  top: auto;
+  bottom: calc(100% + 8px);
+  transform: translateY(8px);
+}
+
+.dataset-card.drop-up.open .custom-options {
+  transform: translateY(0);
+}
+
 .custom-option {
   padding: 9px 12px;
   border-radius: 8px;
@@ -469,13 +480,6 @@ button:disabled {
 }
 
 /* 顶栏中部：数据集 + 训练设备 */
-.topbar-middle {
-  display: flex;
-  align-items: center;
-  gap: 26px;
-  min-width: 0;
-}
-
 .device-pill {
   display: flex;
   align-items: center;
@@ -1092,33 +1096,39 @@ button:disabled {
   box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
 }
 
-/* 快速开始模板：画布标签栏入口按钮 */
+/* 快速开始模板：画布标签栏入口按钮（醒目的琥珀色 CTA，引导新手一键上手） */
 .template-gallery-button {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin: 0 4px 5px auto;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: transparent;
-  color: var(--muted);
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 700;
+  gap: 7px;
+  margin: 0 6px 6px auto;
+  border: 0;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  color: #ffffff;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 800;
   white-space: nowrap;
-  transition: all 0.15s ease;
+  box-shadow: 0 3px 10px rgba(245, 158, 11, 0.35);
+  transition: all 0.18s ease;
 }
 
 .template-gallery-button iconify-icon {
-  color: var(--amber);
-  font-size: 15px;
+  color: #fffbe6;
+  font-size: 16px;
 }
 
 .template-gallery-button:hover {
-  border-color: var(--indigo);
-  background: rgba(255, 255, 255, 0.8);
-  color: var(--indigo);
+  background: linear-gradient(135deg, #f7b21c, #ea8f08);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(245, 158, 11, 0.48);
+}
+
+.template-gallery-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.35);
 }
 
 /* 模板库弹窗：网格卡片 */
@@ -1656,10 +1666,15 @@ button:disabled {
 }
 
 .edge-control-halo {
-  fill: rgba(14, 165, 233, 0.14);
-  stroke: rgba(14, 165, 233, 0.38);
-  stroke-width: 1;
+  fill: rgba(14, 165, 233, 0.12);
+  stroke: none;
   pointer-events: none;
+  animation: edge-halo-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes edge-halo-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
 }
 
 .edge-control {
@@ -1668,11 +1683,25 @@ button:disabled {
   stroke-width: 2.5;
   cursor: grab;
   pointer-events: auto;
+  filter: drop-shadow(0 2px 3px rgba(14, 165, 233, 0.4));
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.12s ease, fill 0.12s ease;
 }
 
 .edge-control:hover {
   fill: #e0f2fe;
   stroke: var(--indigo-strong);
+  transform: scale(1.18);
+}
+
+.edge-control-dot {
+  fill: var(--indigo);
+  pointer-events: none;
+}
+
+.is-edge-control-dragging .edge-control-dot {
+  fill: var(--indigo-strong);
 }
 
 .edge-control:active,
@@ -2087,13 +2116,15 @@ button:disabled {
 
 .actionbar-left {
   min-width: 0;
+  flex: 0 1 auto;
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
 .training-job-panel {
-  width: 360px;
+  width: 340px;
+  min-width: 240px;
   min-height: 48px;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -2176,6 +2207,19 @@ button:disabled {
   font-size: 20px;
 }
 
+/* 任务运行时：查看训练详情按钮高亮闪烁，提示此处可点击查看进度 */
+.training-job-panel.is-running .icon-button {
+  color: var(--cyan);
+  background: #cffafe;
+  animation: view-training-pulse 1.3s ease-in-out infinite;
+}
+
+@keyframes view-training-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.55); }
+  70% { box-shadow: 0 0 0 7px rgba(6, 182, 212, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0); }
+}
+
 .training-job-panel.is-empty {
   opacity: 0.75;
 }
@@ -2196,7 +2240,50 @@ button:disabled {
 }
 
 .footer-actions {
-  gap: 10px;
+  gap: 14px;
+  flex: 0 0 auto;
+}
+
+/* 底栏按钮分组：模型操作组 | 分隔线 | 训练区 */
+.action-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-divider {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 32px;
+  background: var(--border);
+}
+
+/* 训练区：浅蓝容器把「数据集·设备·轮次·开始训练」聚成一块，引导新手 */
+.train-group {
+  gap: 12px;
+  padding: 6px 8px 6px 14px;
+  border: 1px solid #bae6fd;
+  border-radius: 14px;
+  background: linear-gradient(90deg, rgba(224, 242, 254, 0.45), rgba(240, 249, 255, 0.75));
+}
+
+/* 底栏内的按钮略紧凑，给训练区腾出空间 */
+.footer-actions .secondary-button {
+  padding: 8px 13px;
+}
+
+/* 训练区内下拉/标签更紧凑 */
+.train-group .dataset-pill,
+.train-group .device-pill {
+  gap: 8px;
+}
+
+.train-group .custom-select-value {
+  min-width: 62px;
+}
+
+.train-group .dataset-card {
+  padding: 6px 12px;
 }
 
 /* 训练轮次输入 */
@@ -3344,7 +3431,6 @@ button:disabled {
   .sidebar-toggle { left: 239px; }
   .workspace.sidebar-collapsed .sidebar-toggle { left: 0; }
   .inspector-panel { width: 300px; }
-  .topbar-middle { display: none; }
   .training-job-panel { width: 280px; }
   .guide-strip { display: none; }
   .help-steps { grid-template-columns: 1fr; }

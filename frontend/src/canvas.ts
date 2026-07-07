@@ -550,19 +550,25 @@ function renderEdgeControlPoints(svg: SVGSVGElement, connectorsByKey: Record<str
   if (!connector) return;
 
   const controlPoint = activeCanvas().edgeControls[selectedKey];
-  const handle = document.createElementNS(SVG_NS, "circle");
   const halo = document.createElementNS(SVG_NS, "circle");
+  const handle = document.createElementNS(SVG_NS, "circle");
+  const dot = document.createElementNS(SVG_NS, "circle");
 
+  // 外圈柔光：提示这是一个可交互的控制点
   halo.setAttribute("cx", String(controlPoint.x));
   halo.setAttribute("cy", String(controlPoint.y));
-  halo.setAttribute("r", "13");
+  halo.setAttribute("r", "15");
   halo.setAttribute("class", "edge-control-halo");
 
+  // 手柄本体：白底圆环 + 阴影
   handle.setAttribute("cx", String(controlPoint.x));
   handle.setAttribute("cy", String(controlPoint.y));
-  handle.setAttribute("r", "6");
+  handle.setAttribute("r", "7.5");
   handle.setAttribute("class", "edge-control");
   handle.dataset.connectionKey = selectedKey;
+  const title = document.createElementNS(SVG_NS, "title");
+  title.textContent = "拖动可弯曲连线";
+  handle.appendChild(title);
   handle.addEventListener("mousedown", event => {
     event.preventDefault();
     event.stopPropagation();
@@ -573,8 +579,15 @@ function renderEdgeControlPoints(svg: SVGSVGElement, connectorsByKey: Record<str
     event.stopPropagation();
   });
 
+  // 内圆点：作为"抓取点"，让手柄更像一个实体控件而非幽灵点
+  dot.setAttribute("cx", String(controlPoint.x));
+  dot.setAttribute("cy", String(controlPoint.y));
+  dot.setAttribute("r", "2.75");
+  dot.setAttribute("class", "edge-control-dot");
+
   svg.appendChild(halo);
   svg.appendChild(handle);
+  svg.appendChild(dot);
 }
 
 
@@ -1069,7 +1082,12 @@ export function handleCanvasClick(event: MouseEvent) {
     return;
   }
 
+  // 若当前有选中的连线，点击空白处取消选中并重绘（清掉高亮与控制点）
+  const hadConnectionSelected = !!activeCanvas().selectedConnectionKey;
   deselectNode();
+  if (hadConnectionSelected) {
+    drawLines();
+  }
 }
 
 

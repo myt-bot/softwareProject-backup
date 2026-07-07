@@ -20,7 +20,7 @@ function selectDevice(device: "cpu" | "cuda") {
 
 <template>
   <div class="device-pill">
-    <span class="dataset-label">训练设备</span>
+    <span class="dataset-label">设备</span>
     <div class="device-toggle" title="选择训练模型时使用的计算设备">
       <button
         id="device-cpu"
