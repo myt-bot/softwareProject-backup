@@ -63,7 +63,8 @@ def get_device_summary():
 
     返回：
         dict：设备摘要信息，包括可用设备列表、默认设备、CUDA 是否可用、
-        CUDA 设备数量以及每个 GPU 的索引和名称。
+        CUDA 设备数量、每个 GPU 的索引和名称，以及用于排查「有 GPU 却检测
+        不到」的诊断信息（PyTorch 版本、是否为 CUDA 构建、原因说明）。
     """
     cuda_available = is_cuda_available()
     cuda_device_count = torch.cuda.device_count() if cuda_available else 0

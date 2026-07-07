@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { showToast, store } from "../store";
+import { agent, showToast, store } from "../store";
 
 // 训练设备选择：CPU / GPU（cuda）。GPU 不可用时禁用并提示。
 function selectDevice(device: "cpu" | "cuda") {
   if (device === "cuda" && !store.cudaAvailable) {
-    showToast("warning", "未检测到可用的 GPU，已保持使用 CPU 训练。");
+    showToast(
+      "warning",
+      agent.online
+        ? "未检测到可用的 GPU，将使用 CPU 训练。"
+        : "请先运行本机训练应用，才能检测你电脑上的 GPU。"
+    );
     return;
   }
   if (store.device === device) return;

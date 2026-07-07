@@ -103,23 +103,32 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 
 前端默认访问 `http://127.0.0.1:8000` 上的云端后端接口。若 `5173` 或 `8000` 端口被占用，需要先关闭占用该端口的旧服务，或同步修改前端接口地址和启动端口。
 
-终端三：启动用户本机 Agent，连接云端并等待训练指令。
+终端三：运行用户本机训练应用，连接云端并等待训练指令。
 
-**首次使用（纯网页用户，本机没有 Agent 代码）**：登录后点击网页顶栏「本机训练
-未连接」打开「本机训练 Agent」弹窗，点「下载本机 Agent」下载压缩包
-（云端 `GET /agent/download` 返回，含完整 `local_agent` 源码、依赖清单和说明），
-解压后按包内 `README.txt` 执行：
+**首次使用（纯网页用户，本机没有训练程序）**：登录后点击网页顶栏「本机训练
+未连接」打开「本机训练应用」弹窗，点「下载本机训练应用」（云端
+`GET /agent/download?token=<JWT>` 返回，包内含**自举启动器 launcher.py + 编译后的
+`.pyc` Agent 代码 + 内置令牌的 config.json + 构建指引 build_app.md**）。
+
+应用的设计（方案 A）：**用户双击即用，无需手敲命令、无需预装依赖**。启动器
+`local_agent/launcher.py`（只用标准库）在首次运行时：
+
+1. 检查专属虚拟环境 `~/.visualdl_agent/venv` 是否已就绪；
+2. 未就绪 → 自动创建虚拟环境并安装依赖（Windows/Linux **一律装 CUDA 版 PyTorch**
+   `--index-url .../whl/cu121`，macOS 装默认版），装好后写就绪标记；
+3. 已就绪 → 直接用该虚拟环境启动 Agent，用内置令牌连云端。之后每次打开都走
+   「直接启动」，不再重装。
+
+打包成「用户双击、无需装 Python」的单文件应用：见下载包内 `build_app.md`
+（PyInstaller 冻结 launcher.py + 内置独立 Python，torch 不进可执行文件而在首次
+运行时装进虚拟环境，故可执行文件很小）。
+
+**开发环境（已 clone 仓库）**：可直接运行启动器（令牌从弹窗或浏览器
+localStorage 的 `model-workshop-token` 取得，写入项目根目录的 `config.json`，或用
+`--token` 传入）：
 
 ```bash
-pip install -r requirements-agent.txt
-python -m local_agent.main --server http://127.0.0.1:8000 --token <你的JWT令牌>
-```
-
-**开发环境（已 clone 仓库）**：可直接在项目根目录运行（令牌可在弹窗复制或从
-浏览器 localStorage 的 `model-workshop-token` 取得）：
-
-```bash
-python -m local_agent.main --server http://127.0.0.1:8000 --token <你的JWT令牌>
+python local_agent/launcher.py --server http://127.0.0.1:8000 --token <你的JWT令牌>
 ```
 
 本机 Agent 会：

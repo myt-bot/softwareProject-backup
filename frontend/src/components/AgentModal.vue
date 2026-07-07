@@ -2,26 +2,18 @@
 import { computed } from "vue";
 import { agentDownloadUrl } from "../api/client";
 import { auth } from "../auth";
-import { agent, showToast, ui } from "../store";
+import { agent, ui } from "../store";
 
-// 启动本机 Agent 的命令（携带当前用户令牌以绑定身份）
-const command = computed(
-  () => `python -m local_agent.main --server http://127.0.0.1:8000 --token ${auth.token ?? "<你的令牌>"}`
-);
+// 下载链接内含用户令牌：下载的应用已绑定账号，双击即自动连接
+const downloadUrl = computed(() => agentDownloadUrl(auth.token ?? ""));
 
-const downloadUrl = agentDownloadUrl();
+const gpuName = computed(() => {
+  const dev = agent.deviceSummary?.cuda_devices?.[0];
+  return typeof dev === "string" ? dev : dev?.name || "GPU";
+});
 
 function close() {
   ui.agentModalOpen = false;
-}
-
-async function copyCommand() {
-  try {
-    await navigator.clipboard.writeText(command.value);
-    showToast("success", "启动命令已复制。");
-  } catch {
-    showToast("warning", "当前浏览器不支持自动复制。");
-  }
 }
 </script>
 
@@ -32,8 +24,8 @@ async function copyCommand() {
         <div class="modal-title">
           <iconify-icon icon="mdi:laptop"></iconify-icon>
           <div>
-            <h2>本机训练 Agent</h2>
-            <p>训练在你自己的电脑上进行，需要先启动本地训练 Agent</p>
+            <h2>本机训练应用</h2>
+            <p>训练在你自己的电脑上进行，需要先运行本机训练应用</p>
           </div>
         </div>
         <button class="icon-button" id="btn-close-agent" @click="close"><iconify-icon icon="mdi:close"></iconify-icon></button>
@@ -44,50 +36,43 @@ async function copyCommand() {
         <div class="agent-status-row" :class="agent.online ? 'online' : 'offline'">
           <span class="agent-dot"></span>
           <div>
-            <strong>{{ agent.online ? "本机 Agent 已连接" : "本机 Agent 未连接" }}</strong>
+            <strong>{{ agent.online ? "本机训练已连接" : "本机训练未连接" }}</strong>
             <span v-if="agent.online" class="agent-status-detail">
               运行时 {{ agent.runtimeVersion || "?" }} ·
               设备 {{ agent.deviceSummary?.available_devices?.join(" / ") || "未知" }}
-              <template v-if="agent.deviceSummary?.cuda_available"> · GPU 可用</template>
+              <template v-if="agent.deviceSummary?.cuda_available"> · GPU 可用（{{ gpuName }}）</template>
             </span>
-            <span v-else class="agent-status-detail">按下方步骤启动后将自动连接</span>
+            <span v-else class="agent-status-detail">按下方步骤运行应用后将自动连接</span>
           </div>
         </div>
 
-        <!-- 首次使用：下载 Agent -->
+        <!-- 下载训练应用 -->
         <a class="agent-download" :href="downloadUrl" download>
           <iconify-icon icon="mdi:download"></iconify-icon>
           <div>
-            <strong>下载本机 Agent（首次使用）</strong>
-            <span>本机还没有 Agent 程序？点此下载压缩包，解压后按下方步骤启动</span>
+            <strong>下载本机训练应用</strong>
+            <span>已绑定你的账号，无需手动配置</span>
           </div>
         </a>
 
-        <!-- 启动步骤 -->
+        <!-- 使用步骤（无需手敲命令） -->
         <ol class="agent-steps">
           <li>
-            <strong>准备环境</strong>：确保已安装 Python 3.10+，解压下载的压缩包并进入其目录。
+            <strong>下载并解压</strong>上面的训练应用压缩包。
           </li>
           <li>
-            <strong>安装依赖</strong>（首次）：<code>pip install -r requirements-agent.txt</code>
+            <strong>双击运行</strong>应用（Windows 为 .exe、macOS 为 .app）。首次运行会
+            自动准备训练环境（创建专属虚拟环境并安装 PyTorch，较慢、只需一次），
+            之后每次打开都会直接连接。
           </li>
           <li>
-            <strong>启动本机 Agent</strong>：复制并运行下面的命令。首次运行会自动从云端下载训练运行时代码。
-            <div class="agent-command">
-              <code>{{ command }}</code>
-              <button class="icon-button" title="复制命令" @click="copyCommand">
-                <iconify-icon icon="mdi:content-copy"></iconify-icon>
-              </button>
-            </div>
-          </li>
-          <li>
-            Agent 连接成功后，本页顶部会显示「本机训练已连接」，即可进行结构校验、训练与代码导出。
+            连接成功后，本页顶部会显示「本机训练已连接」，即可进行结构校验、训练与代码导出。
           </li>
         </ol>
 
         <p class="agent-note">
           <iconify-icon icon="mdi:shield-check-outline"></iconify-icon>
-          令牌用于把本机 Agent 绑定到你的账号，请勿分享给他人。
+          该应用已内置登录令牌以绑定你的账号，请勿分享给他人。
         </p>
       </div>
 

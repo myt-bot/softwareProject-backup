@@ -324,7 +324,7 @@ button:disabled {
 .agent-status-row strong { display: block; font-size: 14px; color: var(--text); }
 .agent-status-detail { font-size: 12px; color: var(--muted); }
 
-/* 下载本机 Agent 的醒目入口 */
+/* 下载本机训练应用的醒目入口 */
 .agent-download {
   display: flex;
   align-items: center;

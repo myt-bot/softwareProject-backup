@@ -116,7 +116,7 @@ export interface DeviceSummary {
   default_device?: string;
   cuda_available?: boolean;
   cuda_device_count?: number;
-  cuda_devices?: string[];
+  cuda_devices?: Array<{ index?: number; name?: string }> | string[];
 }
 
 export interface AgentStatus {
