@@ -1,9 +1,9 @@
-"""backend.schemas 数据结构和基础检查方法测试。"""
+﻿"""local_agent.runtime.schemas 数据结构和基础检查方法测试。"""
 
 import pytest
 from pydantic import ValidationError
 
-from backend.schemas import (
+from local_agent.runtime.schemas import (
     CodeExportRequest,
     ConnectionConfig,
     LayerConfig,
@@ -304,3 +304,4 @@ def test_code_export_request_reports_blank_class_name():
 def test_code_export_request_requires_model():
     with pytest.raises(ValidationError):
         CodeExportRequest()
+

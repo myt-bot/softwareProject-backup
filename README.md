@@ -4,13 +4,15 @@
 
 本项目是一个面向软件课设的可视化深度学习模型构建平台。
 
-系统面向深度学习初学者、课程实验和小组项目场景，目标是让用户通过可视化方式搭建神经网络模型，并完成结构校验、张量维度推导、本地训练、CPU/GPU 切换、训练指标查看和 PyTorch 代码导出。
+系统面向深度学习初学者、课程实验和小组项目场景，目标是让用户通过可视化方式搭建神经网络模型，并完成结构校验、张量维度推导、本机训练、CPU/GPU 切换、训练指标查看和 PyTorch 代码导出。
+
+当前架构采用「云端中转 + 用户本机 Agent」方案：云端服务器只负责前端部署、用户/项目数据存储、训练任务调度和 Agent 连接管理；真正的模型校验、PyTorch 模型构建、训练执行、设备检测和训练产物保存都在用户本机 `local_agent` 中完成。
 
 ## 项目目标
 
 - 支持用户通过可视化界面搭建 MLP、CNN 等基础模型。
 - 支持模型结构检查和层级维度推导。
-- 支持本地 PyTorch 训练。
+- 支持通过用户本机 Agent 执行 PyTorch 训练。
 - 支持 CPU/GPU 运算切换。
 - 支持展示 loss、accuracy 等训练指标。
 - 支持导出 PyTorch 模型代码。
@@ -26,11 +28,18 @@
 - 后续可选：Vue 或 React
 - 后续可选图编辑库：Vue Flow、React Flow、AntV X6 或 jsPlumb
 
-### 后端
+### 云端后端
 
 - Python
 - FastAPI
 - Pydantic
+- MySQL / SQLAlchemy
+- WebSocket（用于与本机 Agent 通信）
+
+### 本机 Agent
+
+- Python
+- FastAPI
 - PyTorch
 - TorchVision
 - NumPy
@@ -40,15 +49,15 @@
 - Python 3.10 或更高版本
 - Node.js 20.19 或更高版本（前端 Vue 3 + TypeScript + Vite）
 - MySQL 8（后端存储；推荐直接用 Docker Compose 启动，见下文「Docker Compose 一键部署」）
-- Docker（可选，用于一键部署后端与数据库）
+- Docker（可选，用于一键部署云端后端与数据库）
 - CUDA GPU 可选
 - 无 GPU 时自动使用 CPU
 
 ## 服务启动方法
 
-前端页面和后端接口需要分别启动，并保持两个终端窗口都处于运行状态。
+前端页面、云端后端接口和用户本机 Agent 需要分别启动。开发环境中通常保持三个终端窗口运行；生产部署时，云端只部署前端、云端后端和数据库，本机 Agent 由用户在自己的电脑上启动。
 
-首次运行或提示缺少 `uvicorn`、`fastapi` 等依赖时，先在项目根目录安装依赖：
+首次运行云端后端或本机 Agent 时，先在项目根目录安装 Python 依赖：
 
 ```bash
 pip install -r requirements.txt
@@ -76,9 +85,9 @@ npm run build       # 类型检查 + 生产构建（输出到 frontend/dist/）
 npm run preview     # 预览生产构建产物
 ```
 
-终端二：启动后端 FastAPI 服务。
+终端二：启动云端后端 FastAPI 服务。
 
-后端存储使用 MySQL，启动后端前需保证 `DATABASE_URL` 环境变量（缺省为
+云端后端存储使用 MySQL，启动后端前需保证 `DATABASE_URL` 环境变量（缺省为
 `mysql+pymysql://root:devroot@127.0.0.1:3306/visual_dl`）指向的数据库可用。
 最简单的方式是先用 Docker 只启动数据库：
 
@@ -86,17 +95,25 @@ npm run preview     # 预览生产构建产物
 docker compose up -d db
 ```
 
-然后启动后端：
+然后启动云端后端：
 
 ```bash
 python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-前端默认访问 `http://127.0.0.1:8000` 上的后端接口。若 `5173` 或 `8000` 端口被占用，需要先关闭占用该端口的旧服务，或同步修改前端接口地址和启动端口。
+前端默认访问 `http://127.0.0.1:8000` 上的云端后端接口。若 `5173` 或 `8000` 端口被占用，需要先关闭占用该端口的旧服务，或同步修改前端接口地址和启动端口。
 
-## Docker Compose 一键部署（后端 + MySQL）
+终端三：启动用户本机 Agent（开发调试）。
 
-仓库提供了 `docker-compose.yml`，可一条命令同时启动 MySQL 数据库和后端 API，适合演示答辩、服务器部署和新成员快速上手（无需手动装 MySQL 和 Python 依赖）。
+```bash
+python -m uvicorn local_agent.main:app --host 127.0.0.1 --port 18000
+```
+
+本机 Agent 负责设备检测、模型结构校验、PyTorch 训练和代码导出。方案 B 中，Agent 启动后还会通过 `local_agent/runtime_manager.py` 检查并下载合适版本的 `trainer-runtime`；当前代码已预留函数和参数说明，具体下载、校验、安装逻辑尚待实现。
+
+## Docker Compose 一键部署（云端后端 + MySQL）
+
+仓库提供了 `docker-compose.yml`，可一条命令同时启动 MySQL 数据库和云端后端 API，适合演示答辩、服务器部署和新成员快速上手。云端后端只负责用户、项目、数据库和训练任务中转，不在服务器上执行 PyTorch 训练。
 
 ### 首次启动
 
@@ -104,14 +121,14 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 # （可选）自定义密码/密钥：复制环境变量模板并按需编辑；跳过则使用开发默认值
 cp .env.example .env
 
-# 构建镜像并启动全部服务（MySQL + 后端 API）
+# 构建镜像并启动全部云端服务（MySQL + 云端后端 API）
 docker compose up -d --build
 
 # （可选）把 data/ 下的历史 JSON 数据导入 MySQL（幂等脚本，可重复执行）
 python -m backend.migrate_json_to_mysql
 ```
 
-启动后：后端 API 在 `http://127.0.0.1:8000`，MySQL 在 `127.0.0.1:3306`（只绑定本机回环地址，不对外网暴露）。前端仍按上文方式用 npm 启动。
+启动后：云端后端 API 在 `http://127.0.0.1:8000`，MySQL 在 `127.0.0.1:3306`（只绑定本机回环地址，不对外网暴露）。前端仍按上文方式用 npm 启动；训练功能需要用户本机 Agent 在线。
 
 ### 常用命令
 
@@ -164,22 +181,31 @@ docker exec -i vdl-mysql mysql -uroot -p密码 visual_dl < backup_2026-07-06.sql
 ```text
 project/
   backend/
-    __init__.py         # 后端包声明
-    main.py             # FastAPI 接口入口
-    schemas.py          # 前后端数据结构定义
-    device.py           # CPU/GPU 检测与选择
-    model_builder.py    # 根据模型 JSON 构建 PyTorch 模型
-    graph_model.py      # 支持 DAG 前向传播的 PyTorch 图模型
-    validator.py        # 模型结构校验与维度推导
-    trainer.py          # 本地训练流程
-    code_exporter.py    # 导出 PyTorch 代码
+    __init__.py         # 云端后端包声明
+    main.py             # 云端 FastAPI 接口入口
+    cloud_training.py   # 云端训练任务调度与本机 Agent 中转接口
+    schemas.py          # 云端数据结构定义（用户/项目/训练中转）
     templates.py        # 内置模型模板
-    graph_utils.py      # 模型图拓扑排序与前驱/后继映射
     storage.py          # MySQL 数据库存储层（SQLAlchemy，M1）
     migrate_json_to_mysql.py  # 一次性迁移脚本：JSON 历史数据导入 MySQL（M1）
     auth.py             # 用户管理与认证模块（M1）
     projects.py         # 项目管理模块（M1）
     security.py         # 密码哈希与 JWT 令牌（M1）
+  local_agent/
+    __init__.py         # 本机 Agent 包声明
+    main.py             # 用户本机 Agent 入口
+    agent_client.py     # 主动连接云端 WebSocket 的客户端
+    runtime_manager.py  # 动态下载/更新 trainer-runtime 的管理器
+    runtime/
+      __init__.py       # 本机训练运行时包声明
+      schemas.py        # 本机训练运行时数据结构
+      device.py         # CPU/GPU 检测与选择
+      model_builder.py  # 根据模型 JSON 构建 PyTorch 模型
+      graph_model.py    # 支持 DAG 前向传播的 PyTorch 图模型
+      graph_utils.py    # 模型图拓扑排序与前驱/后继映射
+      validator.py      # 模型结构校验与维度推导
+      trainer.py        # 本机训练流程
+      code_exporter.py  # 导出 PyTorch 代码
   frontend/
     index.html          # 前端页面入口（Vite）
     package.json        # 前端依赖与脚本
@@ -223,15 +249,15 @@ project/
     M3_validator_shape/ # M3 结构校验与维度推导模块测试
     M7_templates_docs/  # M7 内置模板模块测试
   requirements.txt      # Python 依赖
-  docker-compose.yml    # 一键部署编排：MySQL + 后端 API
-  Dockerfile            # 后端 API 镜像构建配方
+  docker-compose.yml    # 一键部署编排：MySQL + 云端后端 API
+  Dockerfile            # 云端后端 API 镜像构建配方
   .env.example          # 部署环境变量模板（复制为 .env 使用）
   README.md             # 项目开发文档
 ```
 
 ## 核心数据格式
 
-前端通过 JSON 描述当前画布中的模型结构。后端根据该 JSON 完成结构校验、维度推导、模型构建、训练和代码导出。
+前端通过 JSON 描述当前画布中的模型结构。云端后端负责保存项目、创建训练任务并把模型 JSON 与训练配置转发给用户本机 Agent；本机 Agent 根据该 JSON 完成结构校验、维度推导、PyTorch 模型构建、训练和代码导出。
 
 示例：
 
@@ -301,7 +327,7 @@ project/
 
 ## 当前支持的训练数据集
 
-后端训练模块目前支持以下 torchvision 内置数据集：
+本机 Agent 训练运行时目前支持以下 torchvision 内置数据集：
 
 | 数据集 | 输入形状 | 分类数 |
 | ------ | -------- | ------ |
@@ -327,20 +353,20 @@ project/
 除上述基础层外，结构校验器（M3）与内置模板（M7）现已支持进阶层类型：
 LSTM、SelfAttention、TransformerEncoder、Seq2Seq、VAE、GraphConv。
 
-## 后端接口设计
+## 云端与本机 Agent 接口设计
+
+### 云端后端接口
 
 | 方法   | 路径                      | 功能                   | 模块 |
 | ------ | ------------------------- | ---------------------- | ---- |
-| GET    | /health                   | 检查后端服务是否正常   | -    |
-| GET    | /devices                  | 获取可用计算设备       | -    |
-| POST   | /validate                 | 校验模型结构并推导维度 | -    |
-| POST   | /train                    | 启动训练任务           | -    |
-| GET    | /train/{job_id}/status    | 查询训练状态           | -    |
-| GET    | /train/{job_id}/result    | 查询训练结果           | -    |
-| POST   | /train/{job_id}/cancel    | 停止进行中的训练任务   | -    |
-| POST   | /export/pytorch           | 导出 PyTorch 代码（暂未实现，返回 501） | - |
+| GET    | /health                   | 检查云端后端服务是否正常 | -    |
+| POST   | /train                    | 创建云端训练任务，并下发给用户本机 Agent | 云端中转 |
+| GET    | /train/{job_id}/status    | 查询云端记录的训练状态 | 云端中转 |
+| GET    | /train/{job_id}/result    | 查询本机 Agent 回传的训练结果 | 云端中转 |
+| POST   | /train/{job_id}/cancel    | 请求取消训练任务，并转发给本机 Agent | 云端中转 |
+| WS     | /agents/ws                | 本机 Agent 主动连接云端的 WebSocket | 云端中转 |
 | POST   | /auth/register            | 注册新用户（自动登录） | M1   |
-| POST   | /auth/login               | 用户登录（邮箱+密码）  | M1   |
+| POST   | /auth/login               | 用户登录（邮箱 + 密码） | M1   |
 | GET    | /auth/me                  | 获取当前登录用户信息   | M1   |
 | POST   | /users                    | 创建用户               | M1   |
 | GET    | /users                    | 获取所有用户列表       | M1   |
@@ -356,119 +382,111 @@ LSTM、SelfAttention、TransformerEncoder、Seq2Seq、VAE、GraphConv。
 | PUT    | /projects/{project_id}    | 更新项目信息           | M1   |
 | DELETE | /projects/{project_id}    | 删除项目               | M1   |
 
-## 后端模块和函数说明
+### 本机 Agent 接口
+
+| 方法 | 路径        | 功能 |
+| ---- | ----------- | ---- |
+| GET  | /health     | 检查本机 Agent 是否启动，并返回本机设备摘要 |
+| GET  | /devices    | 获取用户本机可用 CPU/GPU 设备 |
+| POST | /validate   | 在用户本机校验模型结构并推导维度 |
+
+本机 Agent 的训练启动、取消、进度上报和结果回传主要通过主动连接云端的 WebSocket 完成；本机 HTTP 接口用于开发调试和本地能力检查。
+
+## 云端后端模块和函数说明
 
 ### backend/main.py
 
 | 函数                  | 功能                                       |
 | --------------------- | ------------------------------------------ |
-| health_check          | 检查后端服务是否正常运行                   |
-| list_devices          | 返回当前本机可用的计算设备                 |
-| validate_model        | 校验模型结构，并推导每一层的张量维度变化   |
-| start_training        | 根据用户选择的 CPU 或 GPU 启动本地训练任务 |
-| get_training_status   | 返回指定训练任务的当前状态、日志和进度     |
-| get_training_result   | 返回训练完成后的最终指标和相关产物信息     |
-| export_pytorch_code   | 导出 PyTorch 代码接口（暂未实现，返回 501）|
-| register              | 注册新用户并返回 JWT 令牌（M1）            |
-| login                 | 验证凭据后返回 JWT 令牌（M1）              |
-| get_current_user_info | 获取当前登录用户信息（M1）                 |
-| create_user           | 创建新用户（M1）                           |
-| list_users            | 获取所有用户列表（M1）                     |
-| get_user              | 获取指定用户信息（M1）                     |
-| update_user           | 更新用户信息（M1）                         |
-| delete_user           | 删除用户及关联项目（M1）                   |
-| create_project        | 创建项目/保存模型（M1）                    |
-| list_project_templates | 获取内置模型模板列表（M7）                |
-| get_project_template  | 获取指定模板的完整模型图（M7）             |
-| create_project_from_template | 基于内置模板创建项目（M7）           |
-| list_projects         | 获取项目列表（M1）                         |
-| get_project           | 获取指定项目详情（M1）                     |
-| update_project        | 更新项目信息（M1）                         |
-| delete_project        | 删除项目（M1）                             |
+| health_check          | 检查云端后端服务是否正常运行                  |
+| register              | 注册新用户并返回 JWT 令牌（M1）           |
+| login                 | 验证凭据后返回 JWT 令牌（M1）             |
+| get_current_user_info | 获取当前登录用户信息（M1）                |
+| create_user           | 创建新用户（M1）                          |
+| list_users            | 获取所有用户列表（M1）                    |
+| get_user              | 获取指定用户信息（M1）                    |
+| update_user           | 更新用户信息（M1）                        |
+| delete_user           | 删除用户及关联项目（M1）                  |
+| create_project        | 创建项目/保存模型（M1）                   |
+| list_project_templates | 获取内置模型模板列表（M7）               |
+| get_project_template  | 获取指定模板的完整模型图（M7）            |
+| create_project_from_template | 基于内置模板创建项目（M7）          |
+| list_projects         | 获取项目列表（M1）                        |
+| get_project           | 获取指定项目详情（M1）                    |
+| update_project        | 更新项目信息（M1）                        |
+| delete_project        | 删除项目（M1）                            |
+
+### backend/cloud_training.py
+
+| 函数 | 功能 |
+| --- | --- |
+| create_cloud_training_job | 创建云端训练任务，并准备下发给用户本机 Agent |
+| get_cloud_training_status | 查询云端记录的训练任务状态 |
+| cancel_cloud_training_job | 请求取消训练任务，并转发给本机 Agent |
+| get_cloud_training_result | 查询本机 Agent 回传的最终训练结果 |
+| agent_websocket_endpoint | 接收本机 Agent 主动建立的 WebSocket 连接 |
+| dispatch_training_job_to_agent | 将训练任务下发给用户在线的本机 Agent（待实现） |
+| handle_agent_training_update | 处理本机 Agent 回传的训练进度或最终结果（待实现） |
+| get_online_agent_for_user | 查询某个用户当前在线的本机 Agent（待实现） |
 
 ### backend/schemas.py
 
-| 类                   | 功能                                         |
-| -------------------- | -------------------------------------------- |
-| LayerConfig          | 描述画布中的一个模型层节点以及它的可编辑参数 |
-| ConnectionConfig     | 描述画布中两个层节点之间的连接关系           |
-| ModelGraph           | 描述前端传给后端的完整模型图结构             |
-| TrainConfig          | 描述训练超参数以及用户选择的计算设备         |
-| ModelRequest         | 模型校验和维度推导接口的请求体               |
-| TrainRequest         | 启动本地训练任务接口的请求体                 |
-| CodeExportRequest    | 导出 PyTorch 代码接口的请求体                |
-| UserCreateRequest    | 创建用户接口的请求体（M1）                   |
-| UserUpdateRequest    | 更新用户接口的请求体（M1）                   |
-| UserRegisterRequest  | 用户注册接口的请求体，含 confirm_password 确认密码（M1） |
-| UserLoginRequest     | 用户登录接口的请求体（M1）                   |
-| TokenResponse        | 认证成功后的 JWT 令牌响应（M1）              |
-| ProjectCreateRequest | 创建项目接口的请求体（M1）                   |
-| ProjectTemplateCreateRequest | 基于内置模板创建项目的请求体（M7）   |
-| ProjectUpdateRequest | 更新项目接口的请求体（M1）                   |
+| 类 | 功能 |
+| --- | --- |
+| CloudModelGraph | 云端保存和转发的轻量模型图结构 |
+| CloudTrainRequest | 云端训练中转接口请求体，包含模型图和训练配置字典 |
+| UserCreateRequest | 创建用户接口的请求体（M1） |
+| UserUpdateRequest | 更新用户接口的请求体（M1） |
+| UserRegisterRequest | 用户注册接口的请求体，含 confirm_password 确认密码（M1） |
+| UserLoginRequest | 用户登录接口的请求体（M1） |
+| TokenResponse | 认证成功后的 JWT 令牌响应（M1） |
+| ProjectCreateRequest | 创建项目接口的请求体（M1） |
+| ProjectTemplateCreateRequest | 基于内置模板创建项目的请求体（M7） |
+| ProjectUpdateRequest | 更新项目接口的请求体（M1） |
 
-### backend/device.py
+## 本机 Agent 模块和函数说明
 
-| 函数                  | 功能                                         |
-| --------------------- | -------------------------------------------- |
-| get_available_devices | 检测当前可用的计算设备，并返回给前端用于展示 |
-| is_cuda_available     | 检查当前本机的 PyTorch 是否可以使用 CUDA GPU |
-| resolve_device        | 根据用户选择决定训练实际使用的设备           |
-| get_device_summary    | 返回适合在设置面板中展示的 CPU/GPU 信息      |
+### local_agent/main.py
 
-### backend/model_builder.py
+| 函数 | 功能 |
+| --- | --- |
+| health_check | 返回本机 Agent 健康状态和设备摘要 |
+| list_devices | 返回用户本机可用 CPU/GPU 设备 |
+| validate_model | 在用户本机校验模型结构并推导维度 |
+| start_agent | 启动本机 Agent，并主动连接云端服务器（待实现） |
 
-| 函数                  | 功能                                                                   |
-| --------------------- | ---------------------------------------------------------------------- |
-| build_model           | 将已经通过校验的可视化模型图转换成支持 DAG 前向传播的 PyTorch 模型对象 |
-| create_layer          | 根据一个可视化层配置创建对应的 PyTorch 层                              |
-| order_layers          | 将画布中的模型节点排序为拓扑执行顺序                                   |
-| extract_model_summary | 生成便于展示或调试的模型结构摘要                                       |
+### local_agent/agent_client.py
 
-### backend/graph_model.py
+| 函数 | 功能 |
+| --- | --- |
+| connect_to_cloud_server | 连接云端 WebSocket，处理认证、心跳、重连和消息收发（待实现） |
+| build_agent_hello_message | 构造 Agent 连接云端后的首条注册消息（待实现） |
+| handle_cloud_command | 处理云端下发的训练、取消、运行时检查等指令（待实现） |
+| start_local_training_job | 在用户本机启动 PyTorch 训练任务（待实现） |
+| send_training_update | 向云端发送训练进度或最终结果（待实现） |
 
-| 类/函数              | 功能                                                      |
-| -------------------- | --------------------------------------------------------- |
-| ExecutableGraphModel | 支持有向无环图结构、拓扑执行和多输入合并的 PyTorch 模型类 |
+### local_agent/runtime_manager.py
 
-### backend/validator.py
+| 函数 | 功能 |
+| --- | --- |
+| get_installed_runtime_version | 读取本机已安装的 trainer-runtime 版本（待实现） |
+| fetch_runtime_manifest | 从云端获取最新兼容运行时元信息（待实现） |
+| download_runtime_package | 下载并校验 trainer-runtime 压缩包（待实现） |
+| install_runtime_package | 安装已下载的 trainer-runtime（待实现） |
+| ensure_runtime_ready | 确保本机已有可用训练运行时（待实现） |
 
-| 函数                    | 功能                                               |
-| ----------------------- | -------------------------------------------------- |
-| validate_model_graph    | 执行完整模型校验，并返回错误、警告和维度信息       |
-| validate_required_nodes | 检查模型图中是否包含 Input、Output 等必要节点      |
-| validate_connections    | 检查是否存在缺失、重复、非法或暂不支持的连接关系   |
-| validate_layer_params   | 检查某一层的可编辑参数是否合法                     |
-| infer_all_shapes        | 按执行顺序推导每一层的输入维度和输出维度           |
-| infer_layer_shape       | 根据输入维度和层参数推导某一层的输出维度           |
-| infer_conv2d_shape      | 根据通道数、卷积核、步长和填充推导 Conv2D 输出维度 |
-| infer_pooling_shape     | 根据池化核、步长和填充推导池化层输出维度           |
-| infer_flatten_shape     | 根据多维张量输入推导 Flatten 后的一维向量长度      |
-| build_error_message     | 将校验错误转换成适合初学者阅读的解释文本           |
+### local_agent/runtime/*.py
 
-### backend/trainer.py
-
-| 函数                    | 功能                                       |
-| ----------------------- | ------------------------------------------ |
-| create_training_job     | 在训练开始前创建并登记一个训练任务         |
-| run_training_job        | 执行一个已登记训练任务的完整训练流程       |
-| prepare_dataset         | 加载并预处理用户选择的内置数据集           |
-| train_one_epoch         | 训练一个 epoch，并返回该轮训练指标         |
-| evaluate_model          | 评估模型，并返回验证损失和准确率           |
-| save_training_artifacts | 保存训练产生的模型权重、指标和日志         |
-| get_job_status          | 返回训练任务的当前状态和进度               |
-| get_job_result          | 返回已完成训练任务的最终指标和保存文件路径 |
-| stop_training_job       | 请求取消一个正在运行的训练任务             |
-
-### backend/code_exporter.py
-
-| 函数                    | 功能                                          |
-| ----------------------- | --------------------------------------------- |
-| export_to_pytorch       | 根据可视化模型图生成完整的 PyTorch 模型源代码 |
-| generate_imports        | 生成导出代码所需的 import 语句                |
-| generate_model_class    | 生成导出模型对应的 nn.Module 类主体           |
-| generate_layer_code     | 生成某一个 PyTorch 层的源代码                 |
-| generate_forward_method | 生成导出 PyTorch 模型的 forward 方法          |
-| format_python_code      | 在返回前端之前格式化生成的 Python 代码        |
+| 文件 | 功能 |
+| --- | --- |
+| schemas.py | 本机训练运行时数据结构，包括模型图、训练配置、校验请求、训练请求和代码导出请求 |
+| device.py | CPU/GPU 检测与训练设备选择 |
+| graph_utils.py | 模型图拓扑排序与前驱/后继映射 |
+| graph_model.py | 支持 DAG 前向传播的 PyTorch 图模型 |
+| model_builder.py | 根据模型 JSON 构建 PyTorch 模型 |
+| validator.py | 模型结构校验与张量维度推导 |
+| trainer.py | 本机 PyTorch 训练流程、指标计算和训练产物保存 |
+| code_exporter.py | 根据可视化模型图生成 PyTorch 模型源代码 |
 
 ### backend/templates.py
 
@@ -477,15 +495,6 @@ LSTM、SelfAttention、TransformerEncoder、Seq2Seq、VAE、GraphConv。
 | get_available_templates | 返回前端可选择的全部内置模板元信息（共 11 个） |
 | create_*_template 系列  | 各内置模板的模型图构建函数：线性分类器、MLP、感知机、LeNet、ResNet-tiny、LSTM、Seq2Seq、Transformer 编码器、自注意力演示、VAE、GCN-tiny、CNN |
 | apply_template          | 按模板名或别名返回模板图，供前端加载到画布中 |
-
-### backend/graph_utils.py
-
-| 函数                    | 功能                           |
-| ----------------------- | ------------------------------ |
-| normalize_model_graph   | 将 JSON 字符串或字典统一成字典 |
-| topological_sort_layers | 对模型层进行拓扑排序           |
-| build_predecessor_map   | 构建每个节点的前驱映射         |
-| build_successor_map     | 构建每个节点的后继映射         |
 
 ### backend/storage.py（M1）
 
@@ -573,10 +582,10 @@ MySQL 数据库存储层（SQLAlchemy 实现）。连接串由环境变量 `DATA
 
 | 导出                      | 功能                                         |
 | ------------------------- | -------------------------------------------- |
-| handleValidateModel       | 将当前模型图发送到后端，并展示结构校验结果   |
+| handleValidateModel       | 将当前模型图发送到本机 Agent，并展示结构校验结果 |
 | handleSaveProject         | 保存当前模型到项目                           |
-| handleExportCode          | 向后端请求生成的 PyTorch 代码，并展示给用户  |
-| handleStartTraining       | 将模型图和训练配置发送到后端，启动本地训练   |
+| handleExportCode          | 向本机 Agent 请求生成的 PyTorch 代码，并展示给用户 |
+| handleStartTraining       | 将模型图和训练配置提交给云端任务中转，由本机 Agent 执行训练 |
 | openCurrentTrainingMonitor | 打开训练监控页并对接实时轮询                |
 
 ### frontend/src/monitor.ts
@@ -592,17 +601,17 @@ MySQL 数据库存储层（SQLAlchemy 实现）。连接串由环境变量 `DATA
 | 函数                | 功能                                             |
 | ------------------- | ------------------------------------------------ |
 | fetchHealth         | 调用后端健康检查接口，确认服务是否可访问         |
-| fetchDevices        | 向后端请求当前可用的 CPU/GPU 设备                |
-| validateModel       | 将可视化模型图发送给后端，用于结构校验和维度推导 |
-| startTraining       | 根据选择的数据集、超参数和设备启动本地训练任务   |
-| fetchTrainingStatus | 查询训练任务的当前状态和进度                     |
-| fetchTrainingResult | 查询已完成训练任务的最终指标和产物信息           |
+| fetchDevices        | 向本机 Agent 请求当前可用的 CPU/GPU 设备          |
+| validateModel       | 将可视化模型图发送给本机 Agent，用于结构校验和维度推导 |
+| startTraining       | 向云端创建训练任务，并由云端下发给本机 Agent 执行 |
+| fetchTrainingStatus | 向云端查询训练任务的当前状态和进度               |
+| fetchTrainingResult | 向云端查询本机 Agent 回传的最终指标和产物信息     |
 | cancelTraining      | 请求停止进行中的训练任务                         |
 | registerUser        | 注册新账号并获取 JWT 令牌                        |
 | loginUser           | 邮箱密码登录并获取 JWT 令牌                      |
 | fetchCurrentUser    | 通过令牌获取当前登录用户信息                     |
 | setAuthToken        | 注入 JWT，之后所有请求自动携带 Authorization 头  |
-| exportPytorchCode   | 向后端请求根据模型图生成的 PyTorch 模型代码      |
+| exportPytorchCode   | 向本机 Agent 请求根据模型图生成的 PyTorch 模型代码 |
 
 ## 增量开发计划
 
@@ -617,14 +626,14 @@ MySQL 数据库存储层（SQLAlchemy 实现）。连接串由环境变量 `DATA
 
 - 检测本机是否支持 CUDA。
 - 前端展示 CPU/GPU 选项。
-- 后端根据用户选择切换训练设备。
+- 本机 Agent 根据用户选择切换训练设备。
 - GPU 不可用时给出提示或自动降级到 CPU。
 
 ### 第三阶段：模型 JSON 构建
 
 - 前端生成统一的模型 JSON。
-- 后端接收模型 JSON。
-- 后端根据 JSON 构建 PyTorch 模型。
+- 云端接收模型 JSON 并创建训练任务。
+- 本机 Agent 根据 JSON 构建 PyTorch 模型。
 
 ### 第四阶段：结构校验与维度推导
 
@@ -651,26 +660,30 @@ MySQL 数据库存储层（SQLAlchemy 实现）。连接串由环境变量 `DATA
 ## 开发约定
 
 - 前端不直接执行深度学习训练，只负责模型编辑、接口调用和结果展示。
-- 后端负责模型校验、维度推导、PyTorch 模型构建、训练和代码导出。
-- 前后端之间统一使用 JSON 通信。
+- 云端后端负责用户、项目、数据库、训练任务调度和本机 Agent 连接管理。
+- 本机 Agent 负责模型校验、维度推导、PyTorch 模型构建、训练、设备检测和代码导出。
+- 前端、云端后端和本机 Agent 之间统一使用 JSON 通信；云端与 Agent 的任务通道优先使用 WebSocket。
 - 第一版模型构建器按有向无环图进行拓扑执行，支持顺序结构、基础分支汇合和多输入合并；暂不支持环形连接和自定义 Python 层。
 - 用户只能选择系统内置层类型，不能直接提交任意 Python 代码。
-- GPU 是否可用以后端检测结果为准，前端不能自行假设。
-- 新增接口时需要同步更新 backend/main.py 和本 README。
+- GPU 是否可用以本机 Agent 检测结果为准，前端和云端后端不能自行假设。
+- 新增云端接口时需要同步更新 backend/main.py 或 backend/cloud_training.py 和本 README。
+- 新增本机 Agent 接口时需要同步更新 local_agent/main.py 或 local_agent/agent_client.py 和本 README。
 - 新增函数时需要在本 README 中登记函数功能。
-- 修改核心 JSON 数据格式时，需要同步更新前端、后端和本 README。
+- 修改核心 JSON 数据格式时，需要同步更新前端、云端后端、本机 Agent 和本 README。
 
 ## AI 协作说明
 
 后续使用 AI 辅助开发时，请优先阅读本 README，并遵守以下约定：
 
-- 不要随意改变前后端 JSON 数据结构。
+- 不要随意改变前端、云端后端和本机 Agent 之间的 JSON 数据结构。
 - 新增功能前先确认对应模块职责。
-- 后端新增训练相关逻辑优先放在 backend/trainer.py。
-- 后端新增模型构建逻辑优先放在 backend/model_builder.py，图模型执行逻辑优先放在 backend/graph_model.py。
-- 后端新增维度推导和校验逻辑优先放在 backend/validator.py。
-- 后端新增设备相关逻辑优先放在 backend/device.py。
-- 后端新增代码导出逻辑优先放在 backend/code_exporter.py。
+- 云端新增训练调度、中转、Agent 连接相关逻辑优先放在 backend/cloud_training.py。
+- 本机新增训练相关逻辑优先放在 local_agent/runtime/trainer.py。
+- 本机新增模型构建逻辑优先放在 local_agent/runtime/model_builder.py，图模型执行逻辑优先放在 local_agent/runtime/graph_model.py。
+- 本机新增维度推导和校验逻辑优先放在 local_agent/runtime/validator.py。
+- 本机新增设备相关逻辑优先放在 local_agent/runtime/device.py。
+- 本机新增代码导出逻辑优先放在 local_agent/runtime/code_exporter.py。
 - 前端新增接口调用时优先封装到 frontend/src/api/client.ts，共享类型放在 frontend/src/types.ts。
 - 前端新增页面区块时拆分为 frontend/src/components/ 下的 Vue 组件，跨组件状态放在 frontend/src/store.ts。
 - 新增或修改函数后，需要同步更新本 README 中的函数说明。
+

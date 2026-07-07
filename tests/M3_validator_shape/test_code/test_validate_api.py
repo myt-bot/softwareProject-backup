@@ -1,8 +1,8 @@
-import unittest
+﻿import unittest
 
 from fastapi.testclient import TestClient
 
-from backend.main import app
+from local_agent.main import app
 
 
 def layer(layer_id, layer_type, params=None):
@@ -81,3 +81,4 @@ class ValidateApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -1,4 +1,4 @@
-import unittest
+﻿import unittest
 
 from backend.templates import (
     apply_template,
@@ -10,7 +10,7 @@ from backend.templates import (
     create_vae_template,
     get_available_templates,
 )
-from backend.validator import infer_layer_shape, validate_model_graph
+from local_agent.runtime.validator import infer_layer_shape, validate_model_graph
 
 
 EXPECTED_TEMPLATE_KEYS = {
@@ -214,7 +214,7 @@ class TemplateModelBuilderUnitTests(unittest.TestCase):
     def setUpClass(cls):
         try:
             import torch  # noqa: F401
-            from backend.model_builder import create_layer
+            from local_agent.runtime.model_builder import create_layer
         except ModuleNotFoundError as exc:
             cls.skip_reason = f"缺少依赖，跳过 model_builder 构建测试: {exc}"
             cls.create_layer = None
@@ -259,3 +259,4 @@ class TemplateModelBuilderUnitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

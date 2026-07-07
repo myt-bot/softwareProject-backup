@@ -1,4 +1,4 @@
-"""模板接口集成测试。"""
+﻿"""模板接口集成测试。"""
 
 import sys
 import tempfile
@@ -17,7 +17,7 @@ storage._STORAGE_DIR = _data_dir
 storage._USERS_FILE = _data_dir / "users.json"
 storage._PROJECTS_FILE = _data_dir / "projects.json"
 
-from backend.validator import validate_model_graph
+from local_agent.runtime.validator import validate_model_graph
 
 
 try:
@@ -181,3 +181,4 @@ class TemplateApiIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -1,6 +1,6 @@
-import unittest
+﻿import unittest
 
-from backend.validator import (
+from local_agent.runtime.validator import (
     infer_flatten_shape,
     infer_layer_shape,
     validate_model_graph,
@@ -220,3 +220,4 @@ class ValidatorShapeUnitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

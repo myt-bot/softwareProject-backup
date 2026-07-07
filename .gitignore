@@ -51,3 +51,5 @@ demo.py
 # ============================================================
 MNIST/
 training_artifacts/
+
+software.code-workspace
