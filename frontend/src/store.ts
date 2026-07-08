@@ -82,86 +82,6 @@ export const fallbackTemplates: TemplateMeta[] = [
   { key: "gcn", name: "GCN", description: "图卷积网络。", family: "graph" },
 ];
 
-const initialNodes: GraphNode[] = [
-  {
-    id: "input",
-    type: "Input",
-    title: "MNIST Input",
-    badge: "Input",
-    color: "emerald",
-    hint: "28x28x1",
-    x: 438,
-    y: 60,
-    params: { shape: [1, 28, 28] },
-  },
-  {
-    id: "conv",
-    type: "Conv2D",
-    title: "Feature Extractor",
-    badge: "Conv2D",
-    color: "blue",
-    note: "out=16, k=3, s=1, p=0",
-    hint: "?",
-    x: 438,
-    y: 265,
-    params: { out_channels: 16, kernel_size: 3, stride: 1, padding: 0 },
-  },
-  {
-    id: "pool",
-    type: "Pooling",
-    title: "Dimension Reducer",
-    badge: "MaxPool",
-    color: "purple",
-    note: "k=2, s=2",
-    hint: "?",
-    x: 438,
-    y: 470,
-    params: { kernel_size: 2, stride: 2, padding: 0 },
-  },
-  {
-    id: "flatten",
-    type: "Flatten",
-    title: "Vectorize",
-    badge: "Flatten",
-    color: "indigo",
-    hint: "?",
-    x: 438,
-    y: 675,
-    params: {},
-  },
-  {
-    id: "linear",
-    type: "Linear",
-    title: "Classifier FC",
-    badge: "Linear",
-    color: "cyan",
-    note: "out=128, in=1024",
-    hint: "?",
-    x: 438,
-    y: 880,
-    params: { out_features: 128 },
-  },
-  {
-    id: "output",
-    type: "Output",
-    title: "MNIST Classes",
-    badge: "Output",
-    color: "rose",
-    hint: "?",
-    x: 438,
-    y: 1085,
-    params: {},
-  },
-];
-
-const initialConnections: Connection[] = [
-  ["input", "conv"],
-  ["conv", "pool"],
-  ["pool", "flatten"],
-  ["flatten", "linear"],
-  ["linear", "output"],
-];
-
 export type ValidationStatus = "unvalidated" | "passing" | "failed";
 export type NodeBadgeState = "none" | "passed" | "pending";
 
@@ -237,8 +157,9 @@ export const store = reactive({
   // 训练设备（cpu / cuda），由顶栏设备选择器切换；GPU 可用性来自后端 /devices
   device: "cpu",
   cudaAvailable: false,
-  // 多画布：标签页切换，至少保留一个
-  canvases: [createCanvas(1, "画布 1", initialNodes, initialConnections)] as WorkCanvas[],
+  // 多画布：标签页切换，至少保留一个。初始进入为空白画布（不预置示例模型，
+  // 需要示例可用顶部「快速开始模板」加载）
+  canvases: [createCanvas(1, "画布 1")] as WorkCanvas[],
   activeCanvasId: 1,
   canvasSeq: 1,
   // 以下为全局交互状态（只作用于当前激活画布的瞬时操作）

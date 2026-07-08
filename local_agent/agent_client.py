@@ -305,6 +305,8 @@ async def connect_to_cloud_server(
                     runtime_version=state.runtime_version,
                     device_summary=device_summary,
                 ))
+                # 明确的连接成功标记（GUI 启动器据此显示"已连接"）
+                print("[agent] CONNECTED 已成功连接云端。", flush=True)
                 heartbeat = asyncio.create_task(_heartbeat_loop())
                 try:
                     async for raw in websocket:

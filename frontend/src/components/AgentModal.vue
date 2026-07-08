@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { agentDownloadUrl } from "../api/client";
+import { computed, ref, watch } from "vue";
+import { agentDownloadUrl, fetchAgentToken } from "../api/client";
 import { auth } from "../auth";
-import { agent, ui } from "../store";
+import { agent, showToast, ui } from "../store";
 
 type OsKey = "windows" | "macos" | "linux";
 const OS_OPTIONS: Array<{ key: OsKey; label: string; icon: string }> = [
@@ -29,6 +29,37 @@ const gpuName = computed(() => {
   const dev = agent.deviceSummary?.cuda_devices?.[0];
   return typeof dev === "string" ? dev : dev?.name || "GPU";
 });
+
+// 首次准备环境需下载的依赖大小（CUDA 版 PyTorch 较大；macOS 默认版较小）
+const depsSize = computed(() => (selectedOs.value === "macos" ? "约 200 MB" : "约 2–3 GB"));
+
+// 长期有效的 Agent 令牌（用于手动更新 config.json）
+const agentToken = ref("");
+const tokenDays = ref(365);
+
+watch(
+  () => ui.agentModalOpen,
+  async open => {
+    if (!open || !auth.token) return;
+    try {
+      const res = await fetchAgentToken(auth.token);
+      agentToken.value = res.token;
+      if (res.expires_days) tokenDays.value = res.expires_days;
+    } catch {
+      agentToken.value = "";
+    }
+  }
+);
+
+async function copyToken() {
+  if (!agentToken.value) return;
+  try {
+    await navigator.clipboard.writeText(agentToken.value);
+    showToast("success", "令牌已复制，粘贴到应用 config.json 的 token 字段即可。");
+  } catch {
+    showToast("warning", "当前浏览器不支持自动复制，请手动选中复制。");
+  }
+}
 
 function close() {
   ui.agentModalOpen = false;
@@ -79,13 +110,14 @@ function close() {
           </button>
         </div>
 
-        <!-- 下载训练应用 -->
-        <a class="agent-download" :href="downloadUrl" download>
+        <!-- 下载训练应用（醒目脉冲，提示可点击下载） -->
+        <a class="agent-download pulse" :href="downloadUrl" download id="btn-agent-download">
           <iconify-icon icon="mdi:download"></iconify-icon>
           <div>
-            <strong>下载本机训练应用（{{ OS_OPTIONS.find(o => o.key === selectedOs)?.label }}）</strong>
+            <strong>点击下载本机训练应用（{{ OS_OPTIONS.find(o => o.key === selectedOs)?.label }}）</strong>
             <span>已绑定你的账号，无需手动配置</span>
           </div>
+          <span class="agent-download-cue">点此下载 <iconify-icon icon="mdi:arrow-down-bold"></iconify-icon></span>
         </a>
 
         <!-- 使用步骤（无需手敲命令） -->
@@ -94,18 +126,36 @@ function close() {
             <strong>下载并解压</strong>上面的训练应用压缩包。
           </li>
           <li>
-            <strong>双击运行</strong>应用（Windows 为 .exe、macOS 为 .app）。首次运行会
-            自动准备训练环境（创建专属虚拟环境并安装 PyTorch，较慢、只需一次），
-            之后每次打开都会直接连接。
+            <strong>双击运行</strong>应用（Windows 为 .exe、macOS 为 .app），在界面里点
+            <strong>「准备训练环境」</strong>。首次会下载并安装 PyTorch 等依赖
+            （<strong>{{ depsSize }}</strong>，较慢、只需一次），装好后自动连接；之后每次打开直接连接。
           </li>
           <li>
             连接成功后，本页顶部会显示「本机训练已连接」，即可进行结构校验、训练与代码导出。
           </li>
         </ol>
 
+        <!-- 令牌失效时手动更新（醒目红色区域） -->
+        <div class="agent-token-box">
+          <div class="agent-token-head">
+            <iconify-icon icon="mdi:alert-circle-outline"></iconify-icon>
+            <strong>应用连不上 / 提示令牌失效？无需重新下载</strong>
+          </div>
+          <p>
+            复制下面这串<b>长期有效令牌</b>（{{ tokenDays }} 天），替换你应用文件夹里
+            <code>config.json</code> 的 <code>"token"</code> 字段，保存后重新运行应用即可。
+          </p>
+          <div class="agent-token-value">
+            <code>{{ agentToken || "加载中…" }}</code>
+            <button class="icon-button" title="复制令牌" :disabled="!agentToken" @click="copyToken">
+              <iconify-icon icon="mdi:content-copy"></iconify-icon>
+            </button>
+          </div>
+        </div>
+
         <p class="agent-note">
           <iconify-icon icon="mdi:shield-check-outline"></iconify-icon>
-          该应用已内置登录令牌以绑定你的账号，请勿分享给他人。
+          令牌用于把应用绑定到你的账号，请勿分享给他人。
         </p>
       </div>
 

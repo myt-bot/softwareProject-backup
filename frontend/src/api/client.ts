@@ -18,7 +18,9 @@ import type {
   AuthUser,
 } from "../types";
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+// 后端地址：生产构建时由 VITE_API_BASE_URL 注入（见 frontend/.env.production），
+// 未设置时回退到本地开发地址。
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
 // 浏览器与云端服务器的持久化 WebSocket 地址（接收 Agent 状态与训练进度）
 export function clientWebSocketUrl(token: string): string {
@@ -30,6 +32,11 @@ export function clientWebSocketUrl(token: string): string {
 export function agentDownloadUrl(token: string, platform?: string): string {
   const base = `${API_BASE_URL}/agent/download?token=${encodeURIComponent(token)}`;
   return platform ? `${base}&platform=${encodeURIComponent(platform)}` : base;
+}
+
+// 获取长期有效的 Agent 令牌（供用户手动更新已下载应用 config.json 的 token）
+export async function fetchAgentToken(token: string): Promise<{ token: string; expires_days?: number }> {
+  return request(`/agent/token?token=${encodeURIComponent(token)}`);
 }
 
 // 请求超时：后端接口都是快速返回的（训练在后台线程执行），

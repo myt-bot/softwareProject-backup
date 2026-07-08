@@ -1,17 +1,14 @@
-"""VisualDL 本机训练应用启动器（自举）。
+"""VisualDL 本机训练应用启动器（图形界面）。
 
-打开应用后自动完成环境准备并启动 Agent，用户无需手敲任何命令：
-
-    1. 检查本应用专属的虚拟环境是否已存在（~/.visualdl_agent/venv）；
-    2. 已存在 → 直接用它启动 Agent；
-    3. 不存在 → 自动创建虚拟环境并安装依赖（Windows/Linux 一律装 CUDA 版
-       PyTorch，macOS 装默认版），装好后启动 Agent。
-
-第二次以后打开都走「直接启动」，不再重复安装。
+功能：
+- 图形界面（tkinter），带项目风格图标；
+- 检测本机训练环境是否就绪，**未就绪时由用户点击按钮才下载/安装依赖**（不自动装）；
+- 界面内可直接粘贴/更新令牌，保存到启动器自管配置（不依赖外部 config.json）；
+- 虚拟环境创建在**启动器所在目录**下的 visualdl_runtime/venv；
+- 启动并连接云端，实时显示连接状态与日志。
 
 打包为单文件应用时（PyInstaller + 内置独立 Python），本文件是入口。
-launcher 只用 Python 标准库，创建虚拟环境所需的「基础 Python」由打包时
-内置的独立解释器提供，因此用户电脑上无需预装 Python。
+无图形环境时自动回退到命令行模式（--no-gui 亦可强制）。
 """
 
 import json
@@ -19,18 +16,14 @@ import os
 import platform
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
-# 应用专属数据目录（名字足够独特，几乎不会与其他程序冲突）
-APP_DIR = Path.home() / ".visualdl_agent"
-VENV_DIR = APP_DIR / "venv"
-READY_MARKER = VENV_DIR / ".deps_ready"
-
-# 轻量依赖（从 PyPI 安装，很快）
+# 依赖清单（Windows/Linux 一律装 CUDA 版 PyTorch；macOS 装默认版）
 BASE_REQUIREMENTS = ["websockets", "numpy", "fastapi", "pydantic"]
-# 训练框架（Windows/Linux 用 CUDA 源，一律装 GPU 版；macOS 无 CUDA 装默认版）
 TORCH_REQUIREMENTS = ["torch", "torchvision"]
 CUDA_INDEX_URL = "https://download.pytorch.org/whl/cu121"
+DEFAULT_SERVER = "http://127.0.0.1:8000"
 
 
 def _is_windows() -> bool:
@@ -41,110 +34,349 @@ def _is_macos() -> bool:
     return platform.system() == "Darwin"
 
 
+def _deps_size_text() -> str:
+    """首次需下载的依赖大小估计（含 PyTorch）。CUDA 版较大，macOS 默认版较小。"""
+    return "约 200 MB" if _is_macos() else "约 2–3 GB"
+
+
+def _launcher_dir() -> Path:
+    """启动器/可执行文件所在目录（虚拟环境与配置都放在它下面）。"""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent   # 打包 exe 所在目录
+    return Path(__file__).resolve().parent              # 源码运行：launcher.py 所在目录
+
+
+# 启动器目录下新建的运行时文件夹：存放虚拟环境与启动器自管配置
+APP_DIR = _launcher_dir() / "visualdl_runtime"
+VENV_DIR = APP_DIR / "venv"
+READY_MARKER = VENV_DIR / ".deps_ready"
+SAVED_CONFIG = APP_DIR / "config.json"   # 启动器自管配置（令牌更新后存这里，最高优先）
+
+
 def venv_python() -> Path:
-    """返回虚拟环境内 Python 解释器的路径（区分平台）。"""
+    """虚拟环境内 Python 解释器路径（区分平台）。"""
     if _is_windows():
         return VENV_DIR / "Scripts" / "python.exe"
     return VENV_DIR / "bin" / "python"
 
 
 def is_venv_ready() -> bool:
-    """判断本应用的虚拟环境是否已创建且依赖已装好。"""
+    """训练环境是否已创建且依赖已装好。"""
     return venv_python().exists() and READY_MARKER.exists()
 
 
-def _base_python() -> str:
-    """创建虚拟环境使用的基础 Python。
+def _agent_code_dir() -> Path:
+    """包含 local_agent 包的目录（用于子进程 PYTHONPATH）。"""
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", _launcher_dir()))
+    here = Path(__file__).resolve().parent
+    for d in (here, here.parent):
+        if (d / "local_agent").is_dir():
+            return d
+    return here.parent
 
-    打包成单文件应用后，sys.executable 指向内置的独立 Python，可直接用它
-    创建 venv；开发环境下则是当前 Python。
+
+def _asset(name: str):
+    """定位打包/源码中的资源文件（如图标）。"""
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "local_agent" / "assets" / name)
+    candidates.append(Path(__file__).resolve().parent / "assets" / name)
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+
+# —————————————————————————————————————————————
+# 配置：随下载附带（seed）+ 启动器自管（authoritative）
+# —————————————————————————————————————————————
+
+def _read_json(path) -> dict:
+    try:
+        if path and Path(path).exists():
+            return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
+def _shipped_config() -> dict:
+    """随应用附带的 config.json（下载时注入的令牌），用于首次 seed。
+
+    优先读可执行文件旁的外部 config.json；其次源码布局；最后打包内置。
     """
-    return sys.executable
+    meipass = getattr(sys, "_MEIPASS", None)
+    for path in [
+        _launcher_dir() / "config.json",
+        Path(__file__).resolve().parent / "config.json",
+        (Path(meipass) / "config.json") if meipass else None,
+    ]:
+        cfg = _read_json(path)
+        if cfg:
+            return cfg
+    return {}
 
+
+def load_config() -> dict:
+    """有效配置：启动器自管配置优先，缺失项用随包附带的 seed 补齐。"""
+    shipped = _shipped_config()
+    saved = _read_json(SAVED_CONFIG)
+    return {
+        "server_url": saved.get("server_url") or shipped.get("server_url") or DEFAULT_SERVER,
+        "token": saved.get("token") or shipped.get("token") or "",
+    }
+
+
+def save_config(server_url: str, token: str) -> None:
+    """把令牌/地址保存到启动器自管配置（此后以此为准，不再依赖外部 config.json）。"""
+    APP_DIR.mkdir(parents=True, exist_ok=True)
+    SAVED_CONFIG.write_text(
+        json.dumps({"server_url": server_url, "token": token}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+# —————————————————————————————————————————————
+# 环境准备（点击后才执行）与 Agent 子进程
+# —————————————————————————————————————————————
 
 def create_environment(log=print) -> None:
-    """创建虚拟环境并安装全部依赖（含 CUDA 版 PyTorch）。"""
+    """创建虚拟环境并安装依赖（含 CUDA 版 PyTorch）。仅在用户触发时调用。"""
     APP_DIR.mkdir(parents=True, exist_ok=True)
-
     if not venv_python().exists():
         log("[启动器] 正在创建训练环境（首次使用，只需一次）...")
-        subprocess.run([_base_python(), "-m", "venv", str(VENV_DIR)], check=True)
-
+        subprocess.run([sys.executable, "-m", "venv", str(VENV_DIR)], check=True)
     py = str(venv_python())
     log("[启动器] 正在升级 pip ...")
     subprocess.run([py, "-m", "pip", "install", "--upgrade", "pip"], check=True)
-
-    # 先装轻量依赖（快）
     log("[启动器] 正在安装基础依赖 ...")
     subprocess.run([py, "-m", "pip", "install", *BASE_REQUIREMENTS], check=True)
-
-    # 再装 PyTorch：Windows/Linux 用 CUDA 源一律装 GPU 版；macOS 装默认版
-    log("[启动器] 正在安装 PyTorch（首次较慢，请耐心等待）...")
+    log(f"[启动器] 即将下载并安装 PyTorch（{_deps_size_text()}），首次较慢，请保持网络畅通 ...")
     torch_cmd = [py, "-m", "pip", "install", *TORCH_REQUIREMENTS]
     if not _is_macos():
         torch_cmd += ["--index-url", CUDA_INDEX_URL]
     subprocess.run(torch_cmd, check=True)
-
     READY_MARKER.write_text("ok", encoding="utf-8")
     log("[启动器] 训练环境准备完成。")
 
 
-def _load_config() -> dict:
-    """读取随应用包附带的 config.json（含云端地址与令牌）。"""
-    # 优先读应用包目录（打包后为可执行文件所在目录）里的 config.json
-    candidates = [
-        Path(getattr(sys, "_MEIPASS", "")) / "config.json" if hasattr(sys, "_MEIPASS") else None,
-        Path(sys.argv[0]).resolve().parent / "config.json",
-        Path(__file__).resolve().parent.parent / "config.json",
-        APP_DIR / "config.json",
-    ]
-    for path in candidates:
-        if path and path.exists():
-            try:
-                return json.loads(path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                continue
-    return {}
-
-
-def _agent_code_dir() -> Path:
-    """返回包含 local_agent 包的目录，用于设置子进程的 PYTHONPATH。"""
-    if hasattr(sys, "_MEIPASS"):
-        return Path(sys._MEIPASS)  # PyInstaller 解包目录
-    return Path(__file__).resolve().parent.parent
-
-
-def run_agent(server_url: str, token: str, log=print) -> int:
-    """用虚拟环境里的 Python 启动本机 Agent（阻塞运行直到退出）。"""
+def start_agent_process(server_url: str, token: str) -> subprocess.Popen:
+    """启动 Agent 子进程，stdout 行式输出（供界面/命令行读取）。"""
     env = dict(os.environ)
     code_dir = str(_agent_code_dir())
     env["PYTHONPATH"] = code_dir + os.pathsep + env.get("PYTHONPATH", "")
-
-    log("[启动器] 正在启动本机训练 Agent 并连接云端 ...")
-    proc = subprocess.run(
+    env["PYTHONIOENCODING"] = "utf-8"
+    return subprocess.Popen(
         [str(venv_python()), "-m", "local_agent.main", "--server", server_url, "--token", token],
         cwd=code_dir,
         env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        bufsize=1,
     )
-    return proc.returncode
 
 
-def main() -> None:
-    config = _load_config()
-    # 命令行参数可覆盖 config.json（便于开发调试）
-    server_url = config.get("server_url", "http://127.0.0.1:8000")
+# —————————————————————————————————————————————
+# 图形界面
+# —————————————————————————————————————————————
+
+def run_gui(config: dict) -> None:
+    import tkinter as tk
+    from tkinter import scrolledtext, messagebox
+
+    C_BG = "#f4f8fd"
+    C_BLUE = "#0ea5e9"
+    C_TEXT = "#1f2a44"
+    C_MUTED = "#5b6b88"
+
+    root = tk.Tk()
+    root.title("VisualDL 本机训练应用")
+    root.geometry("660x560")
+    root.configure(bg=C_BG)
+    _imgs = []  # 防止 PhotoImage 被回收
+    icon = _asset("icon.png")
+    if icon is not None:
+        try:
+            img = tk.PhotoImage(file=str(icon))
+            root.iconphoto(True, img)
+            _imgs.append(img)
+        except Exception:
+            pass
+
+    ui = {"busy": False, "connected": False, "proc": None}
+
+    # 头部：图标 + 标题
+    header = tk.Frame(root, bg=C_BG)
+    header.pack(fill="x", padx=20, pady=(18, 8))
+    if _imgs:
+        small = _imgs[0].subsample(max(1, _imgs[0].width() // 48))
+        _imgs.append(small)
+        tk.Label(header, image=small, bg=C_BG).pack(side="left")
+    title_box = tk.Frame(header, bg=C_BG)
+    title_box.pack(side="left", padx=12)
+    tk.Label(title_box, text="VisualDL 本机训练应用", font=("Microsoft YaHei", 15, "bold"),
+             fg=C_TEXT, bg=C_BG).pack(anchor="w")
+    tk.Label(title_box, text="训练在你自己的电脑上进行", font=("Microsoft YaHei", 9),
+             fg=C_MUTED, bg=C_BG).pack(anchor="w")
+
+    # 令牌 / 服务器地址（界面内更新令牌）
+    form = tk.Frame(root, bg=C_BG)
+    form.pack(fill="x", padx=20, pady=6)
+    tk.Label(form, text="登录令牌（从网页「本机训练应用」弹窗复制，失效时在此更新）",
+             font=("Microsoft YaHei", 9), fg=C_MUTED, bg=C_BG).pack(anchor="w")
+    token_var = tk.StringVar(value=config.get("token", ""))
+    token_entry = tk.Entry(form, textvariable=token_var, font=("Consolas", 9), show="•")
+    token_entry.pack(fill="x", pady=(2, 6), ipady=4)
+    row = tk.Frame(form, bg=C_BG)
+    row.pack(fill="x")
+    tk.Label(row, text="服务器：", font=("Microsoft YaHei", 9), fg=C_MUTED, bg=C_BG).pack(side="left")
+    server_var = tk.StringVar(value=config.get("server_url", DEFAULT_SERVER))
+    tk.Entry(row, textvariable=server_var, font=("Consolas", 9)).pack(side="left", fill="x", expand=True, ipady=3)
+
+    status_var = tk.StringVar(value="")
+    tk.Label(root, textvariable=status_var, font=("Microsoft YaHei", 10, "bold"),
+             fg=C_TEXT, bg=C_BG, anchor="w").pack(fill="x", padx=20, pady=(8, 4))
+
+    # 主按钮 + 保存令牌
+    btns = tk.Frame(root, bg=C_BG)
+    btns.pack(fill="x", padx=20)
+    action_btn = tk.Button(btns, text="", font=("Microsoft YaHei", 11, "bold"),
+                           bg=C_BLUE, fg="white", activebackground="#0284c7",
+                           activeforeground="white", relief="flat", cursor="hand2", pady=8)
+    action_btn.pack(side="left", fill="x", expand=True)
+    save_btn = tk.Button(btns, text="保存令牌", font=("Microsoft YaHei", 10),
+                         relief="flat", cursor="hand2", pady=8, padx=12)
+    save_btn.pack(side="left", padx=(10, 0))
+
+    # 日志
+    log_widget = scrolledtext.ScrolledText(root, height=14, font=("Consolas", 9),
+                                           bg="#0f172a", fg="#cbd5e1", relief="flat", state="disabled")
+    log_widget.pack(fill="both", expand=True, padx=20, pady=(10, 18))
+
+    def log(msg: str) -> None:
+        def _do():
+            log_widget.configure(state="normal")
+            log_widget.insert("end", msg + "\n")
+            log_widget.see("end")
+            log_widget.configure(state="disabled")
+        root.after(0, _do)
+
+    def set_status(text: str) -> None:
+        root.after(0, lambda: status_var.set(text))
+
+    def set_action(text: str, enabled: bool) -> None:
+        root.after(0, lambda: action_btn.config(text=text, state=("normal" if enabled else "disabled")))
+
+    def refresh_idle() -> None:
+        if ui["busy"] or ui["connected"]:
+            return
+        if not token_var.get().strip():
+            set_status("请先粘贴登录令牌")
+            set_action("请先填写令牌", False)
+        elif is_venv_ready():
+            set_status("环境就绪，点击即可连接")
+            set_action("启动并连接云端", True)
+        else:
+            set_status(f"首次使用需准备训练环境：约需下载 {_deps_size_text()} 依赖（含 PyTorch，只需一次）")
+            set_action(f"准备训练环境并连接（首次下载{_deps_size_text()}）", True)
+
+    def on_save() -> None:
+        t = token_var.get().strip()
+        s = server_var.get().strip() or DEFAULT_SERVER
+        if not t:
+            messagebox.showwarning("提示", "请先粘贴令牌。")
+            return
+        save_config(s, t)
+        log("[启动器] 令牌已保存。")
+        refresh_idle()
+
+    def worker() -> None:
+        s = server_var.get().strip() or DEFAULT_SERVER
+        t = token_var.get().strip()
+        if not t:
+            ui["busy"] = False
+            set_status("缺少令牌")
+            refresh_idle()
+            return
+        save_config(s, t)
+        try:
+            if not is_venv_ready():
+                set_status("正在准备训练环境（首次较慢）...")
+                create_environment(log=log)
+        except Exception as exc:  # noqa: BLE001
+            log(f"[启动器] 环境准备失败：{exc}")
+            set_status("环境准备失败，请重试")
+            ui["busy"] = False
+            set_action("重试准备环境并连接", True)
+            return
+
+        set_status("正在连接云端 ...")
+        set_action("连接中 ...", False)
+        try:
+            proc = start_agent_process(s, t)
+        except Exception as exc:  # noqa: BLE001
+            log(f"[启动器] 启动失败：{exc}")
+            ui["busy"] = False
+            set_status("启动失败")
+            set_action("重试", True)
+            return
+        ui["proc"] = proc
+        for line in proc.stdout:
+            line = line.rstrip()
+            log(line)
+            if "CONNECTED" in line or "已成功连接" in line:
+                ui["connected"] = True
+                set_status("✅ 已连接云端，回到网页即可训练")
+            elif "403" in line:
+                ui["connected"] = False
+                set_status("❌ 令牌无效/已失效：请在上方更新令牌后点“保存令牌”再重试")
+        ui["busy"] = False
+        ui["connected"] = False
+        set_status("连接已结束")
+        refresh_idle()
+
+    def on_action() -> None:
+        if ui["busy"]:
+            return
+        if not token_var.get().strip():
+            messagebox.showwarning("提示", "请先粘贴令牌。")
+            return
+        ui["busy"] = True
+        threading.Thread(target=worker, daemon=True).start()
+
+    action_btn.config(command=on_action)
+    save_btn.config(command=on_save)
+    token_var.trace_add("write", lambda *a: refresh_idle())
+    refresh_idle()
+
+    def on_close() -> None:
+        proc = ui.get("proc")
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:  # noqa: BLE001
+                pass
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
+    root.mainloop()
+
+
+# —————————————————————————————————————————————
+# 命令行回退
+# —————————————————————————————————————————————
+
+def run_cli(config: dict) -> None:
+    server = config.get("server_url", DEFAULT_SERVER)
     token = config.get("token", "")
-    for i, arg in enumerate(sys.argv):
-        if arg == "--server" and i + 1 < len(sys.argv):
-            server_url = sys.argv[i + 1]
-        if arg == "--token" and i + 1 < len(sys.argv):
-            token = sys.argv[i + 1]
-
     if not token:
-        print("[启动器] 缺少令牌：请从网页「本机训练 Agent」弹窗下载带令牌的应用，"
-              "或用 --token 提供令牌。")
+        print("[启动器] 缺少令牌：请从网页下载应用，或用 --token 提供。")
         sys.exit(1)
-
+    save_config(server, token)
     try:
         if is_venv_ready():
             print("[启动器] 检测到已就绪的训练环境，直接启动。")
@@ -153,9 +385,28 @@ def main() -> None:
     except subprocess.CalledProcessError as exc:
         print(f"[启动器] 环境准备失败：{exc}")
         sys.exit(1)
+    proc = start_agent_process(server, token)
+    for line in proc.stdout:
+        print(line.rstrip())
+    sys.exit(proc.wait())
 
-    code = run_agent(server_url, token)
-    sys.exit(code)
+
+def main() -> None:
+    config = load_config()
+    for i, arg in enumerate(sys.argv):
+        if arg == "--server" and i + 1 < len(sys.argv):
+            config["server_url"] = sys.argv[i + 1]
+        if arg == "--token" and i + 1 < len(sys.argv):
+            config["token"] = sys.argv[i + 1]
+
+    if "--no-gui" not in sys.argv:
+        try:
+            import tkinter  # noqa: F401
+            run_gui(config)
+            return
+        except Exception as exc:  # noqa: BLE001
+            print(f"[启动器] 图形界面不可用，转命令行模式：{exc}")
+    run_cli(config)
 
 
 if __name__ == "__main__":

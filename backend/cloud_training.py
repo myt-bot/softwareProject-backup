@@ -30,7 +30,7 @@ from fastapi import APIRouter, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 
 from .schemas import CloudTrainRequest
-from .security import verify_access_token
+from .security import create_access_token, verify_access_token
 
 
 router = APIRouter(tags=["cloud-training"])
@@ -49,6 +49,9 @@ _AGENT_DIST_DIR = Path(os.environ.get("AGENT_DIST_DIR", str(Path(__file__).resol
 
 # 编译 .pyc 时使用的 Python 版本（打包成单文件应用时内置的独立 Python 应与之一致）
 _PYC_PYTHON = f"{sys.version_info.major}.{sys.version_info.minor}"
+
+# 注入本机 Agent 的令牌有效期（Agent 是长期后台连接，需长期有效，取一年）
+AGENT_TOKEN_EXPIRE_MINUTES = 60 * 24 * 365
 
 # 下载版应用的使用说明（随包附带）
 _AGENT_README = """\
@@ -84,8 +87,14 @@ _BUILD_GUIDE = """\
 =========================================================
 
 思路：用一份「独立 Python」作为内置解释器，用 PyInstaller 把 launcher.py 冻结成
-单文件可执行程序，并把 local_agent/（.pyc）与 config.json 一并打包进去。运行时
-launcher 用内置的独立 Python 创建虚拟环境并安装依赖。
+单文件可执行程序，并把 local_agent/（.pyc）打包进去。运行时 launcher 用内置的
+独立 Python 创建虚拟环境并安装依赖。
+
+⚠️ 重要：**不要把 config.json 打进 exe**（不要 --add-data config.json）。config.json
+必须作为外部文件放在 exe 旁边，这样：
+  - 服务器下载时注入的最新令牌（外部 config.json）才会被读取；
+  - 用户令牌失效时可直接编辑 exe 旁边的 config.json 更新令牌，无需重新打包。
+启动器已优先读取「exe 所在目录的外部 config.json」。
 
 前提：本包内的 local_agent/*.pyc 是用 Python {py} 编译的，内置的独立 Python 必须
 是同一小版本（{py}.x），否则 .pyc 无法被加载。
@@ -97,20 +106,24 @@ launcher 用内置的独立 Python 创建虚拟环境并安装依赖。
 
 2. 安装 PyInstaller：pip install pyinstaller
 
-3. 打包（Windows 为例）：
+3. 打包（Windows 为例，注意不含 config.json、带窗口图标与 GUI）：
 
-       pyinstaller --onefile --name VisualDL-Agent \\
+       pyinstaller --onefile --windowed --name VisualDL-Agent \\
+         --icon "local_agent/assets/icon.ico" \\
          --add-data "local_agent;local_agent" \\
-         --add-data "config.json;." \\
          --add-binary "pybundle;pybundle" \\
          launcher.py
 
-   （macOS/Linux 把 --add-data 的分隔符 ; 换成 :）
+   （macOS/Linux 把 --add-data 的分隔符 ; 换成 :；macOS 图标用 icon.icns）
+   说明：--windowed 表示这是有图形界面的应用（启动器自带 tkinter 界面）；
+   --add-data "local_agent;local_agent" 已包含 assets/ 图标资源。
 
-4. 产物在 dist/ 下。把它作为「本机训练应用」提供给用户下载即可。
+4. 产物在 dist/ 下（VisualDL-Agent.exe）。**分发时把 exe 和 config.json 放在同一
+   文件夹**一起给用户（config.json 内含令牌，用户也可在启动器界面里直接更新令牌）。
 
-注：不同平台需各自构建一次（Windows/macOS/Linux）。torch 不打进可执行文件，
-而是首次运行时装进虚拟环境，因此可执行文件体积很小。
+注：不同平台需各自构建一次（Windows/macOS/Linux）。torch 与 config.json 都不打进
+可执行文件；启动器界面里可更新令牌（保存到 exe 目录下 visualdl_runtime/config.json），
+之后以界面里的令牌为准。
 """
 
 
@@ -641,6 +654,14 @@ def _build_source_package(server_url: str, token: str) -> bytes:
             pyc_name = f"visualdl-agent/{rel.with_suffix('.pyc')}"
             archive.writestr(pyc_name, _compile_to_pyc(path))
 
+        # 资源文件（图标等）原样打包，供 GUI 显示与 PyInstaller 打包使用
+        assets_dir = _AGENT_SOURCE_DIR / "assets"
+        if assets_dir.is_dir():
+            for path in sorted(assets_dir.iterdir()):
+                if path.is_file():
+                    rel = path.relative_to(_AGENT_SOURCE_DIR.parent)
+                    archive.writestr(f"visualdl-agent/{rel}", path.read_bytes())
+
         archive.writestr("visualdl-agent/config.json", _agent_config_json(server_url, token))
         archive.writestr("visualdl-agent/README.txt", _AGENT_README.format(py=_PYC_PYTHON))
         archive.writestr("visualdl-agent/build_app.md", _BUILD_GUIDE.format(py=_PYC_PYTHON))
@@ -659,23 +680,28 @@ def download_agent(request: Request, token: str = Query(...), platform: Optional
 
     参数：
         token：当前用户 JWT 令牌（查询参数——浏览器下载链接无法带请求头）。
+            用于校验登录态；下载时会据此签发一个长期有效的 Agent 令牌注入 config.json。
         platform：可选，windows/macos/linux；缺省按 User-Agent 猜测。
     """
     try:
-        verify_access_token(token)
+        payload = verify_access_token(token)
     except Exception:
         return JSONResponse(status_code=401, content={"status": "error", "message": "令牌无效，无法下载应用"})
+
+    # 浏览器访问令牌仅 1 小时有效，但 Agent 是长期后台连接：为其单独签发一个
+    # 长期有效的令牌注入 config.json，避免一小时后 Agent 因令牌过期被拒（403）。
+    agent_token = create_access_token(payload["sub"], expires_minutes=AGENT_TOKEN_EXPIRE_MINUTES)
 
     server_url = str(request.base_url).rstrip("/")
     platform_name = _detect_platform(request, platform)
 
     artifact = _find_prebuilt_artifact(platform_name)
     if artifact is not None:
-        content = _build_app_package(artifact, platform_name, server_url, token)
+        content = _build_app_package(artifact, platform_name, server_url, agent_token)
         filename = f"VisualDL-Agent-{platform_name}-{_dist_version()}.zip"
     else:
         # 尚无该平台的已构建应用：回退发放源码包（含 .pyc 与打包指引）
-        content = _build_source_package(server_url, token)
+        content = _build_source_package(server_url, agent_token)
         filename = f"visualdl-agent-{platform_name}-{RUNTIME_VERSION}.zip"
 
     return Response(
@@ -683,6 +709,28 @@ def download_agent(request: Request, token: str = Query(...), platform: Optional
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/agent/token")
+def get_agent_token(token: str = Query(...)) -> Response:
+    """返回一个长期有效的 Agent 令牌，供用户手动更新已下载应用的 config.json。
+
+    已下载应用若令牌失效（例如旧版本 1 小时令牌过期），用户无需重新下载，
+    可从网页复制此长期令牌，替换应用目录下 config.json 的 token 字段即可。
+
+    参数：
+        token：当前用户 JWT 令牌（查询参数），用于校验登录态。
+    """
+    try:
+        payload = verify_access_token(token)
+    except Exception:
+        return JSONResponse(status_code=401, content={"status": "error", "message": "令牌无效"})
+
+    agent_token = create_access_token(payload["sub"], expires_minutes=AGENT_TOKEN_EXPIRE_MINUTES)
+    return JSONResponse(content={
+        "token": agent_token,
+        "expires_days": AGENT_TOKEN_EXPIRE_MINUTES // (60 * 24),
+    })
 
 
 # —————————————————————————————————————————————
