@@ -81,52 +81,53 @@ VisualDL 本机训练应用
 提示：本应用已绑定你的账号（config.json 内含登录令牌），请勿分享给他人。
 """
 
-# 制作「新手双击即用、无需装 Python」单文件 exe 的说明（随包附带）
+# 制作「新手双击即用、无需装 Python」应用的说明（随包附带）
 _BUILD_GUIDE = """\
-制作「新手双击即用、无需装 Python」的单文件应用（PyInstaller + 内置独立 Python）
-==============================================================================
+制作「新手双击即用、无需装 Python」的应用
+=========================================
 
-思路：用 PyInstaller 把 launcher.py 与 local_agent/（.pyc）冻结成单个 exe，并把一份
-「独立 Python」（python-build-standalone，约 30–50MB，含 tkinter）一起打进去。用户
-双击 exe，首次运行时启动器会把内置 Python 复制到 exe 旁的 visualdl_runtime/pybase，
-用它创建虚拟环境并安装 torch。**用户全程不用装 Python**。
+❌ 不要用 PyInstaller 打单文件 exe！
+   PyInstaller 会塞进它自己的一个 Python，和这里内置的独立 Python 冲突，导致：
+     - Tcl/Tk 版本冲突 → 图形界面起不来（报 init.tcl / package Tcl 版本冲突）；
+     - python DLL 冲突 → Agent 崩溃（报 Module use of pythonXX.dll conflicts）。
+   一个程序里有两个 Python 必然打架。正确做法是：只用一份独立 Python + 启动脚本。
 
-关键点（启动器已处理好，了解即可）：
-  - exe 自身不是 Python，启动器绝不会用它建 venv（否则会反复自启动 → 进程炸弹）；
-  - 内置 Python 被解包到临时目录、退出即删，所以启动器会先把它**复制到永久目录
-    pybase** 再建 venv，保证下次启动仍可用；
-  - 内置独立 Python 必须是 {py}.x（与本包 .pyc 同小版本），否则 .pyc 加载不了。
+✅ 正确方式：内置一份独立 CPython {py}.x + 启动脚本（只有一个 Python，不打架，含 tkinter）。
+   版本必须是 {py}.x —— 与本包 .pyc 同小版本！用 3.13/3.14 会加载不了 .pyc、DLL 冲突。
 
-步骤（在与目标平台相同的系统上执行）：
+目录结构（整个文件夹打成 zip 发给用户，就是一个下载）：
+  VisualDL-Agent/
+    python/            ← 独立 CPython {py}.x（含 python.exe、pythonw.exe、tkinter）
+    local_agent/       ← 本包内的 .pyc（{py}.x 编译）
+    launcher.py        ← 本包内的启动器
+    config.json        ← 本包内的（可选，含令牌；也可在界面里填令牌）
+    启动.bat           ← 双击它即可（见下）
 
-1. 到 github.com/astral-sh/python-build-standalone 的 Releases，下载对应平台、
-   CPython {py}.x 的「install_only」包；解压得到一个含 python.exe 的目录，
-   重命名为 python/ 放在本目录下（确保有 python/python.exe）。
+启动.bat 内容（Windows，用 pythonw 无黑框）：
+    @echo off
+    cd /d "%~dp0"
+    start "" "%~dp0python\\pythonw.exe" "%~dp0launcher.py"
 
-2. pip install pyinstaller
+步骤（在 Windows 上做一次）：
+1. 到 github.com/astral-sh/python-build-standalone 的 Releases，下载
+   cpython-{py}.* + x86_64-pc-windows-msvc + install_only 的包（认准 {py}，别选 3.13/3.14）；
+   解压得到含 python.exe 的目录，改名为 python/ 放进 VisualDL-Agent/
+   （确保有 python/python.exe 和 python/pythonw.exe）。
+2. 把本包的 local_agent/、launcher.py、config.json 和上面的 启动.bat 放进 VisualDL-Agent/。
+3. 整个 VisualDL-Agent/ 打成 zip，发给用户。
 
-3. 打包成单文件 exe（Windows 为例，带 GUI 与图标，不含 config.json）：
+用户用法：解压 zip → 双击「启动.bat」→ 弹出界面 → 点「准备训练环境」
+（首次装 torch，较慢、只需一次）→ 顶栏显示「本机训练已连接」。全程不用装 Python。
 
-       pyinstaller --onefile --windowed --name VisualDL-Agent \\
-         --icon "local_agent/assets/icon.ico" \\
-         --add-data "local_agent;local_agent" \\
-         --add-data "python;python" \\
-         launcher.py
+想要一个单文件下载：把上面的文件夹用 Inno Setup 做成安装程序 Setup.exe（安装到用户
+目录并建桌面快捷方式），或用 7-Zip 做自解压包。不要用 PyInstaller。
 
-   （macOS/Linux 把 --add-data 的分隔符 ; 换成 :，macOS 图标用 icon.icns）
+macOS / Linux：python/ 换成对应平台的独立 Python，启动脚本用
+    #!/bin/sh
+    cd "$(dirname "$0")"
+    exec ./python/bin/python3 launcher.py
 
-4. 产物 dist/VisualDL-Agent.exe。**分发时把 exe 和 config.json 放在同一文件夹**
-   （config.json 内含令牌，不打进 exe；用户也可在界面里直接改令牌）。
-
-用户用法：双击 VisualDL-Agent.exe → 弹出界面 → 点「准备训练环境」（首次装 torch，
-较慢、只需一次）→ 顶栏显示「本机训练已连接」。全程不用装 Python。
-
-排查：--windowed 无控制台，启动器会把日志写到 exe 目录下
-   visualdl_runtime/launcher.log，出错时弹系统提示框。
-
-提示：单文件 exe 每次启动都要解包一次内置 Python（略慢 1–2 秒）。若更在意启动速度，
-也可改用「文件夹方式」：exe 旁直接放 python/ 目录（--add-data "python;python" 去掉，
-改把 python/ 与 exe 一起分发），启动更快、原理相同。
+排查：启动器会把日志写到 visualdl_runtime/launcher.log；子进程已设为不弹黑窗。
 """
 
 

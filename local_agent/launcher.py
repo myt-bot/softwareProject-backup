@@ -41,6 +41,13 @@ def _deps_size_text() -> str:
     return "约 200 MB" if _is_macos() else "约 2–3 GB"
 
 
+def _subprocess_flags() -> dict:
+    """子进程不弹出黑色控制台窗口（Windows 上 CREATE_NO_WINDOW）。"""
+    if _is_windows():
+        return {"creationflags": 0x08000000}  # CREATE_NO_WINDOW
+    return {}
+
+
 def _launcher_dir() -> Path:
     """启动器/可执行文件所在目录（虚拟环境与配置都放在它下面）。"""
     if getattr(sys, "frozen", False):
@@ -133,7 +140,16 @@ def is_venv_ready() -> bool:
 def _agent_code_dir() -> Path:
     """包含 local_agent 包的目录（用于子进程 PYTHONPATH）。"""
     if getattr(sys, "frozen", False):
-        return Path(getattr(sys, "_MEIPASS", _launcher_dir()))
+        # 打包 exe：_MEIPASS 退出即删，Agent 子进程会因此崩溃；
+        # 首次把 local_agent 复制到永久目录 visualdl_runtime，从那里运行。
+        meipass = getattr(sys, "_MEIPASS", None)
+        target = APP_DIR / "local_agent"
+        if meipass and not (target / "__init__.pyc").exists() and not (target / "__init__.py").exists():
+            src = Path(meipass) / "local_agent"
+            if src.is_dir():
+                APP_DIR.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(src, target, dirs_exist_ok=True)
+        return APP_DIR if target.is_dir() else Path(meipass or _launcher_dir())
     here = Path(__file__).resolve().parent
     for d in (here, here.parent):
         if (d / "local_agent").is_dir():
@@ -220,17 +236,17 @@ def create_environment(log=print) -> None:
                 "或在含 launcher.py 的目录执行  python launcher.py"
             )
         log("[启动器] 正在创建训练环境（首次使用，只需一次）...")
-        subprocess.run([base_python, "-m", "venv", str(VENV_DIR)], check=True)
+        subprocess.run([base_python, "-m", "venv", str(VENV_DIR)], check=True, **_subprocess_flags())
     py = str(venv_python())
     log("[启动器] 正在升级 pip ...")
-    subprocess.run([py, "-m", "pip", "install", "--upgrade", "pip"], check=True)
+    subprocess.run([py, "-m", "pip", "install", "--upgrade", "pip"], check=True, **_subprocess_flags())
     log("[启动器] 正在安装基础依赖 ...")
-    subprocess.run([py, "-m", "pip", "install", *BASE_REQUIREMENTS], check=True)
+    subprocess.run([py, "-m", "pip", "install", *BASE_REQUIREMENTS], check=True, **_subprocess_flags())
     log(f"[启动器] 即将下载并安装 PyTorch（{_deps_size_text()}），首次较慢，请保持网络畅通 ...")
     torch_cmd = [py, "-m", "pip", "install", *TORCH_REQUIREMENTS]
     if not _is_macos():
         torch_cmd += ["--index-url", CUDA_INDEX_URL]
-    subprocess.run(torch_cmd, check=True)
+    subprocess.run(torch_cmd, check=True, **_subprocess_flags())
     READY_MARKER.write_text("ok", encoding="utf-8")
     log("[启动器] 训练环境准备完成。")
 
@@ -250,6 +266,7 @@ def start_agent_process(server_url: str, token: str) -> subprocess.Popen:
         text=True,
         encoding="utf-8",
         bufsize=1,
+        **_subprocess_flags(),
     )
 
 
