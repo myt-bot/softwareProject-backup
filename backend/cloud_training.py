@@ -138,6 +138,10 @@ config.json，以及一个空的 python/ 文件夹（含放置说明）。你只
 
 【第 4 步】打包成 zip
   把整个 VisualDL-Agent/ 文件夹打成  VisualDL-Agent.zip 。
+  （更省事：本项目仓库自带 tools/assemble_bundle.py，会自动套外层 VisualDL-Agent/
+   文件夹、剔除 config.json 与仅供分发者看的文件，并做结构检查：
+     python tools/assemble_bundle.py --src 你放好 python/ 的那个文件夹 -o VisualDL-Agent.zip
+   也可 --from-zip 旧包.zip 直接把已有的包规范化。）
 
 【第 5 步】放到服务器发布目录
   把 VisualDL-Agent.zip 放到  backend/agent_dist/windows/ （macOS 放 macos/、Linux 放 linux/）。
