@@ -48,19 +48,30 @@ def _launcher_dir() -> Path:
     return Path(__file__).resolve().parent              # 源码运行：launcher.py 所在目录
 
 
-def _find_base_python() -> str | None:
-    """找一个**真正的 Python 解释器**来创建虚拟环境。
+def _python_in(directory: Path):
+    """在一个独立 Python 目录里找到 python 可执行文件（兼容不同布局）。"""
+    names = ["python.exe"] if _is_windows() else ["python3", "python"]
+    for name in names:
+        for cand in (directory / name, directory / "bin" / name):
+            if cand.exists():
+                return cand
+    return None
 
-    ⚠️ 打包成 exe 后 `sys.executable` 是 exe 自己，绝不能用它去执行 `-m venv`，
-    否则会反复重启 exe 自身，造成进程炸弹 / 内存爆满。因此这里明确区分：
-      - 源码运行：当前解释器就是真 Python；
-      - 打包 exe：优先用随包内置的独立 Python（pybundle），否则用系统 PATH 里的 Python；
-        都找不到就返回 None（由调用方明确报错，绝不递归启动自己）。
+
+def _ensure_base_python(log=print) -> str | None:
+    """返回一个**可长期使用的真 Python 解释器**路径，用于创建虚拟环境。
+
+    ⚠️ 打包成单文件 exe 后：
+      - `sys.executable` 是 exe 自己，绝不能用它执行 `-m venv`（会反复重启自身 →
+        进程炸弹 / 内存爆满）；
+      - 内置的独立 Python 被解包到临时目录 `_MEIPASS`，exe 退出即删；直接用它建的
+        venv 会指向这个临时路径、下次启动就失效。
+    因此这里**首次运行把内置 Python 复制到 visualdl_runtime/pybase（永久目录）**，
+    之后一直用它。找不到任何可用 Python 时返回 None（调用方明确报错，绝不递归自启动）。
     """
     if not getattr(sys, "frozen", False):
         # 源码 / 内置 Python 文件夹方式：当前解释器就是真 Python。
-        # 若是 pythonw.exe（无控制台），换成同目录的 python.exe 来建 venv，
-        # 避免子进程在无控制台下拿不到输出。
+        # 若是 pythonw.exe（无控制台），换成同目录的 python.exe 建 venv。
         exe = sys.executable
         if exe.lower().endswith("pythonw.exe"):
             alt = Path(exe).with_name("python.exe")
@@ -68,21 +79,35 @@ def _find_base_python() -> str | None:
                 return str(alt)
         return exe
 
-    # PyInstaller 打包方式：sys.executable 是 exe 自身，绝不能用它建 venv。
-    names = ["python.exe"] if _is_windows() else ["python3", "python"]
-    # 先找随包内置的独立 Python（打包目录旁的 python/ 或 pybundle/，或解包目录内）
-    search_roots = [_launcher_dir(), Path(getattr(sys, "_MEIPASS", _launcher_dir()))]
-    for root in search_roots:
-        for sub in ("python", "pybundle", "."):
-            for name in names:
-                candidate = root / sub / name
-                if candidate.exists():
-                    return str(candidate)
+    # —— 打包 exe —— #
+    pybase = APP_DIR / "pybase"
+    found = _python_in(pybase)
+    if found:                                  # 已复制过的永久内置 Python
+        return str(found)
+
+    # exe 旁边直接放了 python/ 目录（文件夹方式，本身就永久，无需复制）
+    for sub in ("python", "pybundle"):
+        found = _python_in(_launcher_dir() / sub)
+        if found:
+            return str(found)
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        for sub in ("python", "pybundle"):
+            src = Path(meipass) / sub
+            if src.is_dir():
+                log("[启动器] 正在准备内置 Python（首次，只需一次）...")
+                APP_DIR.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(src, pybase, dirs_exist_ok=True)   # 复制到永久目录
+                found = _python_in(pybase)
+                if found:
+                    return str(found)
+
     # 兜底：系统 PATH 里的 Python
     for name in ("python", "py", "python3"):
-        found = shutil.which(name)
-        if found:
-            return found
+        which = shutil.which(name)
+        if which:
+            return which
     return None
 
 
@@ -186,15 +211,15 @@ def create_environment(log=print) -> None:
     """创建虚拟环境并安装依赖（含 CUDA 版 PyTorch）。仅在用户触发时调用。"""
     APP_DIR.mkdir(parents=True, exist_ok=True)
     if not venv_python().exists():
-        base_python = _find_base_python()
+        base_python = _ensure_base_python(log)
         if not base_python:
             # 绝不用 exe 自己去建 venv（会递归自启动）；找不到 Python 就明确报错
             raise RuntimeError(
                 "未找到可用的 Python 解释器，无法创建训练环境。\n"
-                "请安装 Python 3.10 及以上版本（安装时勾选 Add Python to PATH），\n"
-                "或改用『源码方式』运行：在含 launcher.py 的目录执行  python launcher.py"
+                "该应用应内置独立 Python；若你是用源码运行，请安装 Python 3.10+，"
+                "或在含 launcher.py 的目录执行  python launcher.py"
             )
-        log(f"[启动器] 正在创建训练环境（首次使用，只需一次）... 使用 {base_python}")
+        log("[启动器] 正在创建训练环境（首次使用，只需一次）...")
         subprocess.run([base_python, "-m", "venv", str(VENV_DIR)], check=True)
     py = str(venv_python())
     log("[启动器] 正在升级 pip ...")
