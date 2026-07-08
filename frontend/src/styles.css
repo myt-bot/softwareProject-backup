@@ -2131,11 +2131,18 @@ body.is-connecting .node-port {
 }
 
 /* 画布浮动控件 */
-.zoom-control {
+/* 画布左下浮动工具栏：拆成"缩放"与"工具"两个短药丸，更清爽 */
+.canvas-toolbar {
   position: absolute;
   left: 24px;
   bottom: 24px;
   z-index: 35;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-group {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -2172,7 +2179,7 @@ body.is-connecting .node-port {
   transform: translateY(-1px);
 }
 
-.zoom-control button {
+.toolbar-group button {
   width: 32px;
   height: 32px;
   border: 0;
@@ -2182,20 +2189,26 @@ body.is-connecting .node-port {
   transition: 0.2s;
 }
 
-.zoom-control button:hover {
+.toolbar-group button:hover {
   background: var(--panel-2);
 }
 
-.zoom-control span {
+#btn-auto-layout:hover {
+  background: #e0f2fe;
+  color: var(--indigo);
+}
+
+.toolbar-group span {
   padding: 0 8px;
   color: var(--muted);
   font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
-.zoom-control i {
+.toolbar-group i {
   width: 1px;
   height: 18px;
   background: var(--border-2);
+  margin: 0 2px;
 }
 
 /* ============================================================

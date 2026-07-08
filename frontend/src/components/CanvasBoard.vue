@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
+  autoLayoutGraph,
   beginConnectionDrag,
   cancelPendingConnection,
   centerGraphInCanvas,
@@ -120,15 +121,21 @@ onBeforeUnmount(() => {
       <iconify-icon icon="mdi:close-circle-outline"></iconify-icon>
       退出连线
     </button>
-    <div class="zoom-control">
-      <button id="zoom-out" title="缩小画布" @click="handleZoomAction('zoom-out')"><iconify-icon icon="mdi:minus"></iconify-icon></button>
-      <span>{{ zoomLabel }}</span>
-      <button id="zoom-in" title="放大画布" @click="handleZoomAction('zoom-in')"><iconify-icon icon="mdi:plus"></iconify-icon></button>
-      <i></i>
-      <button id="zoom-fit" title="定位到节点并居中" @click="centerGraphInCanvas"><iconify-icon icon="mdi:image-filter-center-focus"></iconify-icon></button>
-      <i></i>
-      <button id="btn-undo" title="撤销 (Ctrl+Z)" @click="undoGraphChange"><iconify-icon icon="mdi:undo-variant"></iconify-icon></button>
-      <button id="btn-redo" title="重做 (Ctrl+Shift+Z / Ctrl+Y)" @click="redoGraphChange"><iconify-icon icon="mdi:redo-variant"></iconify-icon></button>
+    <div class="canvas-toolbar">
+      <!-- 缩放组 -->
+      <div class="toolbar-group zoom-control">
+        <button id="zoom-out" title="缩小画布" @click="handleZoomAction('zoom-out')"><iconify-icon icon="mdi:minus"></iconify-icon></button>
+        <span>{{ zoomLabel }}</span>
+        <button id="zoom-in" title="放大画布" @click="handleZoomAction('zoom-in')"><iconify-icon icon="mdi:plus"></iconify-icon></button>
+      </div>
+      <!-- 工具组：自动布局 / 居中 / 撤销 / 重做 -->
+      <div class="toolbar-group">
+        <button id="btn-auto-layout" title="自动布局：一键把节点排列整齐" @click="autoLayoutGraph"><iconify-icon icon="mdi:auto-fix"></iconify-icon></button>
+        <button id="zoom-fit" title="定位到节点并居中" @click="centerGraphInCanvas"><iconify-icon icon="mdi:image-filter-center-focus"></iconify-icon></button>
+        <i></i>
+        <button id="btn-undo" title="撤销 (Ctrl+Z)" @click="undoGraphChange"><iconify-icon icon="mdi:undo-variant"></iconify-icon></button>
+        <button id="btn-redo" title="重做 (Ctrl+Shift+Z / Ctrl+Y)" @click="redoGraphChange"><iconify-icon icon="mdi:redo-variant"></iconify-icon></button>
+      </div>
     </div>
     <div ref="gridRef" class="canvas-grid connections-svg"></div>
     <svg ref="svgRef" class="connections-svg" id="connections-svg"></svg>

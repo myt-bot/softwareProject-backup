@@ -346,6 +346,105 @@ export function redoGraphChange() {
 }
 
 
+// —————————————————————————————————————————————
+// 自动布局：分层（拓扑最长路径）+ 层内重心法排序，把 DAG 排整齐
+// —————————————————————————————————————————————
+
+export function autoLayoutGraph() {
+  const canvas = activeCanvas();
+  const nodes = canvas.nodes;
+  if (nodes.length === 0) {
+    showToast("info", "画布上还没有节点。");
+    return;
+  }
+  recordHistory();
+
+  const ids = nodes.map(node => node.id);
+  const preds: Record<string, string[]> = {};
+  const succ: Record<string, string[]> = {};
+  ids.forEach(id => {
+    preds[id] = [];
+    succ[id] = [];
+  });
+  canvas.connections.forEach(([from, to]) => {
+    if (preds[to]) preds[to].push(from);
+    if (succ[from]) succ[from].push(to);
+  });
+
+  // 1) 分层：Kahn 拓扑排序 + 最长路径，layer[n] = max(layer[前驱]) + 1
+  const indegree: Record<string, number> = {};
+  const layer: Record<string, number> = {};
+  ids.forEach(id => {
+    indegree[id] = preds[id].length;
+    layer[id] = 0;
+  });
+  const queue = ids.filter(id => indegree[id] === 0);
+  const topo: string[] = [];
+  while (queue.length) {
+    const id = queue.shift()!;
+    topo.push(id);
+    for (const next of succ[id]) {
+      layer[next] = Math.max(layer[next], layer[id] + 1);
+      indegree[next] -= 1;
+      if (indegree[next] === 0) queue.push(next);
+    }
+  }
+  // 有环或孤立节点兜底：未排到的按层 0 追加
+  ids.forEach(id => {
+    if (!topo.includes(id)) topo.push(id);
+  });
+
+  // 2) 按层分组（初始顺序 = 拓扑序）
+  const maxLayer = Math.max(...ids.map(id => layer[id]));
+  const layers: string[][] = Array.from({ length: maxLayer + 1 }, () => []);
+  topo.forEach(id => layers[layer[id]].push(id));
+
+  // 3) 层内重心法排序：多趟上下扫描，让每个节点靠近其相邻层邻居的平均位置，减少连线交叉
+  const orderIndex: Record<string, number> = {};
+  layers.forEach(row => row.forEach((id, i) => (orderIndex[id] = i)));
+  const barycenter = (neighbors: string[]) =>
+    neighbors.length ? neighbors.reduce((sum, n) => sum + (orderIndex[n] ?? 0), 0) / neighbors.length : -1;
+  for (let sweep = 0; sweep < 4; sweep++) {
+    const goingDown = sweep % 2 === 0;
+    const order = goingDown
+      ? [...layers.keys()]
+      : [...layers.keys()].reverse();
+    for (const d of order) {
+      const neighborsOf = goingDown ? preds : succ;
+      layers[d].sort((a, b) => {
+        const ba = barycenter(neighborsOf[a]);
+        const bb = barycenter(neighborsOf[b]);
+        if (ba < 0 || bb < 0) return 0;
+        return ba - bb;
+      });
+      layers[d].forEach((id, i) => (orderIndex[id] = i));
+    }
+  }
+
+  // 4) 落位：竖直方向按层、水平方向层内居中对齐
+  const NODE_W = 224;
+  const V_GAP = 205;
+  const H_GAP = 64;
+  const TOP = 60;
+  const widestRow = Math.max(...layers.map(row => row.length));
+  const centerX = 40 + (widestRow * NODE_W + (widestRow - 1) * H_GAP) / 2;
+  layers.forEach((row, depth) => {
+    const rowWidth = row.length * NODE_W + (row.length - 1) * H_GAP;
+    const startX = centerX - rowWidth / 2;
+    row.forEach((id, i) => {
+      const node = nodes.find(item => item.id === id);
+      if (!node) return;
+      node.x = Math.round(startX + i * (NODE_W + H_GAP));
+      node.y = TOP + depth * V_GAP;
+    });
+  });
+
+  void redrawAfterDomUpdate();
+  centerGraphInCanvas();
+  showToast("success", "已按数据流向自动分层排列。");
+}
+
+
 function getConnectionPoints(from: string, to: string, index = 0): ConnectorPoints | null {
   if (!activeCanvas().nodes.some(node => node.id === from) || !activeCanvas().nodes.some(node => node.id === to)) {
     return null;
