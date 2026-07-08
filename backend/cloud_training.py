@@ -629,7 +629,13 @@ def _build_app_package(artifact: Path, platform_name: str, server_url: str, toke
 
     应用只需构建一次（通用、不含令牌）；令牌在下载时通过同目录的 config.json 注入，
     启动器会从可执行文件所在目录读取它，从而绑定账号。
+
+    若产物本身就是组装好的完整包（.zip，内含 python/ 与启动脚本），则原样发放：
+    这种包供所有用户共用，令牌由用户在应用界面内填写（不随包注入，避免令牌泄露）。
     """
+    if artifact.suffix.lower() == ".zip":
+        return artifact.read_bytes()
+
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         # 保留可执行权限（Linux/macOS 解压后可直接运行）
