@@ -17,12 +17,14 @@ from .model_builder import build_model
 TRANING_JOBS = {} #后续改为数据库存储
 
 # 训练产物（模型权重、指标）默认保存目录。
-ARTIFACTS_ROOT = os.path.join(os.path.dirname(__file__), "..", "training_artifacts")
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+ARTIFACTS_ROOT = os.path.join(PROJECT_ROOT, "training_artifacts")
 
 # 训练任务状态对应的中文提示，用于前端状态可见性（NFR4）。
 STATUS_MESSAGES = {
     "pending": "训练任务已创建，等待开始",
     "running": "正在训练",
+    "cancelling": "正在停止，等待当前轮结束",
     "completed": "训练完成",
     "failed": "训练失败",
     "cancelled": "训练已取消",
@@ -81,7 +83,8 @@ def create_training_job(model_graph, train_config):
         "current_epoch": 0,
         "total_epochs": train_config["epochs"],
         "metrics": [],
-        "error": None
+        "error": None,
+        "cancel_requested": False
     }
 
     return {
@@ -145,7 +148,7 @@ def run_training_job(job_id):
         metrics = []
         job["total_steps"] = len(train_loader)
         for epoch in range(1, epochs + 1):
-            if job["status"] == "cancelled":
+            if job.get("cancel_requested"):
                 break
 
             job["current_step"] = 0
@@ -176,7 +179,11 @@ def run_training_job(job_id):
             job["current_step"] = 0
             job["metrics"] = metrics
 
-        if job["status"] == "cancelled":
+            if job.get("cancel_requested"):
+                break
+
+        if job.get("cancel_requested"):
+            job["status"] = "cancelled"
             cancelled_result = {
                 "job_id": job_id,
                 "status": "cancelled",
@@ -234,7 +241,7 @@ def _run_demo_job(job_id):
 
     metrics = []
     for epoch in range(1, epochs + 1):
-        if job["status"] == "cancelled":
+        if job.get("cancel_requested"):
             break
 
         # 模拟每轮训练耗时，给前端留出观察逐轮进度的时间窗口。
@@ -255,7 +262,11 @@ def _run_demo_job(job_id):
         job["current_epoch"] = epoch
         job["metrics"] = metrics
 
-    if job["status"] == "cancelled":
+        if job.get("cancel_requested"):
+            break
+
+    if job.get("cancel_requested"):
+        job["status"] = "cancelled"
         cancelled_result = {
             "job_id": job_id,
             "status": "cancelled",
@@ -638,9 +649,10 @@ def stop_training_job(job_id):
             "status": current_status,
         }
 
-    job["status"] = "cancelled"
+    job["cancel_requested"] = True
+    job["status"] = "cancelling"
     return {
         "job_id": job_id,
         "cancelled": True,
-        "status": "cancelled",
+        "status": "cancelling",
     }

@@ -385,6 +385,18 @@ async def cancel_cloud_training_job(job_id: str, user_id: str = Query(...)) -> d
         return {"job_id": job_id, "cancelled": True, "status": "cancelled", "message": "本机 Agent 已离线，任务已在云端标记为取消。"}
 
     await agent.send({"type": "cancel_training", "job_id": job_id})
+    record["status"] = "cancelling"
+    await registry.broadcast_to_clients(user_id, {
+        "type": "training_update",
+        "job_id": job_id,
+        "status": "cancelling",
+        "current_epoch": record["current_epoch"],
+        "total_epochs": record["total_epochs"],
+        "current_step": record["current_step"],
+        "total_steps": record["total_steps"],
+        "progress": record["progress"],
+        "metrics": record["metrics"],
+    })
     return {"job_id": job_id, "cancelled": True, "status": record["status"], "message": "已向本机 Agent 转发取消请求。"}
 
 

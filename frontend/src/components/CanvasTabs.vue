@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
 import { addCanvas, closeCanvas, switchCanvas } from "../canvas";
-import { store, ui } from "../store";
+import { isTrainingJobActive, store, ui } from "../store";
 import type { WorkCanvas } from "../store";
 
 // 有进行中训练任务的标签显示脉冲圆点，便于并行训练时一眼看到状态
 function isTraining(canvas: WorkCanvas) {
-  return ["pending", "running"].includes(canvas.trainingJob?.status || "");
+  return isTrainingJobActive(canvas.trainingJob);
 }
 
 // 双击标签名进入重命名

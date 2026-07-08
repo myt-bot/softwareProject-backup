@@ -9,6 +9,7 @@ import {
   formatLayerNote,
   getConnectionKey,
   getLayerConfig,
+  isTrainingJobActive,
   isKnownLayerType,
   nextCanvasName,
   resetValidationAfterGraphChange,
@@ -130,7 +131,7 @@ export function closeCanvas(id: number) {
   const canvas = store.canvases[index];
   if (!canvas) return;
 
-  const isTraining = ["pending", "running"].includes(canvas.trainingJob?.status || "");
+  const isTraining = isTrainingJobActive(canvas.trainingJob);
   if (canvas.nodes.length > 0 || isTraining) {
     const message = isTraining
       ? `${canvas.name} 有训练任务进行中，关闭后将不再跟踪其进度。确定关闭？`

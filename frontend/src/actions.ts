@@ -23,6 +23,7 @@ import {
   getCurrentModelGraph,
   getTrainConfig,
   getTrainingLayers,
+  isTrainingJobActive,
   setTrainingJob,
   showToast,
   templateLibrary,
@@ -110,7 +111,7 @@ function applyValidationResult(canvas: WorkCanvas, result: ValidationResult) {
   if (valid) {
     canvas.validationStatus = "passing";
     canvas.nodeBadge = "passed";
-    updateShapeHints(canvas);
+    updateShapeHints(canvas, result?.shapes);
     showToast("success", `${canvas.name} 结构校验通过。`);
     return;
   }
@@ -334,6 +335,12 @@ export async function handleStartTraining() {
   const canvas = activeCanvas();
   if (canvas.trainStarting) return;
 
+  if (isTrainingJobActive(canvas.trainingJob)) {
+    showToast("info", "当前画布已有训练任务进行中，请打开训练详情查看进度。");
+    openTrainingMonitorForCanvas(canvas);
+    return;
+  }
+
   // 训练在用户本机 Agent 执行，需先确认 Agent 在线
   if (!agent.online) {
     showToast("warning", "训练需要本机训练 Agent，请先启动本地 Agent。");
@@ -380,6 +387,11 @@ function openTrainingMonitorForCanvas(canvas: WorkCanvas) {
   openTrainingMonitor({
     live: true,
     jobId: canvas.trainingJob.job_id,
+    initialStatus: {
+      ...canvas.trainingJob,
+      current_epoch: canvas.trainingJob.current_epoch ?? canvas.trainingJob.metrics?.length ?? 0,
+      total_epochs: canvas.trainingJob.total_epochs ?? canvas.trainingJob.trainConfig?.epochs,
+    },
     cancelJob: (jobId: string) => cancelTraining(jobId, auth.user!.id!),
     hyperparams: canvas.trainingJob.trainConfig || getTrainConfig(canvas),
     layers: getTrainingLayers(canvas),

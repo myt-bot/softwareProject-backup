@@ -7,7 +7,7 @@ import {
   handleValidateModel,
   openCurrentTrainingMonitor,
 } from "../actions";
-import { activeCanvas, clamp, getTrainingStatusLabel, showToast, ui } from "../store";
+import { activeCanvas, clamp, getTrainingStatusLabel, isTrainingJobActive, showToast, ui } from "../store";
 import DatasetSelector from "./DatasetSelector.vue";
 import DeviceSelector from "./DeviceSelector.vue";
 import InfoTip from "./InfoTip.vue";
@@ -50,6 +50,7 @@ function handleEpochsChange(event: Event) {
 }
 
 const job = computed(() => canvas.value.trainingJob);
+const hasActiveJob = computed(() => isTrainingJobActive(job.value));
 
 const jobPanelClass = computed(() => {
   if (!job.value) return "is-empty";
@@ -75,8 +76,20 @@ const jobMeta = computed(() => {
 });
 
 const trainDisabled = computed(
-  () => canvas.value.trainStarting || canvas.value.validationStatus !== "passing"
+  () => canvas.value.trainStarting || hasActiveJob.value || canvas.value.validationStatus !== "passing"
 );
+
+const trainButtonTitle = computed(() => {
+  if (hasActiveJob.value) return "当前画布已有训练任务进行中，请先查看训练详情。";
+  if (canvas.value.validationStatus !== "passing") return "先通过“检查结构”，此按钮才会亮起";
+  return "开始训练当前模型";
+});
+
+const trainButtonText = computed(() => {
+  if (canvas.value.trainStarting) return "启动训练...";
+  if (hasActiveJob.value) return "训练进行中";
+  return "开始训练";
+});
 
 // 有模型但还没校验通过 → 提醒"先检查结构"
 const needsCheck = computed(
@@ -170,12 +183,13 @@ const needsCheck = computed(
           class="success-button"
           id="btn-train"
           :disabled="trainDisabled"
-          title="先通过“检查结构”，此按钮才会亮起"
+          :title="trainButtonTitle"
           @click="handleStartTraining"
         >
           <iconify-icon v-if="canvas.trainStarting" icon="mdi:loading" class="spin"></iconify-icon>
+          <iconify-icon v-else-if="hasActiveJob" icon="mdi:timer-sand"></iconify-icon>
           <iconify-icon v-else icon="mdi:play"></iconify-icon>
-          {{ canvas.trainStarting ? "启动训练..." : "开始训练" }}
+          {{ trainButtonText }}
         </button>
       </div>
     </div>

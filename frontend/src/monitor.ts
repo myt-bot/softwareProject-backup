@@ -73,6 +73,7 @@ function emptySeries(totalEpochs: number): MonitorSeries {
 export interface OpenMonitorOptions {
   live?: boolean;
   jobId?: string;
+  initialStatus?: TrainingStatus;
   cancelJob?: (jobId: string) => Promise<CancelTrainingResponse>;
   onBackToBuilder?: () => void;
   onRerun?: () => Promise<{ jobId?: string } | undefined>;
@@ -130,6 +131,9 @@ export function openTrainingMonitor(options: OpenMonitorOptions = {}) {
   monitor.pollAttempt = 0;
 
   monitor.visible = true;
+  if (options.initialStatus) {
+    restoreInitialStatus(options.initialStatus);
+  }
   // live 进度由客户端 WebSocket 推送到 applyStatusMessage / applyResultMessage
 }
 
@@ -298,17 +302,30 @@ export function applyStatusMessage(status: TrainingStatus) {
     ? status.progress
     : (total ? current / total : 0);
   monitor.state = "running";
+  monitor.stopping = status?.status === "cancelling" || monitor.stopping;
   monitor.error = status?.error || null;
+}
+
+
+function restoreInitialStatus(status: TrainingStatus) {
+  const finalStatuses = new Set(["completed", "failed", "cancelled"]);
+  if (finalStatuses.has(status.status || "")) {
+    applyResultMessage(status);
+    return;
+  }
+
+  applyStatusMessage(status);
 }
 
 
 export function applyResultMessage(result: TrainingResult) {
   monitor.stopping = false;
   monitor.result = result;
-  ingestMetrics(result?.metrics, result?.metrics?.length || monitor.hyperparams.epochs);
+  ingestMetrics(result?.metrics, result?.total_epochs || monitor.hyperparams.epochs);
   monitor.state = "completed";
   monitor.progress = 1;
   monitor.currentEpoch = monitor.series.loss.length || monitor.hyperparams.epochs;
+  monitor.error = result?.status === "failed" ? result?.error || "训练失败" : null;
   if (result?.device) {
     monitor.hyperparams.device = String(result.device).toUpperCase();
   }

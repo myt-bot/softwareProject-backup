@@ -8,6 +8,7 @@ import type {
   DeviceSummary,
   GraphNode,
   LayerGroup,
+  LayerShapeInfo,
   ModelGraph,
   ModelGraphConnection,
   MonitorLayer,
@@ -527,8 +528,30 @@ export function updateNodeParam(nodeId: string, key: string, value: unknown) {
 }
 
 
-// 校验通过后为初始示例图的节点填充尺寸提示
-export function updateShapeHints(canvas: WorkCanvas = activeCanvas()) {
+function formatShapeHint(shape: number[] | null | undefined) {
+  if (!Array.isArray(shape) || shape.length === 0) return null;
+
+  // 后端图像 shape 约定为 [C, H, W]；节点卡片延续界面中的 H×W×C 展示习惯。
+  if (shape.length === 3 && shape.every(dimension => typeof dimension === "number")) {
+    return `${shape[1]}x${shape[2]}x${shape[0]}`;
+  }
+
+  return shape.join("x");
+}
+
+
+// 校验通过后用后端推导出的真实尺寸填充节点提示；旧示例图保留兜底值。
+export function updateShapeHints(canvas: WorkCanvas = activeCanvas(), shapes?: Record<string, LayerShapeInfo>) {
+  if (shapes && Object.keys(shapes).length > 0) {
+    canvas.nodes.forEach(node => {
+      const hint = formatShapeHint(shapes[node.id]?.output_shape);
+      if (hint) {
+        node.hint = hint;
+      }
+    });
+    return;
+  }
+
   const hints: Record<string, string> = {
     conv: "26x26x16",
     pool: "13x13x16",
@@ -676,8 +699,12 @@ export function getTrainingLayers(canvas: WorkCanvas = activeCanvas()): MonitorL
 export function getTrainingStatusLabel(status: string | undefined) {
   return (
     {
+      dispatched: "已下发",
+      pending_agent: "等待 Agent",
+      no_agent: "无可用 Agent",
       pending: "等待中",
       running: "训练中",
+      cancelling: "停止中",
       completed: "已完成",
       failed: "失败",
       cancelled: "已取消",
@@ -686,11 +713,21 @@ export function getTrainingStatusLabel(status: string | undefined) {
 }
 
 
+export function isTrainingJobActive(job: TrainingJob | null | undefined) {
+  if (!job) return false;
+  const status = job.status || "pending";
+  return !["completed", "failed", "cancelled", "no_agent"].includes(status);
+}
+
+
 // 把训练任务状态写回它所属的画布（并行训练时各画布互不影响）
 export function setTrainingJob(canvas: WorkCanvas, job: TrainingJob) {
+  const definedJob = Object.fromEntries(
+    Object.entries(job).filter(([, value]) => value !== undefined)
+  ) as TrainingJob;
   canvas.trainingJob = {
     ...(canvas.trainingJob || {}),
-    ...job,
+    ...definedJob,
   };
   canvas.jobId = canvas.trainingJob.job_id || canvas.jobId;
 }

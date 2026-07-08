@@ -20,6 +20,7 @@ import {
 import TmChart from "./TmChart.vue";
 
 const isRunning = computed(() => monitor.state === "running");
+const isCancelled = computed(() => monitor.result?.status === "cancelled");
 
 const series = computed(() => activeSeries());
 const visible = computed(() => visibleCount());
@@ -84,12 +85,20 @@ const overallPercent = computed(() =>
 
 const heroTitle = computed(() => {
   if (monitor.error) return "训练失败";
+  if (monitor.stopping) return `正在停止：等待第 ${displayEpoch.value}/${totalEpochs.value} 轮结束`;
+  if (isCancelled.value) return "训练已停止";
   if (isRunning.value) return `正在进行第 ${displayEpoch.value}/${totalEpochs.value} 轮训练`;
   return "训练完成 🎉";
 });
 
 const heroSubtitle = computed(() => {
   if (monitor.error) return monitor.error;
+  if (monitor.stopping) {
+    return "停止请求已发送。当前轮会继续跑完并写入 loss / accuracy 曲线，完成后训练会自动停止。";
+  }
+  if (isCancelled.value) {
+    return "训练已按请求停止，曲线保留了停止前已完成轮次的真实指标。";
+  }
   if (isRunning.value) {
     return monitor.live && monitor.currentStep === 0 && monitor.currentEpoch === 0
       ? "正在准备数据集并启动训练，稍等片刻..."
@@ -127,11 +136,15 @@ const logLines = computed(() => {
   }
 
   if (isRunning.value) {
-    if (monitor.live && count === 0) {
+    if (monitor.stopping) {
+      lines.push(`> 已请求停止，等待当前轮完成后写入本轮指标 ...`);
+    } else if (monitor.live && count === 0) {
       lines.push(`> 正在准备数据集并启动训练 ...`);
     } else {
       lines.push(`> 正在训练 Epoch ${Math.min(count + 1, total)}/${total} ...`);
     }
+  } else if (isCancelled.value) {
+    lines.push(`> 训练已停止，已保留 ${count}/${total} 轮指标。`);
   } else {
     lines.push(`> 训练完成，模型权重已保存。`);
   }
@@ -157,7 +170,9 @@ const logLines = computed(() => {
           </nav>
         </div>
         <div class="tm-topbar-center">
-          <span v-if="isRunning" class="tm-badge running"><span class="tm-dot"></span>Running</span>
+          <span v-if="monitor.stopping" class="tm-badge stopping"><span class="tm-dot"></span>Stopping</span>
+          <span v-else-if="isRunning" class="tm-badge running"><span class="tm-dot"></span>Running</span>
+          <span v-else-if="isCancelled" class="tm-badge cancelled"><iconify-icon icon="mdi:stop-circle-outline"></iconify-icon>Stopped</span>
           <span v-else class="tm-badge completed"><iconify-icon icon="mdi:check-circle"></iconify-icon>Completed</span>
           <!-- 轮次内进度条：每个 batch 实时推进 -->
           <div v-if="isRunning && monitor.live" class="tm-epoch-progress" title="当前轮次内的训练进度">
