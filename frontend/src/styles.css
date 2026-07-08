@@ -3753,6 +3753,36 @@ body.is-connecting .node-port {
   color: var(--text);
 }
 
+/* 进入 / 退出训练详情的过渡：覆盖层淡入淡出，内容轻微上移承接 */
+.tm-enter-active,
+.tm-leave-active {
+  transition: opacity 0.26s ease;
+}
+
+.tm-enter-from,
+.tm-leave-to {
+  opacity: 0;
+}
+
+.tm-enter-active .tm-shell,
+.tm-leave-active .tm-shell {
+  transition: transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.tm-enter-from .tm-shell,
+.tm-leave-to .tm-shell {
+  transform: translateY(16px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tm-enter-active,
+  .tm-leave-active,
+  .tm-enter-active .tm-shell,
+  .tm-leave-active .tm-shell {
+    transition: none;
+  }
+}
+
 .tm-shell {
   min-height: 100vh;
   display: grid;

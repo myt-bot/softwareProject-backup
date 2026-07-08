@@ -154,8 +154,9 @@ const logLines = computed(() => {
 </script>
 
 <template>
-  <div id="training-monitor" :class="{ hidden: !monitor.visible }">
-    <div v-if="monitor.visible" class="tm-shell">
+  <Transition name="tm">
+  <div id="training-monitor" v-if="monitor.visible">
+    <div class="tm-shell">
       <header class="tm-topbar">
         <div class="tm-topbar-left">
           <button class="icon-button" id="tm-back-icon" title="返回" @click="handleBack">
@@ -336,4 +337,5 @@ const logLines = computed(() => {
       </div>
     </div>
   </div>
+  </Transition>
 </template>
