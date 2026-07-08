@@ -1511,26 +1511,17 @@ button:disabled {
   margin-bottom: 10px;
 }
 
-/* 图标：固定尺寸、内部图标块级居中，避免看起来偏移/被裁 */
-.layer-tip-head .layer-icon {
-  flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
-}
-
-.layer-tip-head .layer-icon iconify-icon {
-  display: block;
-  line-height: 1;
-}
-
-.layer-tip-head strong {
+/* 图标与左侧组件库完全一致：直接复用 .layer-icon 基础样式，不做任何覆盖。
+   标题/描述样式只作用于右侧文字区（.layer-tip-head > div 内），
+   否则 .layer-tip-head span 会误命中作为 <span> 的图标容器，把图标缩小。 */
+.layer-tip-head > div strong {
   display: block;
   font-size: 14.5px;
   font-weight: 700;
   color: var(--text);
 }
 
-.layer-tip-head span {
+.layer-tip-head > div span {
   display: block;
   margin-top: 2px;
   font-size: 11.5px;
