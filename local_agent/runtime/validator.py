@@ -83,6 +83,10 @@ def validate_model_graph(model_graph):
     shapes = shape_info.get("layers", {})
     for layer_id, layer_shape in shapes.items():
         if layer_shape.get("status") != "ok":
+            if layer_shape.get("error"):
+                errors.append(layer_shape["error"])
+                continue
+
             layer_type = layer_shape.get("layer_type")
             if layer_type == "Linear":
                 errors.append(build_error_message(
@@ -176,6 +180,7 @@ def validate_connections(model_graph):
         return errors
 
     adjacency = {layer_id: [] for layer_id in layer_map}
+    predecessors = {layer_id: [] for layer_id in layer_map}
     in_degree = {layer_id: 0 for layer_id in layer_map}
     seen_connections = set()
 
@@ -200,10 +205,39 @@ def validate_connections(model_graph):
 
         seen_connections.add(edge)
         adjacency[source].append(target)
+        predecessors[target].append(source)
         in_degree[target] += 1
 
     if errors:
         return errors
+
+    input_ids = [
+        layer_id
+        for layer_id, layer in layer_map.items()
+        if layer.get("type") == "Input"
+    ]
+    output_ids = [
+        layer_id
+        for layer_id, layer in layer_map.items()
+        if layer.get("type") == "Output"
+    ]
+
+    for layer_id in input_ids:
+        if predecessors[layer_id]:
+            errors.append(f"Input 节点不能有输入连接: {layer_id}")
+
+    for layer_id in output_ids:
+        if adjacency[layer_id]:
+            errors.append(f"Output 节点不能有输出连接: {layer_id}")
+
+    for layer_id, layer in layer_map.items():
+        layer_type = layer.get("type")
+        if layer_type != "Input" and not predecessors[layer_id]:
+            errors.append(f"层 {layer_id} 没有输入连接，必须连接到 Input 或前一层之后")
+        if layer_type != "Output" and not adjacency[layer_id]:
+            errors.append(f"层 {layer_id} 没有输出连接，必须最终连接到 Output")
+        if len(predecessors[layer_id]) > 1 and not _has_explicit_merge(layer):
+            errors.append(f"层 {layer_id} 收到了多个输入，但没有声明合并方式，请设置 merge 参数")
     
     isolated_nodes = [
         layer_id
@@ -238,7 +272,38 @@ def validate_connections(model_graph):
         ]
         errors.append(f"模型连接中存在环，无法排序: {cycle_ids}")
 
+    if input_ids and output_ids:
+        reachable_from_inputs = _collect_reachable(input_ids, adjacency)
+        can_reach_outputs = _collect_reachable(output_ids, predecessors)
+
+        for layer_id in layer_map:
+            if layer_id not in reachable_from_inputs:
+                errors.append(f"层 {layer_id} 不在任何 Input 出发的路径上")
+            if layer_id not in can_reach_outputs:
+                errors.append(f"层 {layer_id} 无法到达任何 Output，请连接到输出节点或删除该分支")
+
     return errors
+
+
+def _has_explicit_merge(layer_config):
+    """多输入节点必须显式声明合并方式，避免误把错误连接当 concat。"""
+    params = layer_config.get("params", {})
+    return params.get("merge") in ("concat", "add", "sum")
+
+
+def _collect_reachable(start_ids, adjacency):
+    """从一组起点出发收集所有可达节点。"""
+    reachable = set()
+    pending = list(start_ids)
+
+    while pending:
+        current_id = pending.pop(0)
+        if current_id in reachable:
+            continue
+        reachable.add(current_id)
+        pending.extend(adjacency.get(current_id, []))
+
+    return reachable
 
 
 def validate_layer_params(layer_config):
@@ -405,9 +470,11 @@ def infer_all_shapes(model_graph):
                 input_shape = _merge_shapes(layer_config, predecessor_shapes)
 
             output_shape = infer_layer_shape(layer_config, input_shape)
-        except Exception:
+            inference_error = None
+        except Exception as exc:
             input_shape = None
             output_shape = None
+            inference_error = str(exc)
 
         shape_by_layer[layer_id] = {
             "layer_type": layer_config.get("type"),
@@ -415,6 +482,8 @@ def infer_all_shapes(model_graph):
             "output_shape": output_shape,
             "status": "ok" if output_shape is not None else "unknown",
         }
+        if inference_error:
+            shape_by_layer[layer_id]["error"] = inference_error
 
         if layer_config.get("type") == "Linear":
             actual_in_features = _flattened_size(input_shape)
@@ -431,7 +500,12 @@ def infer_all_shapes(model_graph):
 def _merge_shapes(layer_config, shapes):
     """根据节点合并方式推导多个前驱 shape 合并后的 shape。"""
     params = layer_config.get("params", {})
-    merge_mode = params.get("merge", "concat")
+    merge_mode = params.get("merge")
+
+    if merge_mode not in ("concat", "add", "sum"):
+        raise ValueError(
+            f"层 {layer_config.get('id')}: 多输入节点必须通过 params.merge 声明 concat、add 或 sum 合并方式"
+        )
 
     if merge_mode in ("add", "sum"):
         normalized_shapes = [

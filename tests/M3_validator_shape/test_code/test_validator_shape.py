@@ -177,6 +177,124 @@ class ValidatorShapeUnitTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("Linear" in error and ("维度" in error or "in_features" in error) for error in result["errors"]))
 
+    def test_dangling_branch_not_reaching_output_is_invalid(self):
+        graph = {
+            "layers": [
+                layer("input_left", "Input", {"shape": [1, 28, 28]}),
+                layer("linear_left", "Linear", {"out_features": 128}),
+                layer("input_right", "Input", {"shape": [1, 28, 28]}),
+                layer("flatten", "Flatten"),
+                layer("classifier", "Linear", {"out_features": 10}),
+                layer("output", "Output"),
+            ],
+            "connections": [
+                connection("input_left", "linear_left"),
+                connection("input_right", "flatten"),
+                connection("flatten", "classifier"),
+                connection("classifier", "output"),
+            ],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("无法到达任何 Output" in error for error in result["errors"]))
+
+    def test_multi_input_multi_output_complete_graph_is_valid(self):
+        graph = {
+            "layers": [
+                layer("input_a", "Input", {"shape": [4]}),
+                layer("input_b", "Input", {"shape": [4]}),
+                layer("merge", "ReLU", {"merge": "add"}),
+                layer("hidden", "Linear", {"out_features": 8}),
+                layer("matrix", "Linear", {"out_features": 4}),
+                layer("mean", "Linear", {"out_features": 1}),
+                layer("variance", "Linear", {"out_features": 1}),
+                layer("output_matrix", "Output"),
+                layer("output_mean", "Output"),
+                layer("output_variance", "Output"),
+            ],
+            "connections": [
+                connection("input_a", "merge"),
+                connection("input_b", "merge"),
+                connection("merge", "hidden"),
+                connection("hidden", "matrix"),
+                connection("hidden", "mean"),
+                connection("hidden", "variance"),
+                connection("matrix", "output_matrix"),
+                connection("mean", "output_mean"),
+                connection("variance", "output_variance"),
+            ],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertTrue(result["valid"])
+        self.assertEqual([], result["errors"])
+        self.assertEqual([4], result["shapes"]["matrix"]["output_shape"])
+        self.assertEqual([1], result["shapes"]["mean"]["output_shape"])
+        self.assertEqual([1], result["shapes"]["variance"]["output_shape"])
+
+    def test_input_node_cannot_have_predecessor(self):
+        graph = {
+            "layers": [
+                layer("input", "Input", {"shape": [4]}),
+                layer("linear", "Linear", {"out_features": 4}),
+                layer("bad_input", "Input", {"shape": [4]}),
+                layer("output", "Output"),
+            ],
+            "connections": [
+                connection("input", "linear"),
+                connection("linear", "bad_input"),
+                connection("bad_input", "output"),
+            ],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("Input 节点不能有输入连接" in error for error in result["errors"]))
+
+    def test_output_node_cannot_have_successor(self):
+        graph = {
+            "layers": [
+                layer("input", "Input", {"shape": [4]}),
+                layer("output", "Output"),
+                layer("linear", "Linear", {"out_features": 2}),
+                layer("final_output", "Output"),
+            ],
+            "connections": [
+                connection("input", "output"),
+                connection("output", "linear"),
+                connection("linear", "final_output"),
+            ],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("Output 节点不能有输出连接" in error for error in result["errors"]))
+
+    def test_multi_input_node_requires_explicit_merge(self):
+        graph = {
+            "layers": [
+                layer("input_a", "Input", {"shape": [4]}),
+                layer("input_b", "Input", {"shape": [4]}),
+                layer("relu", "ReLU"),
+                layer("output", "Output"),
+            ],
+            "connections": [
+                connection("input_a", "relu"),
+                connection("input_b", "relu"),
+                connection("relu", "output"),
+            ],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("没有声明合并方式" in error for error in result["errors"]))
+
     def test_add_merge_requires_same_input_shapes(self):
         graph = {
             "layers": [
