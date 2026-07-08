@@ -58,17 +58,27 @@ def _find_base_python() -> str | None:
         都找不到就返回 None（由调用方明确报错，绝不递归启动自己）。
     """
     if not getattr(sys, "frozen", False):
-        return sys.executable
+        # 源码 / 内置 Python 文件夹方式：当前解释器就是真 Python。
+        # 若是 pythonw.exe（无控制台），换成同目录的 python.exe 来建 venv，
+        # 避免子进程在无控制台下拿不到输出。
+        exe = sys.executable
+        if exe.lower().endswith("pythonw.exe"):
+            alt = Path(exe).with_name("python.exe")
+            if alt.exists():
+                return str(alt)
+        return exe
 
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        names = ["python.exe"] if _is_windows() else ["python3", "python"]
-        for sub in ("pybundle", "python", "."):
+    # PyInstaller 打包方式：sys.executable 是 exe 自身，绝不能用它建 venv。
+    names = ["python.exe"] if _is_windows() else ["python3", "python"]
+    # 先找随包内置的独立 Python（打包目录旁的 python/ 或 pybundle/，或解包目录内）
+    search_roots = [_launcher_dir(), Path(getattr(sys, "_MEIPASS", _launcher_dir()))]
+    for root in search_roots:
+        for sub in ("python", "pybundle", "."):
             for name in names:
-                candidate = Path(meipass) / sub / name
+                candidate = root / sub / name
                 if candidate.exists():
                     return str(candidate)
-
+    # 兜底：系统 PATH 里的 Python
     for name in ("python", "py", "python3"):
         found = shutil.which(name)
         if found:
