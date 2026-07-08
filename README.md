@@ -6,7 +6,7 @@
 
 系统面向深度学习初学者、课程实验和小组项目场景，目标是让用户通过可视化方式搭建神经网络模型，并完成结构校验、张量维度推导、本机训练、CPU/GPU 切换、训练指标查看和 PyTorch 代码导出。
 
-当前架构采用「云端中转 + 用户本机 Agent」方案：云端服务器只负责前端部署、用户/项目数据存储、训练任务调度和 Agent 连接管理；真正的模型校验、PyTorch 模型构建、训练执行、设备检测和训练产物保存都在用户本机 `local_agent` 中完成。
+当前架构采用「云端中转 + 用户本机 Agent」方案：云端服务器负责前端部署、用户/项目数据存储、训练任务调度、Agent 连接管理，以及**模型结构校验与维度推导**（纯 Python，无需 PyTorch）；真正的 PyTorch 模型构建、训练执行、设备检测和训练产物保存都在用户本机 `local_agent` 中完成。因此检查结构、实时形状预览无需本机 Agent，只有训练才需要。
 
 ## 项目目标
 
@@ -218,6 +218,43 @@ docker exec -i vdl-mysql mysql -uroot -p密码 visual_dl < backup_2026-07-06.sql
   启动的）再执行。
 - 只想用 Docker 跑数据库、后端仍在本机调试：`docker compose up -d db`。
 
+## 生产部署（Nginx + uvicorn，域名访问）
+
+把系统部署到服务器、用域名访问时，Nginx 负责托管前端静态文件并把 API/WebSocket
+反向代理到 uvicorn。三个关键点：
+
+1. **前端后端地址可配置**：`frontend/.env.production` 里设 `VITE_API_BASE_URL=https://你的域名`，
+   然后 `npm run build`；产物 `frontend/dist/` 交给 Nginx 托管（`https://` 会自动派生 `wss://`）。
+
+2. **uvicorn 必须加 `--proxy-headers`（且单进程）**：
+   ```bash
+   uvicorn backend.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips="*"
+   ```
+   否则 `request.base_url` 会取到内网地址，注入进 Agent 的 config.json / 下载链接会导致连不上。
+   在线 Agent/浏览器的路由表是**进程内内存**，因此**不能开多 worker**。
+
+3. **Nginx 反代要覆盖所有后端路由前缀**（含 `validate`；`/agents/ws`、`/client/ws` 是 WebSocket，需带 Upgrade 头）：
+   ```nginx
+   map $http_upgrade $connection_upgrade { default upgrade; "" close; }
+   server {
+       server_name 你的域名;
+       root /var/www/你的域名;        # 前端 dist
+       location / { try_files $uri $uri/ /index.html; }   # SPA 回退
+       # ⚠️ location 前缀必须包含 validate，否则检查结构会 404
+       location ~ ^/(health|auth|users|projects|train|runtime|agents|agent|client|validate) {
+           proxy_pass http://127.0.0.1:8000;
+           proxy_http_version 1.1;
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-Proto $scheme;    # 配合 --proxy-headers
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection $connection_upgrade;
+           proxy_read_timeout 3600s;                       # WebSocket 长连接
+       }
+   }
+   ```
+   HTTPS 用 `certbot --nginx -d 你的域名` 一键签发。数据库可用 SQLite（`DATABASE_URL=sqlite:////abs/path/app.db`）
+   或 MySQL，二者切换只改 `.env` 的 `DATABASE_URL`。
+
 ## 项目目录结构
 
 ```text
@@ -404,6 +441,7 @@ LSTM、SelfAttention、TransformerEncoder、Seq2Seq、VAE、GraphConv。
 | 方法   | 路径                                | 功能                                                             | 模块     |
 | ------ | ----------------------------------- | ---------------------------------------------------------------- | -------- |
 | GET    | /health                             | 检查云端后端服务是否正常                                         | -        |
+| POST   | /validate                           | 云端做模型结构校验与维度推导（纯 Python，**不依赖本机 Agent**）  | 云端     |
 | POST   | /train                              | 创建云端训练任务，并下发给用户本机 Agent                         | 云端中转 |
 | GET    | /train/{job_id}/status              | 查询云端记录的训练状态                                           | 云端中转 |
 | GET    | /train/{job_id}/result              | 查询本机 Agent 回传的训练结果                                    | 云端中转 |
@@ -437,7 +475,10 @@ LSTM、SelfAttention、TransformerEncoder、Seq2Seq、VAE、GraphConv。
 | ---- | --------- | ------------------------------------------- |
 | GET  | /health   | 检查本机 Agent 是否启动，并返回本机设备摘要 |
 | GET  | /devices  | 获取用户本机可用 CPU/GPU 设备               |
-| POST | /validate | 在用户本机校验模型结构并推导维度            |
+
+> 注：结构校验与维度推导已上移到云端 `POST /validate`（纯 Python，无需 PyTorch），
+> 因此**检查结构、实时形状预览不再依赖本机 Agent**；本机 Agent 只负责真正的训练、
+> 代码导出、目录浏览等需要 PyTorch/本机环境的能力。
 
 本机 Agent 通过主动连接云端的 WebSocket（`/agents/ws`）接收指令并回传进度：训练的
 启动/取消/进度/结果，以及结构校验、设备查询、代码导出，都以 WebSocket 消息形式在
