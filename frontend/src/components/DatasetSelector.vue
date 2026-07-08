@@ -30,7 +30,7 @@ onBeforeUnmount(() => document.removeEventListener("click", handleDocumentClick)
 
 <template>
   <div class="dataset-pill">
-    <span class="dataset-label">数据集 <InfoTip text="用来训练模型的数据。MNIST 是手写数字（新手首选），CIFAR 是彩色小图。首次训练会自动下载所选数据集。" /></span>
+    <span class="dataset-label">数据集 <InfoTip text="用来训练模型的数据。可在右侧下拉里挑选不同的数据集，它们的图片内容、尺寸和类别数量各不相同；首次使用某个数据集时会自动下载并缓存到本地。" /></span>
 
     <!-- 圆润风格的自定义下拉菜单（向上弹出，适配底栏） -->
     <div

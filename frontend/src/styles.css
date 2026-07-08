@@ -1488,13 +1488,13 @@ button:disabled {
 .layer-tip-card {
   position: fixed;
   z-index: 4000;
-  width: 272px;
+  width: 300px;
   max-width: calc(100vw - 24px);
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 14px;
   box-shadow: var(--shadow-lg);
-  padding: 13px 15px;
+  padding: 15px 16px 13px;
   pointer-events: none;            /* 不挡鼠标，避免闪烁 */
   animation: layerTipIn 0.13s ease-out;
 }
@@ -1507,8 +1507,20 @@ button:disabled {
 .layer-tip-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 9px;
+  gap: 11px;
+  margin-bottom: 10px;
+}
+
+/* 图标：固定尺寸、内部图标块级居中，避免看起来偏移/被裁 */
+.layer-tip-head .layer-icon {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+}
+
+.layer-tip-head .layer-icon iconify-icon {
+  display: block;
+  line-height: 1;
 }
 
 .layer-tip-head strong {

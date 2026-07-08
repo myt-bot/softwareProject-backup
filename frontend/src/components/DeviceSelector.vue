@@ -21,7 +21,7 @@ function selectDevice(device: "cpu" | "cuda") {
 
 <template>
   <div class="device-pill">
-    <span class="dataset-label">设备 <InfoTip text="训练用 CPU 还是 GPU 计算。GPU（显卡）比 CPU 快很多，有 NVIDIA 显卡时优先用；没有 GPU 会自动用 CPU（较慢但能跑）。" /></span>
+    <span class="dataset-label">设备 <InfoTip text="选择用 CPU 还是 GPU 来做训练计算。GPU（显卡）的并行算力远高于 CPU，检测到可用 GPU 时建议优先选它；没有可用 GPU 时会自动改用 CPU，速度较慢但一样能完成训练。" /></span>
     <div class="device-toggle" title="选择训练模型时使用的计算设备">
       <button
         id="device-cpu"

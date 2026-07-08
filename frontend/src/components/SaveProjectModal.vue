@@ -52,7 +52,7 @@ async function submit() {
       <div class="save-body">
         <label class="form-field">
           <span>模型名称</span>
-          <input id="save-name" type="text" v-model="form.name" maxlength="60" placeholder="例如：MNIST 手写数字 CNN" @keydown.enter="submit">
+          <input id="save-name" type="text" v-model="form.name" maxlength="60" placeholder="给这个项目起个名字，方便日后查找" @keydown.enter="submit">
         </label>
         <label class="form-field">
           <span>描述（可选）</span>

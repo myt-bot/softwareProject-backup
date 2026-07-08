@@ -11,7 +11,7 @@ const hovered = ref<{ layer: LayerLike; top: number; left: number } | null>(null
 function showTip(event: MouseEvent, layer: LayerLike) {
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
   // 显示在组件项右侧，避免遮挡列表；纵向对齐并夹在视口内
-  const top = Math.max(12, Math.min(rect.top - 4, window.innerHeight - 190));
+  const top = Math.max(12, Math.min(rect.top - 4, window.innerHeight - 250));
   hovered.value = { layer, top, left: rect.right + 12 };
 }
 function hideTip() {

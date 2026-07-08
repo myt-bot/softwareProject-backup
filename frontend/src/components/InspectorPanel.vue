@@ -92,7 +92,7 @@ const ADVANCED_INSPECTORS: Record<string, AdvancedInspector> = {
     icon: "mdi:swap-horizontal",
     color: "text-indigo",
     title: "Seq2Seq 参数",
-    intro: "编码器-解码器结构，把一个序列翻译为另一个序列。",
+    intro: "编码器-解码器结构，把一个序列转换成另一个序列。",
     fields: [
       { key: "hidden_size", label: "Hidden Size 隐藏维度", kind: "number" },
       { key: "output_size", label: "Output Size 输出维度", kind: "number" },
@@ -212,7 +212,7 @@ const inputShapeValue = computed(() => {
 
       <div class="field-stack">
         <ParamNumberField label="Out Channels (输出通道)" :value="selectedNode.params.out_channels" hint="输出多少个特征图。越大能学到越丰富的特征，但更慢、更容易过拟合。" recommend="推荐 8 ~ 64" @change="setParam('out_channels', $event)" />
-        <ParamNumberField label="Kernel Size (卷积核大小)" :value="selectedNode.params.kernel_size" hint="每次看多大的局部区域（如 3 表示 3×3 窗口）。越大视野越广、输出越小。" recommend="常用 3 或 5" @change="setParam('kernel_size', $event)" />
+        <ParamNumberField label="Kernel Size (卷积核大小)" :value="selectedNode.params.kernel_size" hint="每次扫描覆盖的局部区域边长。数值越大，一次看到的范围越广，但输出尺寸缩得越多、计算也越大。" recommend="常用 3 或 5" @change="setParam('kernel_size', $event)" />
         <div class="field-grid">
           <ParamNumberField label="Stride" :value="selectedNode.params.stride" hint="卷积核每次移动的步长。越大输出尺寸越小。" recommend="常用 1" @change="setParam('stride', $event)" />
           <ParamNumberField label="Padding" :value="selectedNode.params.padding" hint="在边缘补几圈 0，用来保持输出尺寸不缩得太快。" recommend="常用 0 或 1" @change="setParam('padding', $event)" />
@@ -250,7 +250,7 @@ const inputShapeValue = computed(() => {
           <small>由前一层自动推导</small>
         </label>
 
-        <ParamNumberField label="Out Features 输出神经元" :value="selectedNode.params.out_features" hint="这一层输出多少个数。若是最后一层，就设成分类的类别数（如 10 类手写数字设 10）。" recommend="末层 = 类别数" @change="setParam('out_features', $event)" />
+        <ParamNumberField label="Out Features 输出神经元" :value="selectedNode.params.out_features" hint="这一层输出多少个数。若是整张网络的最后一层，一般把它设成要区分的类别总数。" recommend="末层 = 类别数" @change="setParam('out_features', $event)" />
       </div>
 
       <div class="shape-preview">
@@ -290,7 +290,7 @@ const inputShapeValue = computed(() => {
       </div>
 
       <section class="info-card">
-        <p>p 一般取 0 到 1 之间的小数，例如 0.5。</p>
+        <p>p 取 0 到 1 之间的小数，表示每次随机丢弃神经元的比例；值越大丢弃越多、正则化越强。</p>
       </section>
     </div>
 

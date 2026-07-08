@@ -76,14 +76,14 @@ function resetDefaults() {
               id="storage-data-dir"
               type="text"
               v-model="form.dataDir"
-              placeholder="默认：项目目录下（如 ./MNIST）"
+              placeholder="留空则使用项目目录下的默认位置"
             >
             <button class="secondary-button path-browse" id="browse-data-dir" @click="openPicker('dataDir')">
               <iconify-icon icon="mdi:folder-search-outline"></iconify-icon>
               浏览
             </button>
           </div>
-          <small>训练数据集（MNIST、CIFAR10 等）将下载并缓存到该目录，例如 ~/datasets</small>
+          <small>训练用的数据集将下载并缓存到该目录，可自定义为任意本地路径。</small>
         </label>
 
         <label class="form-field">
@@ -100,7 +100,7 @@ function resetDefaults() {
               浏览
             </button>
           </div>
-          <small>每次训练的模型权重（model.pt）和指标（metrics.json）将保存到该目录，例如 ~/model_results</small>
+          <small>每次训练得到的模型权重和训练指标文件将保存到该目录，可自定义为任意本地路径。</small>
         </label>
       </div>
 

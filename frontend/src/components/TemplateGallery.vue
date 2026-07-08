@@ -23,11 +23,11 @@ interface ExtraMeta {
 }
 const META_RULES: Array<{ test: RegExp; meta: ExtraMeta }> = [
   { test: /linear|perceptron|感知/i, meta: { difficulty: "新手", purpose: "最简单的分类模型，理解训练流程的第一站", structure: ["Input", "Linear", "Output"], recommended: true } },
-  { test: /mlp/i, meta: { difficulty: "新手", purpose: "多层全连接网络，能识别简单图像", structure: ["Input", "Flatten", "Linear", "ReLU", "Linear", "Output"] } },
-  { test: /lenet/i, meta: { difficulty: "新手", purpose: "经典卷积网络，手写数字识别首选", structure: ["Input", "Conv", "Pool", "Conv", "Pool", "Flatten", "Linear", "Output"], recommended: true } },
-  { test: /resnet/i, meta: { difficulty: "进阶", purpose: "带残差连接的卷积网络，更深也好训练", structure: ["Input", "Conv", "残差块", "Pool", "Linear", "Output"] } },
-  { test: /lstm/i, meta: { difficulty: "进阶", purpose: "循环网络，处理文本 / 时间序列", structure: ["Input", "LSTM", "Linear", "Output"] } },
-  { test: /seq2seq/i, meta: { difficulty: "进阶", purpose: "序列到序列，用于翻译 / 摘要", structure: ["Input", "编码器", "解码器", "Output"] } },
+  { test: /mlp/i, meta: { difficulty: "新手", purpose: "多层全连接网络，能识别简单的图像", structure: ["Input", "Flatten", "Linear", "ReLU", "Linear", "Output"] } },
+  { test: /lenet/i, meta: { difficulty: "新手", purpose: "结构清晰的经典小型卷积网络，适合入门", structure: ["Input", "Conv", "Pool", "Conv", "Pool", "Flatten", "Linear", "Output"], recommended: true } },
+  { test: /resnet/i, meta: { difficulty: "进阶", purpose: "带残差连接的卷积网络，更深也易训练", structure: ["Input", "Conv", "残差块", "Pool", "Linear", "Output"] } },
+  { test: /lstm/i, meta: { difficulty: "进阶", purpose: "循环网络，处理有先后顺序的序列数据", structure: ["Input", "LSTM", "Linear", "Output"] } },
+  { test: /seq2seq/i, meta: { difficulty: "进阶", purpose: "序列到序列，把一段序列转换成另一段", structure: ["Input", "编码器", "解码器", "Output"] } },
   { test: /transformer/i, meta: { difficulty: "进阶", purpose: "注意力编码器，大模型的基础结构", structure: ["Input", "Attention", "前馈", "Output"] } },
   { test: /attention|注意/i, meta: { difficulty: "进阶", purpose: "自注意力机制演示", structure: ["Input", "SelfAttention", "Output"] } },
   { test: /vae/i, meta: { difficulty: "进阶", purpose: "变分自编码器，能生成新样本", structure: ["Input", "编码器", "隐变量", "解码器", "Output"] } },
