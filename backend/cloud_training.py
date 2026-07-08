@@ -83,30 +83,33 @@ VisualDL 本机训练应用
 
 # 打包成单文件应用的构建说明（随包附带）
 _BUILD_GUIDE = """\
-把本应用打包成「用户双击即用、无需预装 Python」的单文件应用
-=========================================================
+把本应用打包成单文件应用（可选）
+=================================
 
-思路：用一份「独立 Python」作为内置解释器，用 PyInstaller 把 launcher.py 冻结成
-单文件可执行程序，并把 local_agent/（.pyc）打包进去。运行时 launcher 用内置的
-独立 Python 创建虚拟环境并安装依赖。
+✅ 最省事、最可靠的方式：**直接用源码运行，不必打包 exe**。
+   在含 launcher.py 的目录执行（需本机装有 Python {py}）：
+       python launcher.py
+   会弹出图形界面，点「准备训练环境」即可（首次自动建 venv 并装依赖）。
 
-⚠️ 重要：**不要把 config.json 打进 exe**（不要 --add-data config.json）。config.json
-必须作为外部文件放在 exe 旁边，这样：
-  - 服务器下载时注入的最新令牌（外部 config.json）才会被读取；
-  - 用户令牌失效时可直接编辑 exe 旁边的 config.json 更新令牌，无需重新打包。
-启动器已优先读取「exe 所在目录的外部 config.json」。
+————————————————————————————————————————
+如果确实要打包成 exe（进阶）
+————————————————————————————————————————
 
-前提：本包内的 local_agent/*.pyc 是用 Python {py} 编译的，内置的独立 Python 必须
-是同一小版本（{py}.x），否则 .pyc 无法被加载。
+⚠️ 关键前提：exe 运行时需要一个**真正的 Python 解释器**来创建虚拟环境。
+   打包后的 exe 自身不是 Python，启动器**绝不会**用 exe 去建 venv（那样会反复
+   自启动、吃满内存）。因此二选一：
+     (A) 目标机器已装 Python {py}（PATH 里能找到 python）——最简单；或
+     (B) 随包内置一份独立 Python（python-build-standalone），解压到本目录 pybundle/，
+         启动器会优先用它。注意独立 Python 必须是 {py}.x（与 .pyc 同小版本）。
+
+⚠️ 不要把 config.json 打进 exe（不要 --add-data config.json）：它必须作为外部文件
+   放在 exe 旁边，这样下载注入的最新令牌才会生效、令牌失效时也能直接改。
 
 步骤（在与目标平台相同的系统上执行）：
 
-1. 获取独立 Python {py}（例如 python-build-standalone 项目的发行版），解压到
-   本目录下的 pybundle/。
-
-2. 安装 PyInstaller：pip install pyinstaller
-
-3. 打包（Windows 为例，注意不含 config.json、带窗口图标与 GUI）：
+1. （方式 B 时）把独立 Python {py} 解压到本目录下的 pybundle/。
+2. pip install pyinstaller
+3. 打包（Windows 为例，带窗口图标与 GUI，不含 config.json）：
 
        pyinstaller --onefile --windowed --name VisualDL-Agent \\
          --icon "local_agent/assets/icon.ico" \\
@@ -114,16 +117,13 @@ _BUILD_GUIDE = """\
          --add-binary "pybundle;pybundle" \\
          launcher.py
 
-   （macOS/Linux 把 --add-data 的分隔符 ; 换成 :；macOS 图标用 icon.icns）
-   说明：--windowed 表示这是有图形界面的应用（启动器自带 tkinter 界面）；
-   --add-data "local_agent;local_agent" 已包含 assets/ 图标资源。
+   （方式 A 无内置 Python 时可去掉 --add-binary "pybundle;pybundle"；
+     macOS/Linux 把分隔符 ; 换成 :，macOS 图标用 icon.icns）
+4. 产物在 dist/。**把 exe 和 config.json 放同一文件夹**分发给用户。
 
-4. 产物在 dist/ 下（VisualDL-Agent.exe）。**分发时把 exe 和 config.json 放在同一
-   文件夹**一起给用户（config.json 内含令牌，用户也可在启动器界面里直接更新令牌）。
-
-注：不同平台需各自构建一次（Windows/macOS/Linux）。torch 与 config.json 都不打进
-可执行文件；启动器界面里可更新令牌（保存到 exe 目录下 visualdl_runtime/config.json），
-之后以界面里的令牌为准。
+出问题排查：--windowed 没有控制台，启动器会把日志写到
+   exe 目录下 `visualdl_runtime/launcher.log`，并在出错时弹系统提示框。
+不同平台需各自构建一次；torch 与 config.json 都不打进 exe。
 """
 
 

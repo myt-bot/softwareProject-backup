@@ -14,9 +14,11 @@
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import threading
+import traceback
 from pathlib import Path
 
 # 依赖清单（Windows/Linux 一律装 CUDA 版 PyTorch；macOS 装默认版）
@@ -44,6 +46,34 @@ def _launcher_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent   # 打包 exe 所在目录
     return Path(__file__).resolve().parent              # 源码运行：launcher.py 所在目录
+
+
+def _find_base_python() -> str | None:
+    """找一个**真正的 Python 解释器**来创建虚拟环境。
+
+    ⚠️ 打包成 exe 后 `sys.executable` 是 exe 自己，绝不能用它去执行 `-m venv`，
+    否则会反复重启 exe 自身，造成进程炸弹 / 内存爆满。因此这里明确区分：
+      - 源码运行：当前解释器就是真 Python；
+      - 打包 exe：优先用随包内置的独立 Python（pybundle），否则用系统 PATH 里的 Python；
+        都找不到就返回 None（由调用方明确报错，绝不递归启动自己）。
+    """
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        names = ["python.exe"] if _is_windows() else ["python3", "python"]
+        for sub in ("pybundle", "python", "."):
+            for name in names:
+                candidate = Path(meipass) / sub / name
+                if candidate.exists():
+                    return str(candidate)
+
+    for name in ("python", "py", "python3"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
 
 
 # 启动器目录下新建的运行时文件夹：存放虚拟环境与启动器自管配置
@@ -146,8 +176,16 @@ def create_environment(log=print) -> None:
     """创建虚拟环境并安装依赖（含 CUDA 版 PyTorch）。仅在用户触发时调用。"""
     APP_DIR.mkdir(parents=True, exist_ok=True)
     if not venv_python().exists():
-        log("[启动器] 正在创建训练环境（首次使用，只需一次）...")
-        subprocess.run([sys.executable, "-m", "venv", str(VENV_DIR)], check=True)
+        base_python = _find_base_python()
+        if not base_python:
+            # 绝不用 exe 自己去建 venv（会递归自启动）；找不到 Python 就明确报错
+            raise RuntimeError(
+                "未找到可用的 Python 解释器，无法创建训练环境。\n"
+                "请安装 Python 3.10 及以上版本（安装时勾选 Add Python to PATH），\n"
+                "或改用『源码方式』运行：在含 launcher.py 的目录执行  python launcher.py"
+            )
+        log(f"[启动器] 正在创建训练环境（首次使用，只需一次）... 使用 {base_python}")
+        subprocess.run([base_python, "-m", "venv", str(VENV_DIR)], check=True)
     py = str(venv_python())
     log("[启动器] 正在升级 pip ...")
     subprocess.run([py, "-m", "pip", "install", "--upgrade", "pip"], check=True)
@@ -374,39 +412,66 @@ def run_cli(config: dict) -> None:
     server = config.get("server_url", DEFAULT_SERVER)
     token = config.get("token", "")
     if not token:
-        print("[启动器] 缺少令牌：请从网页下载应用，或用 --token 提供。")
+        _show_message("VisualDL 本机训练应用", "缺少登录令牌：请从网页重新下载应用。")
         sys.exit(1)
     save_config(server, token)
-    try:
-        if is_venv_ready():
-            print("[启动器] 检测到已就绪的训练环境，直接启动。")
-        else:
-            create_environment()
-    except subprocess.CalledProcessError as exc:
-        print(f"[启动器] 环境准备失败：{exc}")
-        sys.exit(1)
+    if is_venv_ready():
+        print("[启动器] 检测到已就绪的训练环境，直接启动。")
+    else:
+        create_environment()  # 失败时抛异常，由 main() 统一记录并弹窗提示（不静默、不递归）
     proc = start_agent_process(server, token)
     for line in proc.stdout:
         print(line.rstrip())
     sys.exit(proc.wait())
 
 
-def main() -> None:
-    config = load_config()
-    for i, arg in enumerate(sys.argv):
-        if arg == "--server" and i + 1 < len(sys.argv):
-            config["server_url"] = sys.argv[i + 1]
-        if arg == "--token" and i + 1 < len(sys.argv):
-            config["token"] = sys.argv[i + 1]
+def _show_message(title: str, message: str) -> None:
+    """在没有控制台的打包应用里也能弹出可见提示（Windows 用系统消息框）。"""
+    print(f"{title}: {message}")
+    try:
+        if _is_windows():
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, message, title, 0x10)  # MB_ICONERROR
+    except Exception:  # noqa: BLE001
+        pass
 
-    if "--no-gui" not in sys.argv:
-        try:
-            import tkinter  # noqa: F401
-            run_gui(config)
-            return
-        except Exception as exc:  # noqa: BLE001
-            print(f"[启动器] 图形界面不可用，转命令行模式：{exc}")
-    run_cli(config)
+
+def main() -> None:
+    # --windowed 打包后没有控制台，把所有输出与异常写进日志文件，便于排查
+    try:
+        APP_DIR.mkdir(parents=True, exist_ok=True)
+        log_fp = open(APP_DIR / "launcher.log", "a", encoding="utf-8")
+        sys.stdout = log_fp
+        sys.stderr = log_fp
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        config = load_config()
+        for i, arg in enumerate(sys.argv):
+            if arg == "--server" and i + 1 < len(sys.argv):
+                config["server_url"] = sys.argv[i + 1]
+            if arg == "--token" and i + 1 < len(sys.argv):
+                config["token"] = sys.argv[i + 1]
+
+        if "--no-gui" not in sys.argv:
+            try:
+                import tkinter  # noqa: F401
+                run_gui(config)
+                return
+            except Exception as exc:  # noqa: BLE001
+                print(f"[启动器] 图形界面不可用，转命令行模式：{exc}")
+                traceback.print_exc()
+        run_cli(config)
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        _show_message(
+            "VisualDL 本机训练应用",
+            f"启动失败：{exc}\n\n详细日志见：\n{APP_DIR / 'launcher.log'}",
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":
