@@ -25,7 +25,8 @@ from pathlib import Path
 BASE_REQUIREMENTS = ["websockets", "numpy", "fastapi", "pydantic"]
 TORCH_REQUIREMENTS = ["torch", "torchvision"]
 CUDA_INDEX_URL = "https://download.pytorch.org/whl/cu121"
-DEFAULT_SERVER = "http://127.0.0.1:8000"
+# 线上服务器（共用包删掉 config.json 后的默认值，务必是生产域名，否则连不上）
+DEFAULT_SERVER = "https://fk.kanzakiyui.com"
 
 
 def _is_windows() -> bool:
@@ -276,16 +277,22 @@ def start_agent_process(server_url: str, token: str) -> subprocess.Popen:
 
 def run_gui(config: dict) -> None:
     import tkinter as tk
-    from tkinter import scrolledtext, messagebox
+    from tkinter import scrolledtext, messagebox, ttk
 
-    C_BG = "#f4f8fd"
-    C_BLUE = "#0ea5e9"
-    C_TEXT = "#1f2a44"
-    C_MUTED = "#5b6b88"
+    # 调色板（清爽现代，浅色）
+    C_BG    = "#f5f8fc"   # 窗口底
+    C_BRAND = "#2563eb"   # 品牌蓝头部
+    C_SKY   = "#0ea5e9"   # 主按钮
+    C_SKY_H = "#0284c7"
+    C_GREY  = "#e2e8f0"   # 次要按钮
+    C_TEXT  = "#0f172a"
+    C_MUTED = "#64748b"
+    F = "Microsoft YaHei"
 
     root = tk.Tk()
     root.title("VisualDL 本机训练应用")
-    root.geometry("660x560")
+    root.geometry("700x620")
+    root.minsize(660, 560)
     root.configure(bg=C_BG)
     _imgs = []  # 防止 PhotoImage 被回收
     icon = _asset("icon.png")
@@ -299,59 +306,151 @@ def run_gui(config: dict) -> None:
 
     ui = {"busy": False, "connected": False, "proc": None}
 
-    # 头部：图标 + 标题
-    header = tk.Frame(root, bg=C_BG)
-    header.pack(fill="x", padx=20, pady=(18, 8))
+    style = ttk.Style(root)
+    try:
+        style.theme_use("clam")
+    except Exception:
+        pass
+    style.configure("VDL.Horizontal.TProgressbar", troughcolor=C_GREY,
+                    background=C_SKY, bordercolor=C_GREY, thickness=6)
+
+    # —— 头部色带：图标 + 标题 ——
+    header = tk.Frame(root, bg=C_BRAND)
+    header.pack(fill="x")
+    hpad = tk.Frame(header, bg=C_BRAND)
+    hpad.pack(fill="x", padx=24, pady=16)
     if _imgs:
-        small = _imgs[0].subsample(max(1, _imgs[0].width() // 48))
+        small = _imgs[0].subsample(max(1, _imgs[0].width() // 44))
         _imgs.append(small)
-        tk.Label(header, image=small, bg=C_BG).pack(side="left")
-    title_box = tk.Frame(header, bg=C_BG)
-    title_box.pack(side="left", padx=12)
-    tk.Label(title_box, text="VisualDL 本机训练应用", font=("Microsoft YaHei", 15, "bold"),
-             fg=C_TEXT, bg=C_BG).pack(anchor="w")
-    tk.Label(title_box, text="训练在你自己的电脑上进行", font=("Microsoft YaHei", 9),
-             fg=C_MUTED, bg=C_BG).pack(anchor="w")
+        tk.Label(hpad, image=small, bg=C_BRAND).pack(side="left")
+    tbox = tk.Frame(hpad, bg=C_BRAND)
+    tbox.pack(side="left", padx=12)
+    tk.Label(tbox, text="VisualDL 本机训练应用", font=(F, 16, "bold"),
+             fg="white", bg=C_BRAND).pack(anchor="w")
+    tk.Label(tbox, text="训练在你自己的电脑上进行 · 无需安装 Python", font=(F, 9),
+             fg="#c7d7fe", bg=C_BRAND).pack(anchor="w")
 
-    # 令牌 / 服务器地址（界面内更新令牌）
-    form = tk.Frame(root, bg=C_BG)
-    form.pack(fill="x", padx=20, pady=6)
-    tk.Label(form, text="登录令牌（从网页「本机训练应用」弹窗复制粘贴到这里；失效时也在此更新，无需改任何配置文件）",
-             font=("Microsoft YaHei", 9), fg=C_MUTED, bg=C_BG).pack(anchor="w")
-    token_var = tk.StringVar(value=config.get("token", ""))
-    token_entry = tk.Entry(form, textvariable=token_var, font=("Consolas", 9), show="•")
-    token_entry.pack(fill="x", pady=(2, 6), ipady=4)
-    row = tk.Frame(form, bg=C_BG)
-    row.pack(fill="x")
-    tk.Label(row, text="服务器：", font=("Microsoft YaHei", 9), fg=C_MUTED, bg=C_BG).pack(side="left")
-    server_var = tk.StringVar(value=config.get("server_url", DEFAULT_SERVER))
-    tk.Entry(row, textvariable=server_var, font=("Consolas", 9)).pack(side="left", fill="x", expand=True, ipady=3)
+    body = tk.Frame(root, bg=C_BG)
+    body.pack(fill="both", expand=True, padx=24, pady=(16, 18))
 
+    # —— 状态横幅（大字、随状态变色）+ 进度条 ——
+    banner = tk.Frame(body, bg="#eef2ff")
+    banner.pack(fill="x")
     status_var = tk.StringVar(value="")
-    tk.Label(root, textvariable=status_var, font=("Microsoft YaHei", 10, "bold"),
-             fg=C_TEXT, bg=C_BG, anchor="w").pack(fill="x", padx=20, pady=(8, 4))
+    status_lbl = tk.Label(banner, textvariable=status_var, font=(F, 11, "bold"),
+                          fg=C_TEXT, bg="#eef2ff", anchor="w", justify="left", wraplength=620)
+    status_lbl.pack(fill="x", padx=14, pady=11)
+    progress = ttk.Progressbar(body, style="VDL.Horizontal.TProgressbar", mode="indeterminate")
 
-    # 按钮区：准备训练环境（有环境则灰显）｜ 启动并连接 ｜ 保存令牌
-    btns = tk.Frame(root, bg=C_BG)
-    btns.pack(fill="x", padx=20)
-    prepare_btn = tk.Button(btns, text="", font=("Microsoft YaHei", 10, "bold"),
-                            bg="#e2e8f0", fg=C_TEXT, activebackground="#cbd5e1",
-                            relief="flat", cursor="hand2", pady=8,
-                            disabledforeground="#94a3b8")
+    # —— 步骤①：登录令牌 ——
+    tk.Label(body, text="① 粘贴登录令牌", font=(F, 11, "bold"), fg=C_TEXT, bg=C_BG).pack(anchor="w", pady=(16, 2))
+    tk.Label(body, text="在网页「本机训练应用」弹窗里复制令牌，粘到下面（失效时也在这里更新，无需改任何文件）",
+             font=(F, 9), fg=C_MUTED, bg=C_BG, wraplength=640, justify="left").pack(anchor="w")
+    token_var = tk.StringVar(value=config.get("token", ""))
+    token_entry = tk.Entry(body, textvariable=token_var, font=("Consolas", 10), show="•",
+                           relief="solid", bd=1)
+    token_entry.pack(fill="x", pady=(6, 2), ipady=6)
+    tokrow = tk.Frame(body, bg=C_BG)
+    tokrow.pack(fill="x")
+    show_var = tk.BooleanVar(value=False)
+    tk.Checkbutton(tokrow, text="显示令牌", variable=show_var,
+                   command=lambda: token_entry.config(show="" if show_var.get() else "•"),
+                   font=(F, 9), fg=C_MUTED, bg=C_BG, activebackground=C_BG,
+                   selectcolor="white", bd=0, cursor="hand2").pack(side="left")
+    save_btn = tk.Button(tokrow, text="保存令牌", font=(F, 9), relief="flat",
+                         bg=C_GREY, fg=C_TEXT, activebackground="#cbd5e1",
+                         cursor="hand2", padx=14, pady=5)
+    save_btn.pack(side="right")
+
+    # —— 步骤②③：两个大按钮 ——
+    tk.Label(body, text="② 准备训练环境　③ 启动并连接", font=(F, 11, "bold"),
+             fg=C_TEXT, bg=C_BG).pack(anchor="w", pady=(16, 5))
+    btns = tk.Frame(body, bg=C_BG)
+    btns.pack(fill="x")
+    prepare_btn = tk.Button(btns, text="", font=(F, 11, "bold"),
+                            bg=C_GREY, fg=C_TEXT, activebackground="#cbd5e1",
+                            relief="flat", cursor="hand2", pady=13, disabledforeground="#94a3b8")
     prepare_btn.pack(side="left", fill="x", expand=True)
-    connect_btn = tk.Button(btns, text="启动并连接云端", font=("Microsoft YaHei", 11, "bold"),
-                            bg=C_BLUE, fg="white", activebackground="#0284c7",
-                            activeforeground="white", relief="flat", cursor="hand2", pady=8,
-                            disabledforeground="#cbd5e1")
-    connect_btn.pack(side="left", fill="x", expand=True, padx=(10, 0))
-    save_btn = tk.Button(btns, text="保存令牌", font=("Microsoft YaHei", 10),
-                         relief="flat", cursor="hand2", pady=8, padx=12)
-    save_btn.pack(side="left", padx=(10, 0))
+    connect_btn = tk.Button(btns, text="③ 启动并连接云端", font=(F, 12, "bold"),
+                            bg=C_SKY, fg="white", activebackground=C_SKY_H,
+                            activeforeground="white", relief="flat", cursor="hand2", pady=13,
+                            disabledforeground="#e0f2fe")
+    connect_btn.pack(side="left", fill="x", expand=True, padx=(12, 0))
 
-    # 日志
-    log_widget = scrolledtext.ScrolledText(root, height=14, font=("Consolas", 9),
+    # —— 高级设置（可折叠）：服务器地址 ——
+    adv = {"open": False}
+    adv_toggle = tk.Label(body, text="⚙ 高级设置 ▼", font=(F, 9), fg=C_MUTED, bg=C_BG, cursor="hand2")
+    adv_toggle.pack(anchor="w", pady=(16, 0))
+    adv_box = tk.Frame(body, bg=C_BG)
+    tk.Label(adv_box, text="服务器地址（一般无需修改）", font=(F, 9), fg=C_MUTED, bg=C_BG).pack(anchor="w", pady=(6, 2))
+    server_var = tk.StringVar(value=config.get("server_url", DEFAULT_SERVER))
+    tk.Entry(adv_box, textvariable=server_var, font=("Consolas", 9), relief="solid", bd=1).pack(fill="x", ipady=4)
+
+    def _toggle_adv(*_):
+        adv["open"] = not adv["open"]
+        if adv["open"]:
+            adv_box.pack(fill="x", after=adv_toggle)
+            adv_toggle.config(text="⚙ 高级设置 ▲")
+        else:
+            adv_box.pack_forget()
+            adv_toggle.config(text="⚙ 高级设置 ▼")
+    adv_toggle.bind("<Button-1>", _toggle_adv)
+
+    # —— 详细日志（可折叠，默认收起，避免吓到新手）——
+    logstate = {"open": False}
+    log_toggle = tk.Label(body, text="📄 查看详细日志 ▼", font=(F, 9), fg=C_MUTED, bg=C_BG, cursor="hand2")
+    log_toggle.pack(anchor="w", pady=(8, 0))
+    log_widget = scrolledtext.ScrolledText(body, height=8, font=("Consolas", 9),
                                            bg="#0f172a", fg="#cbd5e1", relief="flat", state="disabled")
-    log_widget.pack(fill="both", expand=True, padx=20, pady=(10, 18))
+
+    def _toggle_log(*_):
+        logstate["open"] = not logstate["open"]
+        if logstate["open"]:
+            log_widget.pack(fill="both", expand=True, pady=(6, 0))
+            log_toggle.config(text="📄 收起详细日志 ▲")
+            root.geometry("700x800")
+        else:
+            log_widget.pack_forget()
+            log_toggle.config(text="📄 查看详细日志 ▼")
+            root.geometry("700x620")
+    log_toggle.bind("<Button-1>", _toggle_log)
+
+    # —— 状态 / 进度 / 按钮 helpers ——
+    _BANNER = {
+        "idle": ("#eef2ff", "#3730a3"),
+        "busy": ("#e0f2fe", "#075985"),
+        "ok":   ("#dcfce7", "#166534"),
+        "err":  ("#fee2e2", "#991b1b"),
+    }
+
+    def _apply_banner(text, kind):
+        bg, fg = _BANNER.get(kind, _BANNER["idle"])
+        status_var.set(text)
+        banner.config(bg=bg)
+        status_lbl.config(bg=bg, fg=fg)
+        if kind == "busy":
+            if not progress.winfo_ismapped():
+                progress.pack(fill="x", pady=(10, 0), after=banner)
+            progress.start(12)
+        else:
+            progress.stop()
+            if progress.winfo_ismapped():
+                progress.pack_forget()
+
+    def set_banner(text, kind="idle"):
+        root.after(0, lambda: _apply_banner(text, kind))
+
+    def _auto_kind(text):
+        if text.startswith("✅"):
+            return "ok"
+        if text.startswith("❌") or "失败" in text:
+            return "err"
+        if "正在" in text or text.rstrip().endswith("..."):
+            return "busy"
+        return "idle"
+
+    def set_status(text: str) -> None:
+        set_banner(text, _auto_kind(text))
 
     def log(msg: str) -> None:
         def _do():
@@ -360,30 +459,39 @@ def run_gui(config: dict) -> None:
             log_widget.see("end")
             log_widget.configure(state="disabled")
         root.after(0, _do)
+        # 把启动器的关键进度也映射到横幅，让收起日志的新手也能看到进展
+        if msg.startswith("[启动器]"):
+            set_banner(msg.replace("[启动器]", "").strip(), "busy")
 
-    def set_status(text: str) -> None:
-        root.after(0, lambda: status_var.set(text))
-
-    def _set_btn(btn, text: str, enabled: bool) -> None:
-        root.after(0, lambda: btn.config(
-            text=text, state=("normal" if enabled else "disabled"),
-            cursor=("hand2" if enabled else "arrow")))
+    def _style_btn(btn, text: str, enabled: bool, primary: bool = False) -> None:
+        """primary=当前该点的主操作→蓝色醒目；enabled=False→灰显不可点。"""
+        if enabled and primary:
+            cfg = dict(bg=C_SKY, fg="white", activebackground=C_SKY_H, state="normal", cursor="hand2")
+        elif enabled:
+            cfg = dict(bg=C_GREY, fg=C_TEXT, activebackground="#cbd5e1", state="normal", cursor="hand2")
+        else:
+            cfg = dict(bg="#eaeef3", fg="#9aa7b8", state="disabled", cursor="arrow")
+        cfg["text"] = text
+        root.after(0, lambda: btn.config(**cfg))
 
     def refresh_idle() -> None:
-        """按当前状态刷新两个按钮：有环境时「准备」灰显，无环境时「连接」灰显。"""
+        """按状态高亮「当前该点」的按钮为蓝色主按钮，另一个灰显。"""
         if ui["busy"] or ui["connected"]:
             return
         ready = is_venv_ready()
         has_token = bool(token_var.get().strip())
-        if ready:
-            _set_btn(prepare_btn, "训练环境已就绪 ✓", False)          # 检测到环境 → 灰显
-            _set_btn(connect_btn, "启动并连接云端" if has_token else "请先填写令牌", has_token)
-            set_status("环境已就绪，点「启动并连接云端」" if has_token
-                       else "环境已就绪，请先在上方粘贴登录令牌")
+        if ready and has_token:
+            _style_btn(prepare_btn, "② 训练环境已就绪 ✓", False)
+            _style_btn(connect_btn, "③ 启动并连接云端", True, primary=True)
+            set_banner("环境已就绪！点下方「③ 启动并连接云端」即可开始。", "ok")
+        elif ready:
+            _style_btn(prepare_btn, "② 训练环境已就绪 ✓", False)
+            _style_btn(connect_btn, "③ 请先粘贴令牌", False)
+            set_banner("环境已就绪，请先在 ① 粘贴登录令牌。", "idle")
         else:
-            _set_btn(prepare_btn, f"准备训练环境（首次下载{_deps_size_text()}）", True)
-            _set_btn(connect_btn, "请先准备训练环境", False)          # 无环境 → 连接灰显
-            set_status(f"首次使用：点「准备训练环境」下载依赖（约 {_deps_size_text()}，含 PyTorch，只需一次）")
+            _style_btn(prepare_btn, f"② 准备训练环境（首次下载 {_deps_size_text()}）", True, primary=True)
+            _style_btn(connect_btn, "③ 启动并连接云端", False)
+            set_banner(f"第一步：点「② 准备训练环境」下载依赖（约 {_deps_size_text()}，含 PyTorch，只需一次）。", "idle")
 
     def on_save() -> None:
         t = token_var.get().strip()
@@ -393,27 +501,27 @@ def run_gui(config: dict) -> None:
             return
         save_config(s, t)
         log("[启动器] 令牌已保存到本应用（无需外部配置文件）。")
-        refresh_idle()
+        set_banner("令牌已保存。", "ok")
+        root.after(1200, refresh_idle)
 
     def prepare_worker() -> None:
         try:
             set_status("正在准备训练环境（首次较慢，请保持网络畅通）...")
             create_environment(log=log)
-            set_status("✅ 训练环境准备完成，现在可以「启动并连接云端」了")
+            set_banner("✅ 训练环境准备完成，现在可以「③ 启动并连接云端」了。", "ok")
         except Exception as exc:  # noqa: BLE001
             log(f"[启动器] 环境准备失败：{exc}")
-            set_status("环境准备失败，请重试")
+            set_banner("环境准备失败，请检查网络后重试。", "err")
         ui["busy"] = False
-        refresh_idle()
+        root.after(1500, refresh_idle)
 
     def on_prepare() -> None:
         if ui["busy"] or is_venv_ready():
             return
-        # 装环境本身不需要令牌；顺手保存当前填写，便于随后连接
         save_config(server_var.get().strip() or DEFAULT_SERVER, token_var.get().strip())
         ui["busy"] = True
-        _set_btn(prepare_btn, "正在下载安装 ...", False)
-        _set_btn(connect_btn, "请稍候 ...", False)
+        _style_btn(prepare_btn, "正在下载安装 ...", False)
+        _style_btn(connect_btn, "请稍候 ...", False)
         threading.Thread(target=prepare_worker, daemon=True).start()
 
     def connect_worker() -> None:
@@ -426,8 +534,8 @@ def run_gui(config: dict) -> None:
         except Exception as exc:  # noqa: BLE001
             log(f"[启动器] 启动失败：{exc}")
             ui["busy"] = False
-            set_status("启动失败")
-            refresh_idle()
+            set_banner("启动失败，请重试。", "err")
+            root.after(1200, refresh_idle)
             return
         ui["proc"] = proc
         for line in proc.stdout:
@@ -435,14 +543,18 @@ def run_gui(config: dict) -> None:
             log(line)
             if "CONNECTED" in line or "已成功连接" in line:
                 ui["connected"] = True
-                set_status("✅ 已连接云端，回到网页即可训练")
+                set_banner("✅ 已连接云端！回到网页即可开始训练。", "ok")
+                _style_btn(prepare_btn, "② 训练环境已就绪 ✓", False)
+                root.after(0, lambda: connect_btn.config(
+                    text="● 已连接云端", state="disabled", bg="#16a34a",
+                    fg="white", disabledforeground="white", cursor="arrow"))
             elif "403" in line:
                 ui["connected"] = False
-                set_status("❌ 令牌无效/已失效：请在上方更新令牌后点「保存令牌」再启动")
+                set_banner("❌ 令牌无效/已失效：请在 ① 更新令牌后点「保存令牌」再启动。", "err")
         ui["busy"] = False
         ui["connected"] = False
-        set_status("连接已结束")
-        refresh_idle()
+        set_banner("连接已结束。", "idle")
+        root.after(400, refresh_idle)
 
     def on_connect() -> None:
         if ui["busy"]:
@@ -451,10 +563,10 @@ def run_gui(config: dict) -> None:
             messagebox.showwarning("提示", "请先粘贴令牌。")
             return
         if not is_venv_ready():
-            messagebox.showinfo("提示", "请先点「准备训练环境」下载依赖。")
+            messagebox.showinfo("提示", "请先点「② 准备训练环境」下载依赖。")
             return
         ui["busy"] = True
-        _set_btn(connect_btn, "连接中 ...", False)
+        _style_btn(connect_btn, "连接中 ...", False)
         threading.Thread(target=connect_worker, daemon=True).start()
 
     prepare_btn.config(command=on_prepare)
