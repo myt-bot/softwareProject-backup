@@ -34,6 +34,12 @@ import type { WorkCanvas } from "./store";
 import type { ProjectMeta, TrainConfig, TrainStartResponse, ValidationResult } from "./types";
 import { requestAgent } from "./ws";
 
+type ExportCodeFormat = "py" | "ipynb";
+type ExportAgentResult = {
+  code?: string;
+  format?: ExportCodeFormat;
+  filename?: string;
+};
 
 export function showBackendError(error: unknown, fallbackMessage: string) {
   if (isBackendNotImplemented(error)) {
@@ -251,8 +257,11 @@ export async function removeProject(project: ProjectMeta): Promise<boolean> {
 }
 
 
-export async function handleExportCode() {
+export async function handleExportCode(format?: ExportCodeFormat) {
   const canvas = activeCanvas();
+  if (format) {
+    canvas.exportFormat = format;
+  }
 
   // 代码导出由本机 Agent 的训练运行时执行
   if (!agent.online) {
@@ -262,22 +271,41 @@ export async function handleExportCode() {
   }
 
   ui.exportModalOpen = true;
-  canvas.exportCodeDisplay = "正在请求本机 Agent 导出代码...";
+  canvas.exportCodeDisplay = `正在请求本机 Agent 导出 ${canvas.exportFormat === "ipynb" ? "Notebook" : "Python"} 代码...`;
 
   try {
-    const result = await requestAgent<{ code?: string }>("export", {
+    const result = await requestAgent<ExportAgentResult>("export", {
       model: getCurrentModelGraph(canvas),
       class_name: "GeneratedModel",
+      format: canvas.exportFormat,
+      train_config: getTrainConfig(canvas),
     });
     const code = result?.code;
     canvas.lastExportCode = typeof code === "string" ? code : JSON.stringify(result, null, 2);
     canvas.exportCodeDisplay = canvas.lastExportCode;
-    showToast("success", `${canvas.name} 的 PyTorch 代码已导出。`);
+    canvas.exportFilename = result?.filename || `GeneratedModel.${canvas.exportFormat}`;
+    if (result?.format === "py" || result?.format === "ipynb") {
+      canvas.exportFormat = result.format;
+    }
+    showToast("success", `${canvas.name} 的 ${canvas.exportFormat === "ipynb" ? "Notebook" : "PyTorch 代码"} 已导出。`);
   } catch (error) {
     canvas.lastExportCode = "";
     canvas.exportCodeDisplay = (error as Error)?.message || "代码导出失败。";
     showToast("error", canvas.exportCodeDisplay);
   }
+}
+
+
+export function setExportFormat(format: ExportCodeFormat) {
+  const canvas = activeCanvas();
+  if (canvas.exportFormat === format) return;
+  canvas.exportFormat = format;
+  canvas.exportFilename = `GeneratedModel.${format}`;
+  if (agent.online) {
+    void handleExportCode(format);
+    return;
+  }
+  canvas.exportCodeDisplay = "请选择导出格式后点击“导出代码”。";
 }
 
 
@@ -309,11 +337,14 @@ export function downloadExportCode() {
     return;
   }
 
-  const blob = new Blob([canvas.lastExportCode], { type: "text/x-python;charset=utf-8" });
+  const type = canvas.exportFormat === "ipynb"
+    ? "application/x-ipynb+json;charset=utf-8"
+    : "text/x-python;charset=utf-8";
+  const blob = new Blob([canvas.lastExportCode], { type });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "MNIST_CNN.py";
+  link.download = canvas.exportFilename || `GeneratedModel.${canvas.exportFormat}`;
   link.click();
   URL.revokeObjectURL(url);
 }

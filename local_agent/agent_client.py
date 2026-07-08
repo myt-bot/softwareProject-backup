@@ -135,11 +135,19 @@ def _handle_agent_request(command: dict[str, Any]) -> dict[str, Any]:
             return ok(get_device_summary())
 
         if action == "export":
-            from .runtime.code_exporter import export_to_pytorch
-            code = export_to_pytorch(payload.get("model", {}), payload.get("class_name", "GeneratedModel"))
+            from .runtime.code_exporter import export_model_code
+            export_format = (payload.get("format", "py") or "py").lower()
+            class_name = payload.get("class_name", "GeneratedModel")
+            code = export_model_code(
+                payload.get("model", {}),
+                class_name=class_name,
+                export_format=export_format,
+                train_config=payload.get("train_config"),
+            )
             if not code:
                 return fail("本机训练运行时暂未实现代码导出。")
-            return ok({"code": code})
+            suffix = "ipynb" if export_format == "ipynb" else "py"
+            return ok({"code": code, "format": suffix, "filename": f"{class_name}.{suffix}"})
 
         if action == "list_dir":
             return ok(_list_directory(payload.get("path")))

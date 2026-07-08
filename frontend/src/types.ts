@@ -56,6 +56,7 @@ export interface ModelGraphConnection {
 export interface ModelGraph {
   layers: ModelGraphLayer[];
   connections: ModelGraphConnection[];
+  train_config?: TrainConfig;
 }
 
 export interface TrainConfig {

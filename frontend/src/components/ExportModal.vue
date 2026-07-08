@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { closeExportModal, copyExportCode, downloadExportCode } from "../actions";
+import { closeExportModal, copyExportCode, downloadExportCode, setExportFormat } from "../actions";
 import { activeCanvas, ui } from "../store";
 
 // 显示当前激活画布的导出结果（各画布的导出相互独立）
@@ -24,18 +24,38 @@ const canvas = computed(() => activeCanvas());
       <div class="modal-body">
         <div class="model-summary">
           <h3>模型结构摘要</h3>
+          <div class="export-format-toggle" role="group" aria-label="导出格式">
+            <button
+              type="button"
+              :class="{ active: canvas.exportFormat === 'py' }"
+              title="导出 Python 文件"
+              @click="setExportFormat('py')"
+            >
+              <iconify-icon icon="mdi:language-python"></iconify-icon>
+              <span>.py</span>
+            </button>
+            <button
+              type="button"
+              :class="{ active: canvas.exportFormat === 'ipynb' }"
+              title="导出 Jupyter Notebook"
+              @click="setExportFormat('ipynb')"
+            >
+              <iconify-icon icon="mdi:notebook-outline"></iconify-icon>
+              <span>.ipynb</span>
+            </button>
+          </div>
           <div class="summary-row blue">
             <i></i>
             <div>
-              <strong>特征提取部分</strong>
-              <span>卷积、池化层负责“看懂”图像特征</span>
+              <strong>{{ canvas.nodes.length }} 个节点</strong>
+              <span>当前画布会按连接顺序生成 forward</span>
             </div>
           </div>
           <div class="summary-row indigo">
             <i></i>
             <div>
-              <strong>分类输出部分</strong>
-              <span>全连接层把特征变成类别预测</span>
+              <strong>{{ canvas.connections.length }} 条连线</strong>
+              <span>分支会按节点参数执行 concat 或 add</span>
             </div>
           </div>
         </div>
@@ -51,7 +71,7 @@ const canvas = computed(() => activeCanvas());
         <button class="text-button" id="btn-cancel-modal" @click="closeExportModal">取消</button>
         <button class="primary-button" id="btn-download-code" @click="downloadExportCode">
           <iconify-icon icon="mdi:download"></iconify-icon>
-          下载 .py 文件
+          下载 {{ canvas.exportFormat === "ipynb" ? ".ipynb" : ".py" }} 文件
         </button>
       </div>
     </div>

@@ -85,6 +85,7 @@ export const fallbackTemplates: TemplateMeta[] = [
 
 export type ValidationStatus = "unvalidated" | "passing" | "failed";
 export type NodeBadgeState = "none" | "passed" | "pending";
+export type ExportCodeFormat = "py" | "ipynb";
 
 // 一个独立画布：模型图、选中态、校验态、训练任务、导出结果、视口都相互隔离，
 // 使各画布可以并行进行结构检查 / 保存 / 导出 / 训练。
@@ -115,6 +116,8 @@ export interface WorkCanvas {
   // 代码导出
   lastExportCode: string;
   exportCodeDisplay: string;
+  exportFormat: ExportCodeFormat;
+  exportFilename: string;
   // 视口
   zoom: number;
   panX: number;
@@ -148,6 +151,8 @@ export function createCanvas(
     jobId: null,
     lastExportCode: "",
     exportCodeDisplay: "点击“导出代码”后会从后端生成 PyTorch 代码。",
+    exportFormat: "py",
+    exportFilename: "GeneratedModel.py",
     zoom: 1,
     panX: 0,
     panY: 0,
@@ -664,6 +669,7 @@ export function getCurrentModelGraph(canvas: WorkCanvas = activeCanvas()): Model
         params: getExportParams(node, backendGraph.connections, backendGraph.addTargetIds),
       })),
     connections: backendGraph.connections,
+    train_config: getTrainConfig(canvas),
   };
 }
 

@@ -3557,6 +3557,47 @@ body.is-connecting .node-port {
   overflow-y: auto;
 }
 
+.export-format-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 14px 0 18px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.export-format-toggle button {
+  min-width: 0;
+  min-height: 34px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.export-format-toggle button iconify-icon {
+  font-size: 16px;
+}
+
+.export-format-toggle button:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.export-format-toggle button.active {
+  color: var(--indigo);
+  background: #e0f2fe;
+  box-shadow: var(--shadow-sm);
+}
+
 .summary-row {
   display: flex;
   gap: 12px;
