@@ -33,36 +33,36 @@ export const layerGroups: LayerGroup[] = [
   {
     title: "基础层 / Base Layers",
     layers: [
-      { type: "Input", desc: "输入张量定义", icon: "mdi:login-variant", color: "emerald" },
-      { type: "Output", desc: "分类输出节点", icon: "mdi:logout-variant", color: "rose" },
-      { type: "Add", desc: "多分支逐元素相加", icon: "mdi:plus-circle-outline", color: "cyan" },
+      { type: "Input", desc: "输入张量定义", icon: "mdi:login-variant", color: "emerald", hint: "Input：模型的入口，定义数据形状（如图片 1×28×28）。每个模型从它开始。" },
+      { type: "Output", desc: "分类输出节点", icon: "mdi:logout-variant", color: "rose", hint: "Output：模型的出口，输出最终结果（如各类别的分数）。每个模型以它结尾。" },
+      { type: "Add", desc: "多分支逐元素相加", icon: "mdi:plus-circle-outline", color: "cyan", hint: "Add：把两条分支的结果逐元素相加，用于残差/跳连结构（如 ResNet）。" },
     ],
   },
   {
     title: "卷积与池化 / Conv & Pooling",
     layers: [
-      { type: "Conv2D", desc: "特征提取卷积层", icon: "mdi:grid-large", color: "blue" },
-      { type: "MaxPooling", desc: "下采样空间压缩", icon: "mdi:resize", color: "purple" },
-      { type: "ReLU", desc: "非线性激活函数", icon: "mdi:vector-rectangle", color: "orange" },
+      { type: "Conv2D", desc: "特征提取卷积层", icon: "mdi:grid-large", color: "blue", hint: "Conv2D：提取图像的局部特征，像用放大镜扫过图片。处理图像时最常用。" },
+      { type: "MaxPooling", desc: "下采样空间压缩", icon: "mdi:resize", color: "purple", hint: "MaxPooling：把特征图缩小一半，保留最显著的信息，减少计算、防过拟合。通常接在卷积后。" },
+      { type: "ReLU", desc: "非线性激活函数", icon: "mdi:vector-rectangle", color: "orange", hint: "ReLU：给网络加“非线性”，把负值变 0。几乎每个卷积/全连接层后都会加它。" },
     ],
   },
   {
     title: "全连接与正则 / Linear & Regular",
     layers: [
-      { type: "Flatten", desc: "多维展平为一维", icon: "mdi:layers-triple", color: "indigo" },
-      { type: "Linear", desc: "密集全连接层", icon: "mdi:ray-start-end", color: "cyan" },
-      { type: "Dropout", desc: "随机失活防过拟合", icon: "mdi:filter-off-outline", color: "amber" },
+      { type: "Flatten", desc: "多维展平为一维", icon: "mdi:layers-triple", color: "indigo", hint: "Flatten：把多维特征图“摊平”成一长条向量。卷积之后、接全连接层之前必须先展平。" },
+      { type: "Linear", desc: "密集全连接层", icon: "mdi:ray-start-end", color: "cyan", hint: "Linear：全连接层，把所有输入加权组合。常用在网络末端做分类，out_features 就是类别数。" },
+      { type: "Dropout", desc: "随机失活防过拟合", icon: "mdi:filter-off-outline", color: "amber", hint: "Dropout：训练时随机丢弃一部分神经元，防止模型死记硬背（过拟合）。比例一般 0.2~0.5。" },
     ],
   },
   {
     title: "序列与高级 / Sequence & Advanced",
     layers: [
-      { type: "LSTM", desc: "循环网络处理序列", icon: "mdi:repeat", color: "cyan" },
-      { type: "Seq2Seq", desc: "序列到序列生成", icon: "mdi:swap-horizontal", color: "indigo" },
-      { type: "TransformerEncoder", desc: "自注意力编码器", icon: "mdi:layers-outline", color: "purple" },
-      { type: "SelfAttention", desc: "自注意力机制", icon: "mdi:eye-outline", color: "blue" },
-      { type: "VAE", desc: "变分自编码器", icon: "mdi:creation", color: "rose" },
-      { type: "GraphConv", desc: "图卷积层", icon: "mdi:graph", color: "emerald" },
+      { type: "LSTM", desc: "循环网络处理序列", icon: "mdi:repeat", color: "cyan", hint: "LSTM：循环网络，擅长按顺序处理序列（文本、时间序列），能记住前面的信息。" },
+      { type: "Seq2Seq", desc: "序列到序列生成", icon: "mdi:swap-horizontal", color: "indigo", hint: "Seq2Seq：把一段序列转成另一段序列，用于翻译、摘要等。" },
+      { type: "TransformerEncoder", desc: "自注意力编码器", icon: "mdi:layers-outline", color: "purple", hint: "TransformerEncoder：Transformer 的编码器，靠注意力机制理解序列，是大模型的基础模块。" },
+      { type: "SelfAttention", desc: "自注意力机制", icon: "mdi:eye-outline", color: "blue", hint: "SelfAttention：自注意力，让每个位置都能“关注”序列里其它位置，抓住长距离关系。" },
+      { type: "VAE", desc: "变分自编码器", icon: "mdi:creation", color: "rose", hint: "VAE：变分自编码器，一种生成模型，能学习数据分布并生成新样本。" },
+      { type: "GraphConv", desc: "图卷积层", icon: "mdi:graph", color: "emerald", hint: "GraphConv：图卷积，处理图结构数据（社交网络、分子等），在节点与邻居间传递信息。" },
     ],
   },
 ];
@@ -102,6 +102,8 @@ export interface WorkCanvas {
   // 结构校验（结果通过 toast 弹窗提示）
   validationStatus: ValidationStatus;
   nodeBadge: NodeBadgeState;
+  // 校验失败时每个出错节点的人话提示（nodeId → 说明），用于在画布上标红定位
+  nodeErrors: Record<string, string>;
   inFeatures: number;
   validating: boolean;
   // 训练任务
@@ -136,6 +138,7 @@ export function createCanvas(
     selectedConnectionKey: null,
     validationStatus: "unvalidated",
     nodeBadge: "none",
+    nodeErrors: {},
     inFeatures: 1024,
     validating: false,
     epochs: 1,
@@ -164,6 +167,8 @@ export const store = reactive({
   canvasSeq: 1,
   // 以下为全局交互状态（只作用于当前激活画布的瞬时操作）
   isConnecting: false,
+  // 从节点端口"拖拽"连线（区别于右键菜单的点击式连线）
+  connectingByDrag: false,
   connectSourceId: null as string | null,
   connectTargetId: null as string | null,
   menuConnection: null as Connection | null,
@@ -475,6 +480,7 @@ export function getLayerConfig(layerType: string): LayerConfig {
 export function resetValidationAfterGraphChange(canvas: WorkCanvas = activeCanvas()) {
   canvas.validationStatus = "unvalidated";
   canvas.nodeBadge = "none";
+  canvas.nodeErrors = {};
 }
 
 

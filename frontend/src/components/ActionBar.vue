@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   handleExportCode,
   handleSaveProject,
@@ -10,6 +10,24 @@ import {
 import { activeCanvas, clamp, getTrainingStatusLabel, showToast, ui } from "../store";
 import DatasetSelector from "./DatasetSelector.vue";
 import DeviceSelector from "./DeviceSelector.vue";
+import InfoTip from "./InfoTip.vue";
+
+// 「更多」下拉菜单（收纳保存/我的项目/导出，给底栏腾出空间）
+const moreMenuOpen = ref(false);
+const moreRef = ref<HTMLElement | null>(null);
+
+function handleDocumentClick(event: MouseEvent) {
+  if (!moreRef.value?.contains(event.target as Node)) {
+    moreMenuOpen.value = false;
+  }
+}
+onMounted(() => document.addEventListener("click", handleDocumentClick));
+onBeforeUnmount(() => document.removeEventListener("click", handleDocumentClick));
+
+function runMore(action: () => void) {
+  moreMenuOpen.value = false;
+  action();
+}
 
 // 底部操作栏跟随当前激活画布：各画布的校验/训练状态相互独立、并行进行
 const canvas = computed(() => activeCanvas());
@@ -59,6 +77,11 @@ const jobMeta = computed(() => {
 const trainDisabled = computed(
   () => canvas.value.trainStarting || canvas.value.validationStatus !== "passing"
 );
+
+// 有模型但还没校验通过 → 提醒"先检查结构"
+const needsCheck = computed(
+  () => canvas.value.nodes.length > 0 && canvas.value.validationStatus !== "passing"
+);
 </script>
 
 <template>
@@ -89,26 +112,41 @@ const trainDisabled = computed(
         <button
           class="secondary-button"
           id="btn-validate"
-          title="自动检查每一层的尺寸是否匹配"
+          :class="{ 'attention-pulse': needsCheck }"
+          :title="needsCheck ? '训练前先点这里检查结构是否正确' : '自动检查每一层的尺寸是否匹配'"
           :disabled="canvas.validating"
           @click="handleValidateModel"
         >
           <iconify-icon v-if="canvas.validating" icon="mdi:loading" class="spin"></iconify-icon>
+          <iconify-icon v-else-if="needsCheck" icon="mdi:numeric-1-circle"></iconify-icon>
           <iconify-icon v-else icon="mdi:check-circle-outline"></iconify-icon>
-          {{ canvas.validating ? "正在校验..." : "检查结构" }}
+          {{ canvas.validating ? "正在校验..." : (needsCheck ? "先检查结构" : "检查结构") }}
         </button>
-        <button class="secondary-button" id="btn-save" title="把当前模型保存到我的项目" @click="handleSaveProject">
-          <iconify-icon icon="mdi:content-save-outline"></iconify-icon>
-          保存模型
-        </button>
-        <button class="secondary-button" id="btn-my-projects" title="加载已保存的模型" @click="ui.projectsModalOpen = true">
-          <iconify-icon icon="mdi:folder-open-outline"></iconify-icon>
-          我的项目
-        </button>
-        <button class="secondary-button" id="btn-export" title="生成可直接运行的 PyTorch 代码" @click="handleExportCode">
-          <iconify-icon icon="mdi:code-json"></iconify-icon>
-          导出代码
-        </button>
+        <!-- 更多：保存 / 我的项目 / 导出（收进下拉，底栏更清爽） -->
+        <div class="more-menu-wrap" ref="moreRef">
+          <button
+            class="secondary-button"
+            id="btn-more"
+            :class="{ active: moreMenuOpen }"
+            title="保存 / 加载 / 导出"
+            @click.stop="moreMenuOpen = !moreMenuOpen"
+          >
+            <iconify-icon icon="mdi:dots-horizontal"></iconify-icon>
+            更多
+            <iconify-icon icon="mdi:chevron-up" class="more-caret"></iconify-icon>
+          </button>
+          <div class="more-menu" :class="{ open: moreMenuOpen }">
+            <button id="btn-save" @click="runMore(handleSaveProject)">
+              <iconify-icon icon="mdi:content-save-outline"></iconify-icon> 保存模型
+            </button>
+            <button id="btn-my-projects" @click="runMore(() => (ui.projectsModalOpen = true))">
+              <iconify-icon icon="mdi:folder-open-outline"></iconify-icon> 我的项目
+            </button>
+            <button id="btn-export" @click="runMore(handleExportCode)">
+              <iconify-icon icon="mdi:code-json"></iconify-icon> 导出代码
+            </button>
+          </div>
+        </div>
       </div>
 
       <div class="action-divider"></div>
@@ -117,8 +155,8 @@ const trainDisabled = computed(
       <div class="action-group train-group">
         <DatasetSelector />
         <DeviceSelector />
-        <label class="epochs-field" title="完整遍历训练集的次数（1-100）">
-          <span>轮次</span>
+        <label class="epochs-field">
+          <span>轮次 <InfoTip text="Epoch（轮次）：把整个训练集完整过一遍算一轮。轮次越多学得越充分，但太多会过拟合、也更慢。新手可先设 1~5 轮。" /></span>
           <input
             id="epochs-input"
             type="number"

@@ -52,7 +52,7 @@ function handleDragStart(event: DragEvent, layerType: string) {
             class="layer-item"
             :data-layer-type="layer.type"
             draggable="true"
-            title="按住拖拽到中间画布即可添加"
+            :title="layer.hint ? `${layer.hint}\n\n（按住拖拽到中间画布即可添加）` : '按住拖拽到中间画布即可添加'"
             @dragstart="handleDragStart($event, layer.type)"
           >
             <span :class="`layer-icon ${layer.color}`"><iconify-icon :icon="layer.icon"></iconify-icon></span>

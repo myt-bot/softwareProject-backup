@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
+  beginConnectionDrag,
   cancelPendingConnection,
   centerGraphInCanvas,
   completeConnection,
@@ -13,9 +14,11 @@ import {
   handleNodeMouseDown,
   handleZoomAction,
   initializeCanvasView,
+  redoGraphChange,
   registerCanvasElements,
   selectNode,
   showNodeMenu,
+  undoGraphChange,
 } from "../canvas";
 import { activeCanvas, showToast, store } from "../store";
 import CanvasTabs from "./CanvasTabs.vue";
@@ -61,6 +64,14 @@ function onNodeContextMenu(event: MouseEvent, nodeId: string) {
   event.stopPropagation();
   if (store.isConnecting) return;
   showNodeMenu(event.clientX, event.clientY, nodeId);
+}
+
+// 从节点底部端口按住拖拽 → 开始连线（更直观）
+function onPortMouseDown(event: MouseEvent, nodeId: string) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  beginConnectionDrag(nodeId, event.clientX, event.clientY);
 }
 
 function exitConnectMode() {
@@ -115,9 +126,20 @@ onBeforeUnmount(() => {
       <button id="zoom-in" title="放大画布" @click="handleZoomAction('zoom-in')"><iconify-icon icon="mdi:plus"></iconify-icon></button>
       <i></i>
       <button id="zoom-fit" title="定位到节点并居中" @click="centerGraphInCanvas"><iconify-icon icon="mdi:image-filter-center-focus"></iconify-icon></button>
+      <i></i>
+      <button id="btn-undo" title="撤销 (Ctrl+Z)" @click="undoGraphChange"><iconify-icon icon="mdi:undo-variant"></iconify-icon></button>
+      <button id="btn-redo" title="重做 (Ctrl+Shift+Z / Ctrl+Y)" @click="redoGraphChange"><iconify-icon icon="mdi:redo-variant"></iconify-icon></button>
     </div>
     <div ref="gridRef" class="canvas-grid connections-svg"></div>
     <svg ref="svgRef" class="connections-svg" id="connections-svg"></svg>
+
+    <!-- 空画布引导态：告诉新手第一步该做什么 -->
+    <div v-if="canvas.nodes.length === 0" class="canvas-empty-hint" id="canvas-empty-hint">
+      <iconify-icon icon="mdi:gesture-tap-hold"></iconify-icon>
+      <h3>从这里开始搭建你的模型</h3>
+      <p>👈 从左侧「组件库」拖一个 <b>Input</b> 层到这里<br>或点右上角 <b>⚡ 快速开始模板</b> 一键加载示例</p>
+    </div>
+
     <div ref="nodesRef" class="nodes-container" id="nodes-container">
       <article
         v-for="node in canvas.nodes"
@@ -130,6 +152,7 @@ onBeforeUnmount(() => {
           'connection-source': store.connectSourceId === node.id,
           'connection-target': store.connectTargetId === node.id,
           'node-dragging': store.draggingNodeId === node.id,
+          'node-error': !!canvas.nodeErrors[node.id],
         }"
         :style="{ left: `${node.x}px`, top: `${node.y}px` }"
         @mousedown="handleNodeMouseDown($event, node.id)"
@@ -138,14 +161,33 @@ onBeforeUnmount(() => {
       >
         <div class="node-head">
           <span :class="`node-type ${node.color}`">{{ node.badge }}</span>
-          <span :class="statusBadgeClass">{{ statusBadgeText }}</span>
+          <span v-if="canvas.nodeErrors[node.id]" class="status-badge error">✕ 有问题</span>
+          <span v-else :class="statusBadgeClass">{{ statusBadgeText }}</span>
         </div>
         <h4>{{ node.title }}</h4>
         <p v-if="node.note" class="node-note">{{ node.note }}</p>
-        <div class="shape-row" title="这一层输出数据的尺寸，点击底部“检查结构”后自动推导">
+        <!-- 出错节点的人话提示，直接显示在节点上 -->
+        <p v-if="canvas.nodeErrors[node.id]" class="node-error-msg">
+          <iconify-icon icon="mdi:alert-circle-outline"></iconify-icon>
+          {{ canvas.nodeErrors[node.id] }}
+        </p>
+        <div v-else class="shape-row" title="这一层输出数据的尺寸，点击底部“检查结构”后自动推导">
           <span>输出尺寸</span>
           <strong class="shape-value" :class="{ pending: node.hint === '?' }">{{ shapeHintText(node.hint) }}</strong>
         </div>
+        <!-- 输入锚点（顶部）：与输出端口对称，作为连线的接入点 -->
+        <div
+          v-if="node.type !== 'Input'"
+          class="node-port node-port-in"
+          title="连线接入点"
+        ></div>
+        <!-- 输出端口（底部）：按住拖到另一个节点即可连线 -->
+        <div
+          v-if="node.type !== 'Output'"
+          class="node-port node-port-out"
+          title="按住拖到另一个节点即可连线"
+          @mousedown="onPortMouseDown($event, node.id)"
+        ><iconify-icon icon="mdi:plus"></iconify-icon></div>
       </article>
     </div>
     </main>

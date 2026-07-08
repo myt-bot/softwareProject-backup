@@ -389,19 +389,26 @@ def infer_all_shapes(model_graph):
 
     for layer_config in ordered_layers:
         layer_id = layer_config["id"]
-        predecessor_shapes = [
-            shape_by_layer[predecessor_id]["output_shape"]
-            for predecessor_id in predecessors[layer_id]
-        ]
+        # 逐层容错：任何一层推导失败都只把该层标为 unknown，不让整体崩溃，
+        # 这样前端才能把"算不出尺寸"的层定位并标红。
+        try:
+            predecessor_shapes = [
+                shape_by_layer[predecessor_id]["output_shape"]
+                for predecessor_id in predecessors[layer_id]
+            ]
 
-        if not predecessor_shapes:
+            if not predecessor_shapes:
+                input_shape = None
+            elif len(predecessor_shapes) == 1:
+                input_shape = predecessor_shapes[0]
+            else:
+                input_shape = _merge_shapes(layer_config, predecessor_shapes)
+
+            output_shape = infer_layer_shape(layer_config, input_shape)
+        except Exception:
             input_shape = None
-        elif len(predecessor_shapes) == 1:
-            input_shape = predecessor_shapes[0]
-        else:
-            input_shape = _merge_shapes(layer_config, predecessor_shapes)
+            output_shape = None
 
-        output_shape = infer_layer_shape(layer_config, input_shape)
         shape_by_layer[layer_id] = {
             "layer_type": layer_config.get("type"),
             "input_shape": input_shape,
@@ -609,9 +616,11 @@ def infer_graph_conv_shape(input_shape, params):
 
 def _flattened_size(input_shape):
     """返回输入 shape 展平后的元素数量；无法计算时返回 None。"""
+    if not isinstance(input_shape, (list, tuple)):
+        return None
     flattened_size = 1
     for dimension in input_shape:
-        if dimension <= 0:
+        if not isinstance(dimension, int) or dimension <= 0:
             return None
         flattened_size *= dimension
 

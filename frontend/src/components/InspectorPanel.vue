@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { redrawAfterDomUpdate } from "../canvas";
-import { activeCanvas, showToast, ui, updateNodeParam } from "../store";
+import { computed, ref, watch } from "vue";
+import { validateModelStructure } from "../api/client";
+import { recordHistory, redrawAfterDomUpdate } from "../canvas";
+import { activeCanvas, getCurrentModelGraph, showToast, ui, updateNodeParam } from "../store";
 import ParamNumberField from "./ParamNumberField.vue";
 
 const canvas = computed(() => activeCanvas());
@@ -9,6 +10,33 @@ const canvas = computed(() => activeCanvas());
 const selectedNode = computed(() =>
   canvas.value.nodes.find(item => item.id === canvas.value.selectedNodeId) || null
 );
+
+// 实时形状预览：改参数时向云端请求维度推导（防抖），无需本地 Agent
+const shapesMap = ref<Record<string, { output_shape?: number[] | null }>>({});
+let shapeTimer: ReturnType<typeof setTimeout> | undefined;
+
+function refreshShapes() {
+  clearTimeout(shapeTimer);
+  shapeTimer = setTimeout(async () => {
+    try {
+      const result = await validateModelStructure(getCurrentModelGraph(canvas.value));
+      shapesMap.value = result.shapes || {};
+    } catch {
+      // 预览失败不打扰用户（点"检查结构"仍会给出明确结果）
+    }
+  }, 250);
+}
+
+const liveOutputShape = computed(() => {
+  const node = selectedNode.value;
+  const shape = node ? shapesMap.value[node.id]?.output_shape : null;
+  return shape && shape.length ? shape.join("×") : "—";
+});
+
+// 选中节点变化或组件挂载时刷新一次预览
+watch(selectedNode, node => {
+  if (node) refreshShapes();
+}, { immediate: true });
 
 // 面板悬浮于画布之上：选中节点且未被手动收起时滑入，不改变画布尺寸
 const panelOpen = computed(() => Boolean(selectedNode.value) && !ui.inspectorCollapsed);
@@ -24,9 +52,12 @@ const linearShapeError = computed(
 
 function setParam(key: string, value: number | boolean) {
   if (!selectedNode.value) return;
+  recordHistory();  // 记录改参数前的状态，便于撤销
   updateNodeParam(selectedNode.value.id, key, value);
   // 节点卡片上的 note 可能变化导致高度变化，需要重绘连线
   void redrawAfterDomUpdate();
+  // 改参数后刷新实时形状预览
+  refreshShapes();
 }
 
 // 序列与高级层的参数编辑配置（与后端 model_builder 支持的参数一致）
@@ -145,8 +176,10 @@ function handleInputShapeChange(event: Event) {
     return;
   }
 
+  recordHistory();
   updateNodeParam(node.id, "shape", shape);
   void redrawAfterDomUpdate();
+  refreshShapes();
 }
 
 const inputShapeValue = computed(() => {
@@ -178,12 +211,17 @@ const inputShapeValue = computed(() => {
       </div>
 
       <div class="field-stack">
-        <ParamNumberField label="Out Channels (输出通道)" :value="selectedNode.params.out_channels" @change="setParam('out_channels', $event)" />
-        <ParamNumberField label="Kernel Size (卷积核大小)" :value="selectedNode.params.kernel_size" @change="setParam('kernel_size', $event)" />
+        <ParamNumberField label="Out Channels (输出通道)" :value="selectedNode.params.out_channels" hint="输出多少个特征图。越大能学到越丰富的特征，但更慢、更容易过拟合。" recommend="推荐 8 ~ 64" @change="setParam('out_channels', $event)" />
+        <ParamNumberField label="Kernel Size (卷积核大小)" :value="selectedNode.params.kernel_size" hint="每次看多大的局部区域（如 3 表示 3×3 窗口）。越大视野越广、输出越小。" recommend="常用 3 或 5" @change="setParam('kernel_size', $event)" />
         <div class="field-grid">
-          <ParamNumberField label="Stride" :value="selectedNode.params.stride" @change="setParam('stride', $event)" />
-          <ParamNumberField label="Padding" :value="selectedNode.params.padding" @change="setParam('padding', $event)" />
+          <ParamNumberField label="Stride" :value="selectedNode.params.stride" hint="卷积核每次移动的步长。越大输出尺寸越小。" recommend="常用 1" @change="setParam('stride', $event)" />
+          <ParamNumberField label="Padding" :value="selectedNode.params.padding" hint="在边缘补几圈 0，用来保持输出尺寸不缩得太快。" recommend="常用 0 或 1" @change="setParam('padding', $event)" />
         </div>
+      </div>
+
+      <div class="shape-preview">
+        <span>预计输出尺寸</span>
+        <strong>{{ liveOutputShape }}</strong>
       </div>
 
       <section class="info-card blue-card">
@@ -212,7 +250,12 @@ const inputShapeValue = computed(() => {
           <small>由前一层自动推导</small>
         </label>
 
-        <ParamNumberField label="Out Features 输出神经元" :value="selectedNode.params.out_features" @change="setParam('out_features', $event)" />
+        <ParamNumberField label="Out Features 输出神经元" :value="selectedNode.params.out_features" hint="这一层输出多少个数。若是最后一层，就设成分类的类别数（如 10 类手写数字设 10）。" recommend="末层 = 类别数" @change="setParam('out_features', $event)" />
+      </div>
+
+      <div class="shape-preview">
+        <span>预计输出尺寸</span>
+        <strong>{{ liveOutputShape }}</strong>
       </div>
     </div>
 
@@ -224,9 +267,14 @@ const inputShapeValue = computed(() => {
       </div>
 
       <div class="field-stack">
-        <ParamNumberField label="Kernel Size 池化核大小" :value="selectedNode.params.kernel_size" @change="setParam('kernel_size', $event)" />
-        <ParamNumberField label="Stride 步长" :value="selectedNode.params.stride" @change="setParam('stride', $event)" />
-        <ParamNumberField label="Padding 填充" :value="selectedNode.params.padding" @change="setParam('padding', $event)" />
+        <ParamNumberField label="Kernel Size 池化核大小" :value="selectedNode.params.kernel_size" hint="池化窗口大小。2 表示每 2×2 区域取一个值，把特征图缩小一半。" recommend="推荐 2" @change="setParam('kernel_size', $event)" />
+        <ParamNumberField label="Stride 步长" :value="selectedNode.params.stride" hint="窗口每次移动的步长，通常与池化核大小相同。" recommend="常用 2" @change="setParam('stride', $event)" />
+        <ParamNumberField label="Padding 填充" :value="selectedNode.params.padding" hint="边缘补零圈数，一般不用。" recommend="常用 0" @change="setParam('padding', $event)" />
+      </div>
+
+      <div class="shape-preview">
+        <span>预计输出尺寸</span>
+        <strong>{{ liveOutputShape }}</strong>
       </div>
     </div>
 

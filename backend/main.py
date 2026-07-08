@@ -6,9 +6,13 @@ M1（甘淞文）：用户 CRUD + 项目 CRUD + /auth/* 认证路由 + JWT 令�
 M3：模型校验、形状推导
 """
 
-from fastapi import Depends, FastAPI
+from typing import Any, Dict
+
+from fastapi import Body, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+from local_agent.runtime.validator import validate_model_graph
 
 from . import auth as auth_mgr
 from . import projects as project_mgr
@@ -48,6 +52,20 @@ app.add_middleware(
 def health_check():
     """返回后端服务健康状态。"""
     return {"status": "ok", "service": "Visual Deep Learning Model Builder"}
+
+
+@app.post("/validate")
+def validate_structure(payload: Dict[str, Any] = Body(...)):
+    """在云端做模型结构校验与维度推导（纯 Python，无需本地 Agent）。
+
+    结构检查、每层输出尺寸推导都在此完成，因此用户**不必先下载/运行本地 Agent**
+    即可检查模型是否正确、实时预览各层形状；训练才需要本地 Agent。
+
+    请求体：{"model": {"layers": [...], "connections": [...]}}
+    返回：{valid, errors, warnings, shapes, message}
+    """
+    model = payload.get("model", payload)
+    return validate_model_graph(model)
 
 
 app.include_router(cloud_training_router)

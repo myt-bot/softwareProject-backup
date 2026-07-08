@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, watch } from "vue";
 import { loadProjectTemplates } from "./actions";
 import { auth, initializeAuth, isLoggedIn } from "./auth";
-import { cancelPendingConnection, hideConnectionMenu, hideNodeMenu } from "./canvas";
+import { cancelPendingConnection, hideConnectionMenu, hideNodeMenu, redoGraphChange, undoGraphChange } from "./canvas";
 import { closeHelpModal, initializeBeginnerGuide, ui } from "./store";
 import ActionBar from "./components/ActionBar.vue";
 import AgentModal from "./components/AgentModal.vue";
@@ -41,6 +41,25 @@ function handleKeydown(event: KeyboardEvent) {
     ui.agentModalOpen = false;
     ui.saveModalOpen = false;
     ui.projectsModalOpen = false;
+    return;
+  }
+
+  // 撤销 / 重做（Ctrl/⌘ + Z，Ctrl/⌘ + Shift + Z 或 Ctrl + Y 重做）
+  if (!loggedIn.value) return;
+  const target = event.target as HTMLElement | null;
+  // 正在输入框里打字时不拦截，交给浏览器原生撤销
+  if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+    return;
+  }
+  const mod = event.ctrlKey || event.metaKey;
+  if (!mod) return;
+  const key = event.key.toLowerCase();
+  if (key === "z" && !event.shiftKey) {
+    event.preventDefault();
+    undoGraphChange();
+  } else if ((key === "z" && event.shiftKey) || key === "y") {
+    event.preventDefault();
+    redoGraphChange();
   }
 }
 

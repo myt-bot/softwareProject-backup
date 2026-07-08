@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { agent, showToast, store } from "../store";
+import InfoTip from "./InfoTip.vue";
 
 // 训练设备选择：CPU / GPU（cuda）。GPU 不可用时禁用并提示。
 function selectDevice(device: "cpu" | "cuda") {
@@ -20,7 +21,7 @@ function selectDevice(device: "cpu" | "cuda") {
 
 <template>
   <div class="device-pill">
-    <span class="dataset-label">设备</span>
+    <span class="dataset-label">设备 <InfoTip text="训练用 CPU 还是 GPU 计算。GPU（显卡）比 CPU 快很多，有 NVIDIA 显卡时优先用；没有 GPU 会自动用 CPU（较慢但能跑）。" /></span>
     <div class="device-toggle" title="选择训练模型时使用的计算设备">
       <button
         id="device-cpu"

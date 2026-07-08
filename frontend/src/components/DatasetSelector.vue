@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { datasetChoices, store } from "../store";
+import InfoTip from "./InfoTip.vue";
 
 const dropdownOpen = ref(false);
 const dropdownRef = ref<HTMLElement | null>(null);
@@ -29,7 +30,7 @@ onBeforeUnmount(() => document.removeEventListener("click", handleDocumentClick)
 
 <template>
   <div class="dataset-pill">
-    <span class="dataset-label">数据集</span>
+    <span class="dataset-label">数据集 <InfoTip text="用来训练模型的数据。MNIST 是手写数字（新手首选），CIFAR 是彩色小图。首次训练会自动下载所选数据集。" /></span>
 
     <!-- 圆润风格的自定义下拉菜单（向上弹出，适配底栏） -->
     <div

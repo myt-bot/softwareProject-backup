@@ -289,14 +289,27 @@ button:disabled {
   animation: pulse-dot 1.4s ease-in-out infinite;
 }
 
+/* 未连接：持续脉冲闪烁，提醒用户训练前需运行本机应用 */
 .agent-chip.offline {
   border-color: #fed7aa;
   background: #fff7ed;
   color: var(--orange);
+  animation: agent-chip-pulse 1.7s ease-in-out infinite;
+}
+
+.agent-chip.offline .agent-dot {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+@keyframes agent-chip-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5); }
+  70% { box-shadow: 0 0 0 7px rgba(245, 158, 11, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
 }
 
 .agent-chip:hover {
   filter: brightness(0.98);
+  animation: none;
 }
 
 /* 本机 Agent 指引弹窗 */
@@ -1249,6 +1262,7 @@ button:disabled {
 }
 
 .template-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -1259,6 +1273,69 @@ button:disabled {
   background: var(--panel);
   padding: 14px;
   transition: all 0.18s ease;
+}
+
+/* 推荐新手徽标 */
+.template-recommend {
+  position: absolute;
+  top: -9px;
+  right: 10px;
+  background: linear-gradient(135deg, #34d399, #10b981);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 9px;
+  border-radius: 999px;
+  box-shadow: 0 3px 8px -2px rgba(16, 185, 129, 0.5);
+}
+
+.template-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 难度标签 */
+.template-difficulty {
+  font-size: 11px;
+  font-weight: 800;
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+
+.template-difficulty.easy {
+  background: #d9f5e8;
+  color: #047857;
+}
+
+.template-difficulty.hard {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+/* 结构预览：层的流程缩略 */
+.template-structure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.template-step {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--panel-2);
+  border-radius: 5px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.template-arrow {
+  font-size: 12px;
+  color: var(--faint);
+  flex: 0 0 auto;
 }
 
 .template-card:hover {
@@ -1691,6 +1768,212 @@ button:disabled {
   color: #047857;
 }
 
+.status-badge.error {
+  background: #ffe4ea;
+  color: #be123c;
+}
+
+/* 术语/参数气泡提示（? 图标 + 悬浮说明） */
+.info-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  color: var(--faint);
+  cursor: help;
+  font-size: 13px;
+  vertical-align: middle;
+}
+
+.info-tip:hover,
+.info-tip:focus {
+  color: var(--indigo);
+  outline: none;
+}
+
+.info-tip-bubble {
+  position: absolute;
+  bottom: calc(100% + 9px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  width: max-content;
+  max-width: 250px;
+  background: #1f2a44;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.65;
+  padding: 8px 11px;
+  border-radius: 9px;
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 2000;
+  white-space: normal;
+  text-align: left;
+}
+
+.info-tip:hover .info-tip-bubble,
+.info-tip:focus .info-tip-bubble {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+.info-tip-bubble::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #1f2a44;
+}
+
+/* 参数推荐范围小字 */
+.param-recommend {
+  color: var(--faint);
+  font-size: 11px;
+}
+
+/* 实时输出尺寸预览 */
+.shape-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 4px 0 2px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: #ecfeff;
+  border: 1px solid #a5f3fc;
+}
+
+.shape-preview span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.shape-preview strong {
+  font-size: 14px;
+  color: var(--cyan);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+/* 出错节点上的人话提示（红色） */
+.node-error-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--rose);
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+
+.node-error-msg iconify-icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  font-size: 14px;
+}
+
+/* 节点输出端口：白底蓝环锚点，悬浮节点时才优雅显现，按住拖到另一节点即可连线 */
+.node-port {
+  position: absolute;
+  bottom: -9px;
+  left: 50%;
+  transform: translateX(-50%) scale(0.6);
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #fff;
+  border: 2px solid var(--indigo);
+  color: var(--indigo);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  cursor: crosshair;
+  box-shadow: 0 2px 5px rgba(14, 165, 233, 0.25);
+  opacity: 0;
+  transition: opacity 0.18s ease, transform 0.14s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.14s ease, color 0.14s ease;
+  z-index: 12;
+}
+
+.node-card:hover .node-port {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+
+.node-port-out:hover {
+  transform: translateX(-50%) scale(1.25);
+  background: var(--indigo);
+  color: #fff;
+  box-shadow: 0 4px 11px rgba(14, 165, 233, 0.45);
+}
+
+/* 顶部输入锚点：与底部输出端口对称，纯视觉接入点（不参与拖拽） */
+.node-port-in {
+  top: -9px;
+  bottom: auto;
+  cursor: default;
+  pointer-events: none;
+}
+
+.node-port-in::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--indigo);
+}
+
+/* 正在拖拽连线时，所有端口保持可见，便于看清从哪连出 */
+body.is-connecting .node-port {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+
+/* 空画布引导态 */
+.canvas-empty-hint {
+  position: absolute;
+  top: 42%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: var(--muted);
+  pointer-events: none;
+  z-index: 5;
+  max-width: 440px;
+  padding: 0 20px;
+}
+
+.canvas-empty-hint > iconify-icon {
+  font-size: 54px;
+  color: var(--faint);
+}
+
+.canvas-empty-hint h3 {
+  margin: 10px 0 8px;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.canvas-empty-hint p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 2;
+}
+
+.canvas-empty-hint b {
+  color: var(--indigo);
+}
+
 .node-card h4 {
   margin: 0 0 12px;
   font-size: 15px;
@@ -1745,6 +2028,29 @@ button:disabled {
 .line-selected {
   stroke: var(--indigo);
   stroke-width: 3.5;
+}
+
+/* 结构校验通过：连线变成"数据通路"——浅色管道 + 在管道里流动的亮色数据段 + 末端箭头 */
+.line-flow-track {
+  stroke: #a7f3d0;          /* 浅绿管道（静态轨道） */
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+.line-flow-dash {
+  fill: none;
+  stroke: #10b981;          /* 亮绿数据段 */
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: 9 20;   /* 短亮段 + 长间隔 = 一节节数据 */
+  animation: line-flow-move 0.9s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes line-flow-move {
+  to {
+    stroke-dashoffset: -29;  /* 移动一个 dash+gap 周期，无缝循环 */
+  }
 }
 
 .line-jump-gap {
@@ -2208,23 +2514,26 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   padding: 0 24px;
   position: relative;
   z-index: 50;
   box-shadow: 0 -1px 8px rgba(35, 48, 74, 0.05);
 }
 
+/* 监控卡所在的左侧：优先收缩，避免把右侧按钮挤重叠 */
 .actionbar-left {
   min-width: 0;
-  flex: 0 1 auto;
+  flex: 0 1 320px;
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
 .training-job-panel {
-  width: 340px;
-  min-width: 240px;
+  width: 100%;
+  max-width: 320px;
+  min-width: 0;
   min-height: 48px;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -2356,6 +2665,122 @@ button:disabled {
   width: 1px;
   height: 32px;
   background: var(--border);
+}
+
+/* 「先检查结构」按钮的注意力脉冲（有模型但未校验时） */
+.attention-pulse {
+  border-color: var(--indigo) !important;
+  color: var(--indigo) !important;
+  animation: attention-pulse-ring 1.5s ease-in-out infinite;
+}
+
+@keyframes attention-pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(14, 165, 233, 0.45); }
+  70% { box-shadow: 0 0 0 8px rgba(14, 165, 233, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(14, 165, 233, 0); }
+}
+
+/* 训练需运行本机应用的提醒（校验通过但 Agent 未连接） */
+.train-agent-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--orange);
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  padding: 7px 13px;
+  white-space: nowrap;
+  animation: attention-pulse-ring-orange 1.6s ease-in-out infinite;
+}
+
+.train-agent-hint:hover {
+  background: #ffedd5;
+}
+
+@keyframes attention-pulse-ring-orange {
+  0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+  70% { box-shadow: 0 0 0 7px rgba(245, 158, 11, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+
+/* 「更多」下拉菜单（向上弹出） */
+.more-menu-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+#btn-more .more-caret {
+  font-size: 14px;
+  transition: transform 0.2s ease;
+}
+
+#btn-more.active {
+  border-color: var(--indigo);
+  color: var(--indigo);
+}
+
+#btn-more.active .more-caret {
+  transform: rotate(180deg);
+}
+
+.more-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 156px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(6px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+  z-index: 100;
+}
+
+.more-menu.open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.more-menu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 9px 11px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.more-menu button:hover {
+  background: var(--panel-2);
+  color: var(--indigo);
+}
+
+.more-menu button iconify-icon {
+  font-size: 17px;
+  color: var(--muted);
+}
+
+.more-menu button:hover iconify-icon {
+  color: var(--indigo);
 }
 
 /* 训练区：浅蓝容器把「数据集·设备·轮次·开始训练」聚成一块，引导新手 */

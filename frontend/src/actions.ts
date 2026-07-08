@@ -12,9 +12,10 @@ import {
   isBackendNotImplemented,
   listProjects,
   startTraining,
+  validateModelStructure,
 } from "./api/client";
 import { auth, isLoggedIn } from "./auth";
-import { addCanvas, applyTemplateGraph } from "./canvas";
+import { addCanvas, applyTemplateGraph, drawLines } from "./canvas";
 import { openTrainingMonitor } from "./monitor";
 import {
   activeCanvas,
@@ -87,27 +88,24 @@ export async function handleValidateModel() {
   const canvas = activeCanvas();
   if (canvas.validating) return;
 
-  // 结构校验由本机 Agent 的训练运行时执行（云端不含 PyTorch）
-  if (!agent.online) {
-    showToast("warning", "结构校验需要本机训练 Agent，请先启动本地 Agent。");
-    ui.agentModalOpen = true;
-    return;
-  }
-
+  // 结构校验与维度推导在云端完成，无需本地 Agent（训练才需要 Agent）
   canvas.validating = true;
   try {
-    const result = await requestAgent<ValidationResult>("validate", { model: getCurrentModelGraph(canvas) });
+    const result = await validateModelStructure(getCurrentModelGraph(canvas));
     applyValidationResult(canvas, result);
   } catch (error) {
     showToast("error", (error as Error)?.message || "结构校验失败。");
     canvas.validationStatus = "unvalidated";
   } finally {
     canvas.validating = false;
+    // 重绘连线：校验通过则显示数据流向动画，否则清除
+    drawLines();
   }
 }
 
 
 function applyValidationResult(canvas: WorkCanvas, result: ValidationResult) {
+  canvas.nodeErrors = {};
   const valid = result?.valid === true || result?.status === "ok";
   if (valid) {
     canvas.validationStatus = "passing";
@@ -119,7 +117,53 @@ function applyValidationResult(canvas: WorkCanvas, result: ValidationResult) {
 
   canvas.validationStatus = "failed";
   canvas.nodeBadge = "pending";
-  showToast("error", `${canvas.name} ${result?.message || "结构校验失败"}`);
+
+  // 把每个出错节点标红并给人话提示（用节点标题而非内部 id），实现"定位"
+  const nodeErrors: Record<string, string> = {};
+  const shapes = result?.shapes || {};
+  for (const [layerId, info] of Object.entries(shapes)) {
+    if (info?.status && info.status !== "ok") {
+      const node = canvas.nodes.find(n => n.id === layerId);
+      nodeErrors[layerId] = friendlyShapeError(node?.title || layerId, info);
+    }
+  }
+  canvas.nodeErrors = nodeErrors;
+
+  const errorNodeIds = Object.keys(nodeErrors);
+  if (errorNodeIds.length > 0) {
+    // 选中并聚焦第一个出错节点，方便用户直接看到
+    const firstMsg = nodeErrors[errorNodeIds[0]!]!;
+    showToast("error", `结构有问题：${firstMsg}（出错的层已在画布上标红）`);
+    return;
+  }
+
+  // 没有具体到某一层的错误（如缺少 Input/Output、节点未连通）：给整体的人话提示
+  showToast("error", `${canvas.name}：${friendlyGraphError(result)}`);
+}
+
+
+// 把维度类错误翻译成初学者能懂的话（引用节点标题，给可操作建议）
+function friendlyShapeError(nodeTitle: string, info: { layer_type?: string; actual_in_features?: number; expected_in_features?: number }): string {
+  if (info.layer_type === "Linear" && info.actual_in_features != null) {
+    return `「${nodeTitle}」全连接层输入维度对不上：上一层实际输出 ${info.actual_in_features} 个特征，但这里设定的输入是 ${info.expected_in_features}。把该层的“输入特征数”改成 ${info.actual_in_features}，或调整它前面的层。`;
+  }
+  return `「${nodeTitle}」这一层的输出尺寸算不出来，请检查它的参数，或它前面的连接是否接对了。`;
+}
+
+
+// 把整体结构错误（缺节点/未连通等）翻译成人话
+function friendlyGraphError(result: ValidationResult): string {
+  const first = (result?.errors && result.errors[0]) || result?.message || "结构校验没通过";
+  if (first.includes("缺少必要节点") && first.includes("Input")) {
+    return "模型缺少输入节点：请先从左侧拖一个「Input」层进来。";
+  }
+  if (first.includes("缺少必要节点") && first.includes("Output")) {
+    return "模型缺少输出节点：请加一个「Output」层作为结尾。";
+  }
+  if (first.includes("未连通") || first.includes("连接") || first.includes("孤立") || first.includes("环")) {
+    return "各层还没连成一条通路：请检查是否有节点没连线，从 Input 一路连到 Output。";
+  }
+  return first;
 }
 
 

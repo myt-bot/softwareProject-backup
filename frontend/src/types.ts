@@ -28,6 +28,8 @@ export interface LayerPaletteItem {
   desc: string;
   icon: string;
   color: string;
+  // 悬浮时给新手看的"是什么/何时用"大白话说明
+  hint?: string;
 }
 
 export interface LayerGroup {
@@ -69,10 +71,22 @@ export interface TrainConfig {
   artifacts_dir?: string;
 }
 
+export interface LayerShapeInfo {
+  status?: string;
+  layer_type?: string;
+  input_shape?: number[] | null;
+  output_shape?: number[] | null;
+  expected_in_features?: number;
+  actual_in_features?: number;
+}
+
 export interface ValidationResult {
   valid?: boolean;
   status?: string;
   message?: string;
+  errors?: string[];
+  warnings?: string[];
+  shapes?: Record<string, LayerShapeInfo>;
 }
 
 export interface EpochMetrics {

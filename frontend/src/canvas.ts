@@ -193,6 +193,7 @@ export function drawLines() {
   if (!svgEl) return;
   const svg = svgEl;
   svg.innerHTML = "";
+  const flowingAll = activeCanvas().validationStatus === "passing";
   const renderedConnectors: Connector[] = [];
   const hitPaths: SVGPathElement[] = [];
   const bridges: Bridge[] = [];
@@ -210,9 +211,12 @@ export function drawLines() {
     const hitPath = document.createElementNS(SVG_NS, "path");
 
     visiblePath.setAttribute("d", connector.d);
+    // 结构校验通过后：连线变成"数据通路"——浅色管道 + 末端箭头，
+    // 再叠加一条流动的亮色虚线，营造数据在管道里移动的感觉。
+    const isSelected = activeCanvas().selectedConnectionKey === connector.key;
     visiblePath.setAttribute(
       "class",
-      `line-connector${activeCanvas().selectedConnectionKey === connector.key ? " line-selected" : ""}`
+      `line-connector${isSelected ? " line-selected" : ""}${flowingAll ? " line-flow-track" : ""}`
     );
     visiblePath.dataset.from = from;
     visiblePath.dataset.to = to;
@@ -236,6 +240,13 @@ export function drawLines() {
     });
 
     group.appendChild(visiblePath);
+    // 流动的亮色数据段叠在管道之上（营造数据在通路里移动的感觉）
+    if (flowingAll) {
+      const flowPath = document.createElementNS(SVG_NS, "path");
+      flowPath.setAttribute("d", connector.d);
+      flowPath.setAttribute("class", "line-flow-dash");
+      group.appendChild(flowPath);
+    }
     svg.appendChild(group);
     hitPaths.push(hitPath);
     renderedConnectors.push(connector);
@@ -251,6 +262,87 @@ export function drawLines() {
 export async function redrawAfterDomUpdate() {
   await nextTick();
   drawLines();
+}
+
+
+// —————————————————————————————————————————————
+// 撤销 / 重做（每个画布独立的历史栈）
+// —————————————————————————————————————————————
+
+interface GraphSnapshot {
+  nodes: GraphNode[];
+  connections: Connection[];
+  edgeControls: Record<string, Point>;
+  nodeCounters: Record<string, number>;
+}
+
+const historyMap = new Map<number, { undo: GraphSnapshot[]; redo: GraphSnapshot[] }>();
+const HISTORY_LIMIT = 60;
+
+function getHistory(canvasId: number) {
+  let entry = historyMap.get(canvasId);
+  if (!entry) {
+    entry = { undo: [], redo: [] };
+    historyMap.set(canvasId, entry);
+  }
+  return entry;
+}
+
+function takeSnapshot(): GraphSnapshot {
+  const canvas = activeCanvas();
+  return {
+    nodes: canvas.nodes.map(node => ({ ...node, params: { ...node.params } })),
+    connections: canvas.connections.map(conn => [...conn] as Connection),
+    edgeControls: Object.fromEntries(
+      Object.entries(canvas.edgeControls).map(([key, point]) => [key, { ...point }])
+    ),
+    nodeCounters: { ...canvas.nodeCounters },
+  };
+}
+
+// 在任何改图操作"之前"调用：把当前状态压入撤销栈，并清空重做栈
+export function recordHistory() {
+  const canvas = activeCanvas();
+  const history = getHistory(canvas.id);
+  history.undo.push(takeSnapshot());
+  if (history.undo.length > HISTORY_LIMIT) history.undo.shift();
+  history.redo = [];
+}
+
+function applySnapshot(snapshot: GraphSnapshot) {
+  const canvas = activeCanvas();
+  canvas.nodes = snapshot.nodes.map(node => ({ ...node, params: { ...node.params } }));
+  canvas.connections = snapshot.connections.map(conn => [...conn] as Connection);
+  canvas.edgeControls = Object.fromEntries(
+    Object.entries(snapshot.edgeControls).map(([key, point]) => [key, { ...point }])
+  );
+  canvas.nodeCounters = { ...snapshot.nodeCounters };
+  canvas.selectedNodeId = null;
+  canvas.selectedConnectionKey = null;
+  resetValidationAfterGraphChange(canvas);
+  void redrawAfterDomUpdate();
+}
+
+export function undoGraphChange() {
+  const canvas = activeCanvas();
+  const history = getHistory(canvas.id);
+  if (!history.undo.length) {
+    showToast("info", "没有可撤销的操作了。");
+    return;
+  }
+  history.redo.push(takeSnapshot());
+  applySnapshot(history.undo.pop()!);
+}
+
+export function redoGraphChange() {
+  const canvas = activeCanvas();
+  const history = getHistory(canvas.id);
+  if (!history.redo.length) {
+    showToast("info", "没有可重做的操作了。");
+    return;
+  }
+  history.undo.push(takeSnapshot());
+  applySnapshot(history.redo.pop()!);
 }
 
 
@@ -623,6 +715,7 @@ function getDefaultEdgeControlPoint(connector: Connector): Point {
 
 
 function startEdgeControlDrag(connectionKey: string) {
+  recordHistory();  // 记录弯折前的控制点，便于撤销
   store.draggingEdgeControlKey = connectionKey;
   store.suppressNextClick = true;
   document.body.classList.add("is-edge-control-dragging");
@@ -844,6 +937,17 @@ export function handleDocumentMouseMove(event: MouseEvent) {
 export function handleDocumentMouseUp() {
   dragCandidate = null;
 
+  // 端口拖拽连线：在目标节点上松开即完成，否则取消
+  if (store.isConnecting && store.connectingByDrag) {
+    const target = store.connectTargetId;
+    if (target) {
+      completeConnection(target);
+    }
+    cancelPendingConnection();
+    store.suppressNextClick = true;
+    return;
+  }
+
   if (panState) {
     // 拖动过画布则吞掉随后的 click，避免误触发"取消选中"
     if (panState.moved) {
@@ -866,6 +970,7 @@ export function handleDocumentMouseUp() {
 
 
 function startNodeDrag(nodeId: string) {
+  recordHistory();  // 记录移动前位置，便于撤销
   store.draggingNodeId = nodeId;
   store.suppressNextClick = true;
   document.body.classList.add("is-node-dragging");
@@ -910,6 +1015,19 @@ export function beginConnection(sourceId: string, clientX: number, clientY: numb
   createPendingConnection();
   updatePendingConnection(clientX, clientY);
   showToast("info", "已进入连线模式，点击目标节点即可连线。");
+}
+
+
+// 从节点底部端口按住拖拽连线：更直观，松开在目标节点上即完成
+export function beginConnectionDrag(sourceId: string, clientX: number, clientY: number) {
+  store.isConnecting = true;
+  store.connectingByDrag = true;
+  store.connectSourceId = sourceId;
+  store.connectTargetId = null;
+  store.suppressNextClick = false;
+  document.body.classList.add("is-connecting");
+  createPendingConnection();
+  updatePendingConnection(clientX, clientY);
 }
 
 
@@ -959,6 +1077,7 @@ export function completeConnection(targetId: string) {
     return;
   }
 
+  recordHistory();
   activeCanvas().connections.push([sourceId, targetId]);
   resetValidationAfterGraphChange();
   drawLines();
@@ -968,6 +1087,7 @@ export function completeConnection(targetId: string) {
 
 export function cancelPendingConnection() {
   store.isConnecting = false;
+  store.connectingByDrag = false;
   store.connectSourceId = null;
   store.connectTargetId = null;
   pendingConnection?.remove();
@@ -1021,6 +1141,7 @@ export function deleteMenuNode(event: Event) {
   const nodeId = store.menuNodeId;
   if (!nodeId) return;
 
+  recordHistory();
   activeCanvas().nodes = activeCanvas().nodes.filter(node => node.id !== nodeId);
   activeCanvas().connections = activeCanvas().connections.filter(([source, target]) => source !== nodeId && target !== nodeId);
   removeEdgeControlsForNode(nodeId);
@@ -1043,6 +1164,7 @@ export function deleteMenuConnection(event: Event) {
   if (!store.menuConnection) return;
 
   const [from, to] = store.menuConnection;
+  recordHistory();
   activeCanvas().connections = activeCanvas().connections.filter(([source, target]) => !(source === from && target === to));
   removeEdgeControl(from, to);
   store.menuConnection = null;
@@ -1133,6 +1255,7 @@ function setZoomAroundViewportCenter(newZoom: number) {
 // —————————————————————————————————————————————
 
 export function addNodeFromLayer(layerType: string, x: number, y: number) {
+  recordHistory();
   const node = createNodeConfig(layerType, x, y);
   activeCanvas().nodes.push(node);
   void redrawAfterDomUpdate();
@@ -1168,6 +1291,7 @@ function createNodeConfig(layerType: string, x: number, y: number): GraphNode {
 
 
 export function applyTemplateGraph(modelGraph: ModelGraph) {
+  recordHistory();
   const centeredX = Math.max(40, ((canvasEl?.clientWidth || 0) - 224) / 2);
 
   activeCanvas().nodes = modelGraph.layers.map((layer, index) => {
