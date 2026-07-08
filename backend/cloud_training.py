@@ -110,39 +110,74 @@ _BUILD_GUIDE = """\
 ✅ 正确方式：内置一份独立 CPython {py}.x + 启动脚本（只有一个 Python，不打架，含 tkinter）。
    版本必须是 {py}.x —— 与本包 .pyc 同小版本！用 3.13/3.14 会加载不了 .pyc、DLL 冲突。
 
-目录结构（整个文件夹打成 zip 发给用户，就是一个下载）：
+┌─ 角色区分（重要，别混）─────────────────────────────────────────┐
+│ · 分发者（你）：只做一次——放入独立 Python、打包、放到服务器发布目录。  │
+│ · 最终用户（新手）：下载你打好的包 → 解压 → 双击「启动.bat」→ 界面里填令牌。│
+│   用户全程不装 Python、不下载 Python、不改任何文件。                   │
+└──────────────────────────────────────────────────────────────┘
+
+本压缩包里已经有 launcher.py、local_agent/（.pyc）、启动.bat、启动.command、
+config.json，以及一个空的 python/ 文件夹（含放置说明）。你只需补上 python/ 的内容再打包。
+
+═══ 分发者：组装共用包（做一次）═══
+
+【第 1 步】下载独立 Python（务必 {py}.x！）
+  到 github.com/astral-sh/python-build-standalone 的 Releases，下载
+    cpython-{py}.*+*-x86_64-pc-windows-msvc-install_only.tar.gz  （Windows x64）
+  ⚠️ 一定认准 {py}，不要 3.13/3.14 —— 版本不符会加载不了 .pyc、报 DLL/Tcl 冲突。
+
+【第 2 步】把它放进 python/
+  解压后得到一个含 python.exe、pythonw.exe 的目录，把其中全部内容复制进本包的
+  python/ 文件夹，使存在  python/python.exe  和  python/pythonw.exe 。
+  （可删掉 python/ 里那个“把独立Python解压到这里.txt”说明文件。）
+
+【第 3 步】删除 config.json（关键！）
+  本包里的 config.json 含的是「你自己下载时的令牌」。共用包若保留它，所有用户都会用
+  你的账号登录！所以组装共用包时请删掉 config.json —— 令牌改由每个用户在应用界面里
+  自行填写（这也正是“不外置 config”的设计）。
+
+【第 4 步】打包成 zip
+  把整个 VisualDL-Agent/ 文件夹打成  VisualDL-Agent.zip 。
+
+【第 5 步】放到服务器发布目录
+  把 VisualDL-Agent.zip 放到  backend/agent_dist/windows/ （macOS 放 macos/、Linux 放 linux/）。
+  之后网页「下载本机训练应用」就会把这个完整包原样发给所有用户（零安装）。
+  ——放之前，网页发的是没有 python/ 的半成品，只适合你自己组装、不能直接给用户。
+
+组装完成后的目录结构：
   VisualDL-Agent/
     python/            ← 独立 CPython {py}.x（含 python.exe、pythonw.exe、tkinter）
-    local_agent/       ← 本包内的 .pyc（{py}.x 编译）
-    launcher.py        ← 本包内的启动器
-    config.json        ← 本包内的（可选，含令牌；也可在界面里填令牌）
-    启动.bat           ← 双击它即可（见下）
+    local_agent/       ← .pyc（{py}.x 编译）
+    launcher.py
+    启动.bat  /  启动.command
+    （不含 config.json —— 令牌在界面里填）
 
-启动.bat 内容（Windows，用 pythonw 无黑框）：
+启动.bat 内容（本包已自带，无需手写；用 pythonw 无黑框）：
     @echo off
     cd /d "%~dp0"
     start "" "%~dp0python\\pythonw.exe" "%~dp0launcher.py"
 
-步骤（在 Windows 上做一次）：
-1. 到 github.com/astral-sh/python-build-standalone 的 Releases，下载
-   cpython-{py}.* + x86_64-pc-windows-msvc + install_only 的包（认准 {py}，别选 3.13/3.14）；
-   解压得到含 python.exe 的目录，改名为 python/ 放进 VisualDL-Agent/
-   （确保有 python/python.exe 和 python/pythonw.exe）。
-2. 把本包的 local_agent/、launcher.py、config.json 和上面的 启动.bat 放进 VisualDL-Agent/。
-3. 整个 VisualDL-Agent/ 打成 zip，发给用户。
+═══ 最终用户：怎么用 ═══
+下载完整包 → 解压 → 双击「启动.bat」（macOS/Linux 双击「启动.command」）→ 弹出界面 →
+把网页「本机训练应用」弹窗里的登录令牌粘进界面 → 点「准备训练环境」（首次下载 PyTorch
+等依赖，较慢、只需一次）→ 点「启动并连接云端」→ 网页顶部显示「本机训练已连接」。
+全程不装 Python、不改任何文件。
 
-用户用法：解压 zip → 双击「启动.bat」→ 弹出界面 → 点「准备训练环境」
-（首次装 torch，较慢、只需一次）→ 顶栏显示「本机训练已连接」。全程不用装 Python。
+═══ 想要「单文件」下载（可选）═══
+把组装好的文件夹用 Inno Setup 做成安装程序 Setup.exe（安装 + 建桌面快捷方式），或用
+7-Zip 做自解压 exe。都不要用 PyInstaller（会塞第二个 Python 导致上面说的冲突）。
 
-想要一个单文件下载：把上面的文件夹用 Inno Setup 做成安装程序 Setup.exe（安装到用户
-目录并建桌面快捷方式），或用 7-Zip 做自解压包。不要用 PyInstaller。
-
-macOS / Linux：python/ 换成对应平台的独立 Python，启动脚本用
+═══ macOS / Linux ═══
+python/ 换成对应平台的 install_only 独立 Python（{py}.x）；用自带的 启动.command：
     #!/bin/sh
     cd "$(dirname "$0")"
     exec ./python/bin/python3 launcher.py
 
-排查：启动器会把日志写到 visualdl_runtime/launcher.log；子进程已设为不弹黑窗。
+═══ 排查 ═══
+启动器日志在  visualdl_runtime/launcher.log ；子进程已设为不弹黑窗。
+· 界面报 “Tcl 版本冲突 / init.tcl”、或 Agent 报 “Module use of pythonXX.dll conflicts”
+  → 几乎都是用了 PyInstaller、或独立 Python 版本不是 {py}。按上面纠正即可。
+· 双击 启动.bat 一闪而过 → 多半是 python/ 没放对（缺 python/pythonw.exe）或版本不对。
 """
 
 
