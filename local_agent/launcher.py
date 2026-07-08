@@ -316,7 +316,7 @@ def run_gui(config: dict) -> None:
     # 令牌 / 服务器地址（界面内更新令牌）
     form = tk.Frame(root, bg=C_BG)
     form.pack(fill="x", padx=20, pady=6)
-    tk.Label(form, text="登录令牌（从网页「本机训练应用」弹窗复制，失效时在此更新）",
+    tk.Label(form, text="登录令牌（从网页「本机训练应用」弹窗复制粘贴到这里；失效时也在此更新，无需改任何配置文件）",
              font=("Microsoft YaHei", 9), fg=C_MUTED, bg=C_BG).pack(anchor="w")
     token_var = tk.StringVar(value=config.get("token", ""))
     token_entry = tk.Entry(form, textvariable=token_var, font=("Consolas", 9), show="•")
@@ -331,13 +331,19 @@ def run_gui(config: dict) -> None:
     tk.Label(root, textvariable=status_var, font=("Microsoft YaHei", 10, "bold"),
              fg=C_TEXT, bg=C_BG, anchor="w").pack(fill="x", padx=20, pady=(8, 4))
 
-    # 主按钮 + 保存令牌
+    # 按钮区：准备训练环境（有环境则灰显）｜ 启动并连接 ｜ 保存令牌
     btns = tk.Frame(root, bg=C_BG)
     btns.pack(fill="x", padx=20)
-    action_btn = tk.Button(btns, text="", font=("Microsoft YaHei", 11, "bold"),
-                           bg=C_BLUE, fg="white", activebackground="#0284c7",
-                           activeforeground="white", relief="flat", cursor="hand2", pady=8)
-    action_btn.pack(side="left", fill="x", expand=True)
+    prepare_btn = tk.Button(btns, text="", font=("Microsoft YaHei", 10, "bold"),
+                            bg="#e2e8f0", fg=C_TEXT, activebackground="#cbd5e1",
+                            relief="flat", cursor="hand2", pady=8,
+                            disabledforeground="#94a3b8")
+    prepare_btn.pack(side="left", fill="x", expand=True)
+    connect_btn = tk.Button(btns, text="启动并连接云端", font=("Microsoft YaHei", 11, "bold"),
+                            bg=C_BLUE, fg="white", activebackground="#0284c7",
+                            activeforeground="white", relief="flat", cursor="hand2", pady=8,
+                            disabledforeground="#cbd5e1")
+    connect_btn.pack(side="left", fill="x", expand=True, padx=(10, 0))
     save_btn = tk.Button(btns, text="保存令牌", font=("Microsoft YaHei", 10),
                          relief="flat", cursor="hand2", pady=8, padx=12)
     save_btn.pack(side="left", padx=(10, 0))
@@ -358,21 +364,26 @@ def run_gui(config: dict) -> None:
     def set_status(text: str) -> None:
         root.after(0, lambda: status_var.set(text))
 
-    def set_action(text: str, enabled: bool) -> None:
-        root.after(0, lambda: action_btn.config(text=text, state=("normal" if enabled else "disabled")))
+    def _set_btn(btn, text: str, enabled: bool) -> None:
+        root.after(0, lambda: btn.config(
+            text=text, state=("normal" if enabled else "disabled"),
+            cursor=("hand2" if enabled else "arrow")))
 
     def refresh_idle() -> None:
+        """按当前状态刷新两个按钮：有环境时「准备」灰显，无环境时「连接」灰显。"""
         if ui["busy"] or ui["connected"]:
             return
-        if not token_var.get().strip():
-            set_status("请先粘贴登录令牌")
-            set_action("请先填写令牌", False)
-        elif is_venv_ready():
-            set_status("环境就绪，点击即可连接")
-            set_action("启动并连接云端", True)
+        ready = is_venv_ready()
+        has_token = bool(token_var.get().strip())
+        if ready:
+            _set_btn(prepare_btn, "训练环境已就绪 ✓", False)          # 检测到环境 → 灰显
+            _set_btn(connect_btn, "启动并连接云端" if has_token else "请先填写令牌", has_token)
+            set_status("环境已就绪，点「启动并连接云端」" if has_token
+                       else "环境已就绪，请先在上方粘贴登录令牌")
         else:
-            set_status(f"首次使用需准备训练环境：约需下载 {_deps_size_text()} 依赖（含 PyTorch，只需一次）")
-            set_action(f"准备训练环境并连接（首次下载{_deps_size_text()}）", True)
+            _set_btn(prepare_btn, f"准备训练环境（首次下载{_deps_size_text()}）", True)
+            _set_btn(connect_btn, "请先准备训练环境", False)          # 无环境 → 连接灰显
+            set_status(f"首次使用：点「准备训练环境」下载依赖（约 {_deps_size_text()}，含 PyTorch，只需一次）")
 
     def on_save() -> None:
         t = token_var.get().strip()
@@ -381,38 +392,42 @@ def run_gui(config: dict) -> None:
             messagebox.showwarning("提示", "请先粘贴令牌。")
             return
         save_config(s, t)
-        log("[启动器] 令牌已保存。")
+        log("[启动器] 令牌已保存到本应用（无需外部配置文件）。")
         refresh_idle()
 
-    def worker() -> None:
-        s = server_var.get().strip() or DEFAULT_SERVER
-        t = token_var.get().strip()
-        if not t:
-            ui["busy"] = False
-            set_status("缺少令牌")
-            refresh_idle()
-            return
-        save_config(s, t)
+    def prepare_worker() -> None:
         try:
-            if not is_venv_ready():
-                set_status("正在准备训练环境（首次较慢）...")
-                create_environment(log=log)
+            set_status("正在准备训练环境（首次较慢，请保持网络畅通）...")
+            create_environment(log=log)
+            set_status("✅ 训练环境准备完成，现在可以「启动并连接云端」了")
         except Exception as exc:  # noqa: BLE001
             log(f"[启动器] 环境准备失败：{exc}")
             set_status("环境准备失败，请重试")
-            ui["busy"] = False
-            set_action("重试准备环境并连接", True)
-            return
+        ui["busy"] = False
+        refresh_idle()
 
+    def on_prepare() -> None:
+        if ui["busy"] or is_venv_ready():
+            return
+        # 装环境本身不需要令牌；顺手保存当前填写，便于随后连接
+        save_config(server_var.get().strip() or DEFAULT_SERVER, token_var.get().strip())
+        ui["busy"] = True
+        _set_btn(prepare_btn, "正在下载安装 ...", False)
+        _set_btn(connect_btn, "请稍候 ...", False)
+        threading.Thread(target=prepare_worker, daemon=True).start()
+
+    def connect_worker() -> None:
+        s = server_var.get().strip() or DEFAULT_SERVER
+        t = token_var.get().strip()
+        save_config(s, t)
         set_status("正在连接云端 ...")
-        set_action("连接中 ...", False)
         try:
             proc = start_agent_process(s, t)
         except Exception as exc:  # noqa: BLE001
             log(f"[启动器] 启动失败：{exc}")
             ui["busy"] = False
             set_status("启动失败")
-            set_action("重试", True)
+            refresh_idle()
             return
         ui["proc"] = proc
         for line in proc.stdout:
@@ -423,22 +438,27 @@ def run_gui(config: dict) -> None:
                 set_status("✅ 已连接云端，回到网页即可训练")
             elif "403" in line:
                 ui["connected"] = False
-                set_status("❌ 令牌无效/已失效：请在上方更新令牌后点“保存令牌”再重试")
+                set_status("❌ 令牌无效/已失效：请在上方更新令牌后点「保存令牌」再启动")
         ui["busy"] = False
         ui["connected"] = False
         set_status("连接已结束")
         refresh_idle()
 
-    def on_action() -> None:
+    def on_connect() -> None:
         if ui["busy"]:
             return
         if not token_var.get().strip():
             messagebox.showwarning("提示", "请先粘贴令牌。")
             return
+        if not is_venv_ready():
+            messagebox.showinfo("提示", "请先点「准备训练环境」下载依赖。")
+            return
         ui["busy"] = True
-        threading.Thread(target=worker, daemon=True).start()
+        _set_btn(connect_btn, "连接中 ...", False)
+        threading.Thread(target=connect_worker, daemon=True).start()
 
-    action_btn.config(command=on_action)
+    prepare_btn.config(command=on_prepare)
+    connect_btn.config(command=on_connect)
     save_btn.config(command=on_save)
     token_var.trace_add("write", lambda *a: refresh_idle())
     refresh_idle()

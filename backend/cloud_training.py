@@ -58,27 +58,42 @@ _AGENT_README = """\
 VisualDL 本机训练应用
 ======================
 
-这是运行在你自己电脑上的训练程序。系统的训练在本机进行（可用 GPU 加速），
+这是运行在你自己电脑上的训练程序。训练在本机进行（可用 GPU 加速），
 云端只负责界面、登录和任务中转。
 
-首次打开会自动准备训练环境（创建一个专属虚拟环境并安装 PyTorch 等依赖，
-首次较慢、只需一次），之后每次打开都会直接连接云端。已连接后，网页顶部会
-显示「本机训练已连接」，即可进行结构校验、训练与代码导出。
+【怎么用】
+1. 本文件夹里有个 python\\ 子文件夹，按其中说明把「独立 Python {py}」解压进去
+   （只需一次；若给你这个包的人已放好，可跳过这步）。
+2. Windows 双击「启动.bat」；macOS/Linux 双击「启动.command」。
+3. 弹出界面后：登录令牌通常已自动填好（随包绑定你的账号）。点「准备训练环境」
+   下载依赖（首次含 PyTorch，较慢、只需一次），再点「启动并连接云端」。
+4. 连接成功后网页顶部会显示「本机训练已连接」，即可校验结构、训练、导出代码。
 
-—— 已打包为单文件应用（推荐）——
-直接双击可执行文件（Windows 为 .exe、macOS 为 .app、Linux 为可执行文件）即可，
-无需安装 Python。应用内已内置令牌，会自动绑定到你的账号并连接云端。
+【关于令牌】在应用界面里查看 / 更新即可，无需改任何配置文件。失效时回网页
+重新复制令牌，粘进界面点「保存令牌」再启动。
 
-—— 用源码直接运行（开发/进阶）——
-本包已内置令牌（config.json）。在含 launcher.py 的目录下执行：
+【给分发者】把这个文件夹打包成给别人用的应用（含内置 Python，双击即用）：见 build_app.md。
 
-       python launcher.py
+提示：本应用已绑定你的账号，请勿把带令牌的包分享给他人。
+"""
 
-即会自动创建虚拟环境、安装依赖并启动。（此方式需要本机已装 Python {py}。）
 
-如何打包成单文件应用：见 build_app.md。
+# python/ 子目录里的占位说明：指导用户放入独立 Python，组装成可直接运行的包
+_PYTHON_PLACEHOLDER = """\
+这个 python 文件夹要放「独立 Python {py}」，放好后本应用就能双击运行、无需安装 Python。
 
-提示：本应用已绑定你的账号（config.json 内含登录令牌），请勿分享给他人。
+步骤（Windows）：
+1. 打开 github.com/astral-sh/python-build-standalone 的 Releases。
+2. 下载文件名形如：
+     cpython-{py}.*+*-x86_64-pc-windows-msvc-install_only.tar.gz
+   （务必是 {py}，不要 3.13/3.14，否则会用不了、报 DLL/版本冲突）
+3. 解压，会得到一个 python 文件夹（里面有 python.exe、pythonw.exe）。
+4. 把那个 python 文件夹里的全部内容，复制进当前这个 python\\ 文件夹，
+   使得存在  python\\python.exe  和  python\\pythonw.exe 。
+5. 回到上一层，双击「启动.bat」即可。
+
+（macOS / Linux 同理，换成对应平台的 install_only 包，存在 python/bin/python3 即可。）
+放好后本说明文件可删除。
 """
 
 # 制作「新手双击即用、无需装 Python」应用的说明（随包附带）
@@ -669,6 +684,21 @@ def _build_source_package(server_url: str, token: str) -> bytes:
         archive.writestr("visualdl-agent/config.json", _agent_config_json(server_url, token))
         archive.writestr("visualdl-agent/README.txt", _AGENT_README.format(py=_PYC_PYTHON))
         archive.writestr("visualdl-agent/build_app.md", _BUILD_GUIDE.format(py=_PYC_PYTHON))
+
+        # 现成启动脚本 + python/ 占位说明：用户只需把独立 Python 解压进 python/ 即可双击运行
+        archive.writestr(
+            "visualdl-agent/启动.bat",
+            "@echo off\r\ncd /d \"%~dp0\"\r\n"
+            "start \"\" \"%~dp0python\\pythonw.exe\" \"%~dp0launcher.py\"\r\n",
+        )
+        archive.writestr(
+            "visualdl-agent/启动.command",
+            "#!/bin/sh\ncd \"$(dirname \"$0\")\"\nexec ./python/bin/python3 launcher.py\n",
+        )
+        archive.writestr(
+            "visualdl-agent/python/把独立Python解压到这里.txt",
+            _PYTHON_PLACEHOLDER.format(py=_PYC_PYTHON),
+        )
 
     return buffer.getvalue()
 
