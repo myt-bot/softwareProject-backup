@@ -924,6 +924,7 @@ export function getTrainingLayers(canvas: WorkCanvas = activeCanvas()): MonitorL
   return canvas.nodes
     .filter(node => node.type !== "Add")
     .map(node => ({
+      id: node.id,
       type: node.badge || node.type,
       color: node.color || "cyan",
     }));

@@ -28,6 +28,7 @@ class ExecutableGraphModel(nn.Module):
         }
         self.predecessors = build_predecessor_map(model_graph)
         self.modules_by_id = nn.ModuleDict(modules)
+        self.layer_pulse_callback = None
 
     def forward(self, x):
         """按拓扑顺序执行模型图。
@@ -43,6 +44,7 @@ class ExecutableGraphModel(nn.Module):
         for layer_config in self.ordered_layers:
             layer_id = layer_config["id"]
             layer_type = layer_config["type"]
+            self._emit_layer_pulse(layer_config)
 
             if layer_type == "Input":
                 outputs[layer_id] = _resolve_input_tensor(x, layer_id)
@@ -67,6 +69,13 @@ class ExecutableGraphModel(nn.Module):
             output_id: outputs[output_id]
             for output_id in output_ids
         }
+
+    def _emit_layer_pulse(self, layer_config):
+        """通知外部：forward 已经真实执行到该可视化层。"""
+        callback = self.layer_pulse_callback
+        if callback is None:
+            return
+        callback(layer_config)
 
     def _collect_node_input(self, layer_id, outputs):
         """收集并合并当前节点的所有前驱输出。"""

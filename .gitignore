@@ -60,3 +60,5 @@ backend/agent_dist/*
 !backend/agent_dist/README.md
 
 software.code-workspace
+
+部署.md

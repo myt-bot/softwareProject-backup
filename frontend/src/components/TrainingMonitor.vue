@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 训练监控页（Training Monitor）
 // 作为一个全屏视图挂载在主 shell 之上：训练开始时打开，"返回继续修改"关闭回到搭建页。
-import { computed, onBeforeUnmount, ref, watchEffect } from "vue";
+import { computed } from "vue";
 import {
   activeSeries,
   computeResults,
@@ -46,27 +46,8 @@ const epochPercent = computed(() =>
   monitor.totalSteps > 0 ? Math.round((monitor.currentStep / monitor.totalSteps) * 100) : 0
 );
 
-// 高亮"正在运行的层"：训练进行时按数据流动方向循环点亮 minimap 中的层
-const activeLayerIndex = ref(-1);
-let layerTimer: number | null = null;
-
-watchEffect(() => {
-  const running = monitor.visible && monitor.state === "running";
-  if (running && layerTimer === null) {
-    activeLayerIndex.value = 0;
-    layerTimer = window.setInterval(() => {
-      activeLayerIndex.value = (activeLayerIndex.value + 1) % Math.max(monitor.layers.length, 1);
-    }, 550);
-  } else if (!running && layerTimer !== null) {
-    clearInterval(layerTimer);
-    layerTimer = null;
-    activeLayerIndex.value = -1;
-  }
-});
-
-onBeforeUnmount(() => {
-  if (layerTimer !== null) clearInterval(layerTimer);
-});
+// 高亮"正在运行的层"：由本机训练运行时的真实 forward 事件驱动。
+const activeLayerIndex = computed(() => monitor.activeLayerIndex);
 
 // 超参数用中文 + 英文名标注，对新手更友好
 const hpRows = computed(() => [

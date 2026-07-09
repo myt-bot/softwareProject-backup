@@ -110,7 +110,7 @@ def create_training_job(model_graph, train_config):
 
 
 
-def run_training_job(job_id):
+def run_training_job(job_id, layer_pulse_callback=None):
     """执行一个已登记训练任务的完整训练流程。
 
     参数：
@@ -146,6 +146,10 @@ def run_training_job(job_id):
         device = resolve_device(requested_device)
         job["device"] = str(device)
         model = build_model(job["model_graph"]).to(device)
+        layer_index_by_id = {
+            layer_config.get("id"): index
+            for index, layer_config in enumerate(getattr(model, "ordered_layers", []))
+        }
         loss_fn = _build_loss_fn(loss_fn_config)
         optimizer = _build_optimizer(
             optimizer_config=optimizer_config,
@@ -171,6 +175,11 @@ def run_training_job(job_id):
                 break
 
             job["current_step"] = 0
+            model.layer_pulse_callback = _make_layer_pulse_callback(
+                job=job,
+                layer_index_by_id=layer_index_by_id,
+                callback=layer_pulse_callback,
+            )
             train_metrics = train_one_epoch(
                 model=model,
                 train_loader=train_loader,
@@ -179,6 +188,7 @@ def run_training_job(job_id):
                 device=device,
                 progress_callback=lambda step: job.__setitem__("current_step", step),
             )
+            model.layer_pulse_callback = None
             eval_metrics = evaluate_model(
                 model=model,
                 test_loader=test_loader,
@@ -250,6 +260,28 @@ def run_training_job(job_id):
             "metrics": job.get("metrics", []),
         }
         raise
+
+    finally:
+        if "model" in locals():
+            model.layer_pulse_callback = None
+
+
+def _make_layer_pulse_callback(job, layer_index_by_id, callback):
+    """把模型 forward 中的层到达事件转换成训练任务事件。"""
+    if callback is None:
+        return None
+
+    def emit(layer_config):
+        layer_id = layer_config.get("id")
+        callback({
+            "layer_id": layer_id,
+            "layer_type": layer_config.get("type"),
+            "layer_index": layer_index_by_id.get(layer_id, -1),
+            "current_epoch": job.get("current_epoch", 0),
+            "current_step": job.get("current_step", 0),
+        })
+
+    return emit
 
 
 def _run_demo_job(job_id):

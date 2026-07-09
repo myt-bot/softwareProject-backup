@@ -499,6 +499,10 @@ async def _handle_agent_message(session: AgentSession, message: dict[str, Any]) 
         await registry.broadcast_to_clients(user_id, message)
         return
 
+    if msg_type == "layer_pulse":
+        await registry.broadcast_to_clients(user_id, message)
+        return
+
     if msg_type == "command_ack":
         # 命令回执：记录到任务上，也转发给前端便于提示
         job = registry.jobs.get(message.get("job_id", ""))

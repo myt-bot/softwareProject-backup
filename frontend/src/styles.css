@@ -4206,7 +4206,7 @@ body.is-connecting .node-port {
 .tm-minimap { display: grid; justify-items: center; gap: 4px; margin-top: 16px; }
 .tm-mini-node { width: 140px; border: 1px solid var(--border-2); border-radius: 8px; padding: 7px 10px; text-align: center; font-size: 12px; font-weight: 800; background: var(--panel-2); transition: box-shadow 0.2s ease, transform 0.2s ease; }
 
-/* 训练进行中：按数据流动方向依次高亮闪烁当前层 */
+/* 训练进行中：真实 forward 到达该层时高亮闪烁 */
 .tm-mini-node.running-layer {
   animation: tm-layer-pulse 0.55s ease-in-out infinite;
   transform: scale(1.04);
