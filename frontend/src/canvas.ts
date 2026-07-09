@@ -4,12 +4,16 @@
 import { nextTick } from "vue";
 import {
   activeCanvas,
-  buildContainerFromSelection,
   clamp,
+  containerInputPorts,
   containerLibrary,
+  containerOutputPorts,
   CONTAINER_TYPE,
   createCanvas,
-  expandContainerToNodes,
+  createEmptyContainerNode,
+  deriveNodeCounters,
+  endpointBaseId,
+  endpointPortId,
   formatLayerNote,
   getConnectionKey,
   getLayerConfig,
@@ -20,9 +24,15 @@ import {
   resetValidationAfterGraphChange,
   showToast,
   store,
+  subgraphFromCanvas,
   ui,
+  updateNodeDisplay,
 } from "./store";
+import type { WorkCanvas } from "./store";
 import type { Connection, GraphNode, ModelGraph, Point } from "./types";
+
+// 从组件库拖入"空白容器"的 dataTransfer 标记
+export const NEW_CONTAINER_PAYLOAD = "__new_container__";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -294,6 +304,12 @@ function getHistory(canvasId: number) {
   return entry;
 }
 
+// 进入/退出容器子画板时清空撤销栈：父层与子图共用一个 canvasId，
+// 不清空会导致跨层撤销把一层的快照错误地套到另一层。
+function clearHistory(canvasId: number) {
+  historyMap.delete(canvasId);
+}
+
 function takeSnapshot(): GraphSnapshot {
   const canvas = activeCanvas();
   return {
@@ -324,7 +340,6 @@ function applySnapshot(snapshot: GraphSnapshot) {
   );
   canvas.nodeCounters = { ...snapshot.nodeCounters };
   canvas.selectedNodeId = null;
-  canvas.selectedNodeIds = [];
   canvas.selectedConnectionKey = null;
   resetValidationAfterGraphChange(canvas);
   void redrawAfterDomUpdate();
@@ -453,7 +468,11 @@ export function autoLayoutGraph() {
 
 
 function getConnectionPoints(from: string, to: string, index = 0): ConnectorPoints | null {
-  if (!activeCanvas().nodes.some(node => node.id === from) || !activeCanvas().nodes.some(node => node.id === to)) {
+  // from/to 是"端点"：普通层为节点 id，容器端口为 容器id::端口层id
+  if (
+    !activeCanvas().nodes.some(node => node.id === endpointBaseId(from)) ||
+    !activeCanvas().nodes.some(node => node.id === endpointBaseId(to))
+  ) {
     return null;
   }
 
@@ -462,8 +481,8 @@ function getConnectionPoints(from: string, to: string, index = 0): ConnectorPoin
     to,
     key: getConnectionKey(from, to),
     index,
-    start: getNodeBottomCenter(from),
-    end: getNodeTopCenter(to),
+    start: getEndpointOutPoint(from),
+    end: getEndpointInPoint(to),
   };
 }
 
@@ -854,7 +873,8 @@ function removeEdgeControl(from: string, to: string) {
 function removeEdgeControlsForNode(nodeId: string) {
   Object.keys(activeCanvas().edgeControls).forEach(key => {
     const [source, target] = key.split("->");
-    if (source === nodeId || target === nodeId) {
+    // 端点可能是容器端口（容器id::端口层id），按基节点 id 匹配
+    if (endpointBaseId(source || "") === nodeId || endpointBaseId(target || "") === nodeId) {
       delete activeCanvas().edgeControls[key];
     }
   });
@@ -912,9 +932,27 @@ function getNodeTopCenter(nodeId: string): Point {
 }
 
 
-function getNodeFromPoint(clientX: number, clientY: number): HTMLElement | null {
-  const element = document.elementFromPoint(clientX, clientY);
-  return (element?.closest?.(".node-card") as HTMLElement | null) || null;
+// 端点的连出/连入坐标：容器端口取端口锚点 DOM 中心，普通层取节点底/顶中点。
+function getEndpointOutPoint(endpoint: string): Point {
+  if (endpointPortId(endpoint)) {
+    return getPortAnchorCenter(endpoint) ?? getNodeBottomCenter(endpointBaseId(endpoint));
+  }
+  return getNodeBottomCenter(endpoint);
+}
+
+function getEndpointInPoint(endpoint: string): Point {
+  if (endpointPortId(endpoint)) {
+    return getPortAnchorCenter(endpoint) ?? getNodeTopCenter(endpointBaseId(endpoint));
+  }
+  return getNodeTopCenter(endpoint);
+}
+
+// 容器端口锚点（带 data-endpoint 属性的 DOM 元素）在画布坐标系里的中心点
+function getPortAnchorCenter(endpoint: string): Point | null {
+  const element = document.querySelector(`[data-endpoint="${endpoint}"]`) as HTMLElement | null;
+  if (!element) return null;
+  const rect = element.getBoundingClientRect();
+  return getCanvasPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
 }
 
 
@@ -1153,7 +1191,7 @@ function updatePendingConnection(clientX: number, clientY: number) {
     createPendingConnection();
   }
 
-  const start = getNodeBottomCenter(store.connectSourceId);
+  const start = getEndpointOutPoint(store.connectSourceId);
   const end = getCanvasPoint(clientX, clientY);
 
   pendingConnection!.setAttribute(
@@ -1163,28 +1201,50 @@ function updatePendingConnection(clientX: number, clientY: number) {
 }
 
 
-function updateConnectionTargetState(clientX: number, clientY: number) {
-  const target = getNodeFromPoint(clientX, clientY);
-  const targetId = target?.dataset.nodeId;
-  store.connectTargetId = targetId && targetId !== store.connectSourceId ? targetId : null;
+// 找出指针下的"可连入目标端点"：优先容器输入端口锚点，否则普通层节点本体
+// （容器必须连到具体端口锚点，不接受连到容器卡片本体）。
+function resolveTargetEndpoint(clientX: number, clientY: number): string | null {
+  const element = document.elementFromPoint(clientX, clientY);
+  const portElement = element?.closest?.("[data-endpoint][data-port-kind='in']") as HTMLElement | null;
+  if (portElement?.dataset.endpoint) return portElement.dataset.endpoint;
+
+  const card = element?.closest?.(".node-card") as HTMLElement | null;
+  const nodeId = card?.dataset.nodeId;
+  if (!nodeId) return null;
+
+  const node = activeCanvas().nodes.find(item => item.id === nodeId);
+  if (node?.type === CONTAINER_TYPE) return null;
+  return nodeId;
 }
 
 
-export function completeConnection(targetId: string) {
-  const sourceId = store.connectSourceId;
-  if (!sourceId || sourceId === targetId) {
+function updateConnectionTargetState(clientX: number, clientY: number) {
+  const targetEndpoint = resolveTargetEndpoint(clientX, clientY);
+  const source = store.connectSourceId;
+  store.connectTargetId =
+    targetEndpoint && (!source || endpointBaseId(targetEndpoint) !== endpointBaseId(source))
+      ? targetEndpoint
+      : null;
+}
+
+
+export function completeConnection(targetEndpoint: string) {
+  const sourceEndpoint = store.connectSourceId;
+  if (!sourceEndpoint || endpointBaseId(sourceEndpoint) === endpointBaseId(targetEndpoint)) {
     showToast("warning", "不能将节点连接到自身。");
     return;
   }
 
-  const exists = activeCanvas().connections.some(([source, target]) => source === sourceId && target === targetId);
+  const exists = activeCanvas().connections.some(
+    ([source, target]) => source === sourceEndpoint && target === targetEndpoint
+  );
   if (exists) {
-    showToast("warning", "这两个节点之间已经存在连线。");
+    showToast("warning", "这两个端点之间已经存在连线。");
     return;
   }
 
   recordHistory();
-  activeCanvas().connections.push([sourceId, targetId]);
+  activeCanvas().connections.push([sourceEndpoint, targetEndpoint]);
   resetValidationAfterGraphChange();
   drawLines();
   showToast("success", "连线成功。");
@@ -1249,13 +1309,15 @@ export function deleteMenuNode(event: Event) {
 
   recordHistory();
   activeCanvas().nodes = activeCanvas().nodes.filter(node => node.id !== nodeId);
-  activeCanvas().connections = activeCanvas().connections.filter(([source, target]) => source !== nodeId && target !== nodeId);
+  // 端点可能是容器端口（容器id::端口层id），按基节点 id 过滤，删除该节点相关的所有连线
+  activeCanvas().connections = activeCanvas().connections.filter(
+    ([source, target]) => endpointBaseId(source) !== nodeId && endpointBaseId(target) !== nodeId
+  );
   removeEdgeControlsForNode(nodeId);
   if (activeCanvas().selectedNodeId === nodeId) {
     activeCanvas().selectedNodeId = null;
   }
-  activeCanvas().selectedNodeIds = activeCanvas().selectedNodeIds.filter(id => id !== nodeId);
-  if (store.connectSourceId === nodeId) {
+  if (store.connectSourceId && endpointBaseId(store.connectSourceId) === nodeId) {
     cancelPendingConnection();
   }
   store.menuNodeId = null;
@@ -1327,7 +1389,19 @@ export function handleCanvasDrop(event: DragEvent) {
 
   const point = getCanvasPoint(event.clientX, event.clientY);
 
-  // 从"我的容器"库拖入：实例化一个容器节点
+  // 从组件库拖入"空白容器"：生成一个带 1 进 1 出端口的空容器，等待双击进入编辑
+  if (payload === NEW_CONTAINER_PAYLOAD) {
+    recordHistory();
+    const node = createEmptyContainerNode(activeCanvas(), point.x - 112, point.y - 70);
+    activeCanvas().nodes.push(node);
+    void redrawAfterDomUpdate();
+    selectNode(node.id);
+    resetValidationAfterGraphChange();
+    showToast("info", "已放入空白容器：双击它进入子画板，像搭模型一样拖入层，用 Input/Output 定义输入输出端口。");
+    return;
+  }
+
+  // 从"我的容器"库拖入：实例化一个已保存的容器
   if (payload.startsWith("container:")) {
     const def = containerLibrary.items.find(item => item.defId === payload.slice("container:".length));
     if (!def) return;
@@ -1348,41 +1422,124 @@ export function handleCanvasDrop(event: DragEvent) {
 
 
 // —————————————————————————————————————————————
-// 自定义容器：打包 / 解组 / 折叠
+// 自定义容器：进入 / 退出子画板、折叠
 // —————————————————————————————————————————————
 
-export function groupSelectedIntoContainer() {
-  const canvas = activeCanvas();
-  const result = buildContainerFromSelection(canvas, canvas.selectedNodeIds);
-  if (!result.ok) {
-    showToast("warning", result.reason);
-    return;
-  }
-
-  recordHistory();
-  canvas.nodes = result.keepNodes;
-  canvas.connections = result.keepConnections;
-  canvas.selectedNodeId = result.container.id;
-  canvas.selectedNodeIds = [result.container.id];
-  resetValidationAfterGraphChange(canvas);
-  void redrawAfterDomUpdate();
-  showToast("success", `已把 ${result.container.subgraph!.nodes.length} 个节点打包为容器。`);
+// 当前是否在编辑某个容器的子画板
+export function isEditingContainer(): boolean {
+  return activeCanvas().editStack.length > 0;
 }
 
+// 面包屑路径：主画布 + 依次进入的各层容器名
+export function containerBreadcrumb(): string[] {
+  return ["主画布", ...activeCanvas().editStack.map(frame => frame.containerName)];
+}
 
-export function ungroupContainerNode(containerId: string) {
+// 双击容器 → 进入其子画板：把父层压栈，画布字段换成容器子图
+export function enterContainer(containerId: string) {
   const canvas = activeCanvas();
-  const result = expandContainerToNodes(canvas, containerId);
-  if (!result) return;
+  const node = canvas.nodes.find(item => item.id === containerId && item.type === CONTAINER_TYPE);
+  if (!node || !node.subgraph) return;
 
-  recordHistory();
-  canvas.nodes = result.keepNodes;
-  canvas.connections = result.keepConnections;
+  cancelPendingConnection();
+  hideNodeMenu();
+
+  canvas.editStack.push({
+    containerId,
+    containerName: node.title,
+    nodes: canvas.nodes,
+    connections: canvas.connections,
+    edgeControls: canvas.edgeControls,
+    nodeCounters: canvas.nodeCounters,
+    selectedNodeId: canvas.selectedNodeId,
+    selectedConnectionKey: canvas.selectedConnectionKey,
+    validationStatus: canvas.validationStatus,
+    nodeBadge: canvas.nodeBadge,
+    nodeErrors: canvas.nodeErrors,
+    inFeatures: canvas.inFeatures,
+    zoom: canvas.zoom,
+    panX: canvas.panX,
+    panY: canvas.panY,
+    hasCenteredInitialGraph: canvas.hasCenteredInitialGraph,
+  });
+
+  const subgraph = node.subgraph;
+  canvas.nodes = subgraph.nodes;
+  canvas.connections = subgraph.connections;
+  canvas.edgeControls = {};
+  canvas.nodeCounters = subgraph.nodeCounters || deriveNodeCounters(subgraph.nodes);
   canvas.selectedNodeId = null;
-  canvas.selectedNodeIds = [];
-  resetValidationAfterGraphChange(canvas);
+  canvas.selectedConnectionKey = null;
+  canvas.validationStatus = "unvalidated";
+  canvas.nodeBadge = "none";
+  canvas.nodeErrors = {};
+  canvas.hasCenteredInitialGraph = true;
+  clearHistory(canvas.id);
+
+  void redrawAfterDomUpdate().then(() => centerGraphInCanvas());
+  showToast("info", `进入容器「${node.title}」：拖入层搭建；每个 Input=一个输入端口，每个 Output=一个输出端口。`);
+}
+
+// 退出一层：把编辑好的子图写回容器节点，并还原父层
+export function exitContainer() {
+  const canvas = activeCanvas();
+  const frame = canvas.editStack.pop();
+  if (!frame) return;
+
+  cancelPendingConnection();
+  hideNodeMenu();
+
+  const editedSubgraph = subgraphFromCanvas(canvas.nodes, canvas.connections, canvas.nodeCounters);
+
+  canvas.nodes = frame.nodes;
+  canvas.connections = frame.connections;
+  canvas.edgeControls = frame.edgeControls;
+  canvas.nodeCounters = frame.nodeCounters;
+  canvas.selectedNodeId = frame.selectedNodeId;
+  canvas.selectedConnectionKey = frame.selectedConnectionKey;
+  // 子图改动会使父层校验结果失效，重置为未校验
+  canvas.validationStatus = "unvalidated";
+  canvas.nodeBadge = "none";
+  canvas.nodeErrors = {};
+  canvas.inFeatures = frame.inFeatures;
+  canvas.zoom = frame.zoom;
+  canvas.panX = frame.panX;
+  canvas.panY = frame.panY;
+  canvas.hasCenteredInitialGraph = frame.hasCenteredInitialGraph;
+  clearHistory(canvas.id);
+
+  const container = canvas.nodes.find(item => item.id === frame.containerId);
+  if (container) {
+    container.subgraph = editedSubgraph;
+    updateNodeDisplay(container);
+    pruneStaleContainerPortConnections(canvas, container);
+  }
+
   void redrawAfterDomUpdate();
-  showToast("success", "已解组容器，内部层已还原到画布。");
+}
+
+// 从面包屑退回到指定深度（0 = 主画布）
+export function exitToDepth(depth: number) {
+  while (activeCanvas().editStack.length > depth) {
+    exitContainer();
+  }
+}
+
+// 端口（Input/Output 节点）增删后，清理外层引用了不存在端口的连线
+function pruneStaleContainerPortConnections(canvas: WorkCanvas, container: GraphNode) {
+  const validPorts = new Set([
+    ...containerInputPorts(container).map(port => port.id),
+    ...containerOutputPorts(container).map(port => port.id),
+  ]);
+  canvas.connections = canvas.connections.filter(([source, target]) => {
+    for (const endpoint of [source, target]) {
+      if (endpointBaseId(endpoint) === container.id) {
+        const portId = endpointPortId(endpoint);
+        if (portId && !validPorts.has(portId)) return false;
+      }
+    }
+    return true;
+  });
 }
 
 
@@ -1395,18 +1552,11 @@ export function toggleContainerCollapse(nodeId: string) {
 }
 
 
-export function groupFromMenu(event: Event) {
-  event.stopPropagation();
-  hideNodeMenu();
-  groupSelectedIntoContainer();
-}
-
-
-export function ungroupFromMenu(event: Event) {
+export function enterContainerFromMenu(event: Event) {
   event.stopPropagation();
   const nodeId = store.menuNodeId;
   hideNodeMenu();
-  if (nodeId) ungroupContainerNode(nodeId);
+  if (nodeId) enterContainer(nodeId);
 }
 
 
@@ -1509,22 +1659,9 @@ export function applyTemplateGraph(modelGraph: ModelGraph) {
 // 选中状态
 // —————————————————————————————————————————————
 
-export function selectNode(nodeId: string, additive = false) {
+export function selectNode(nodeId: string) {
   const canvas = activeCanvas();
-  if (additive) {
-    // Shift 点击：加入/移出多选集合（用于"打包为容器"）
-    const selection = new Set(canvas.selectedNodeIds);
-    if (selection.has(nodeId)) {
-      selection.delete(nodeId);
-    } else {
-      selection.add(nodeId);
-    }
-    canvas.selectedNodeIds = [...selection];
-    canvas.selectedNodeId = canvas.selectedNodeIds[canvas.selectedNodeIds.length - 1] ?? null;
-  } else {
-    canvas.selectedNodeId = nodeId;
-    canvas.selectedNodeIds = [nodeId];
-  }
+  canvas.selectedNodeId = nodeId;
   canvas.selectedConnectionKey = null;
   // 点击节点卡片时重新展开参数面板
   ui.inspectorCollapsed = false;
@@ -1533,7 +1670,6 @@ export function selectNode(nodeId: string, additive = false) {
 
 export function deselectNode() {
   activeCanvas().selectedNodeId = null;
-  activeCanvas().selectedNodeIds = [];
   activeCanvas().selectedConnectionKey = null;
 }
 

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { validateModelStructure } from "../api/client";
-import { recordHistory, redrawAfterDomUpdate, ungroupContainerNode } from "../canvas";
+import { enterContainer, recordHistory, redrawAfterDomUpdate } from "../canvas";
 import {
   activeCanvas,
+  containerInputPorts,
+  containerLayerCount,
+  containerOutputPorts,
   getCurrentModelGraph,
   saveContainerToLibrary,
   showToast,
@@ -156,8 +159,16 @@ const advancedInspector = computed(() =>
   selectedNode.value ? ADVANCED_INSPECTORS[selectedNode.value.type] ?? null : null
 );
 
-// —— 自定义容器编辑 ——
-const containerBindings = computed(() => selectedNode.value?.paramBindings ?? []);
+// —— 自定义容器 ——
+const containerSummary = computed(() => {
+  const node = selectedNode.value;
+  if (!node || node.type !== "Container") return null;
+  return {
+    layers: containerLayerCount(node),
+    inputs: containerInputPorts(node).length,
+    outputs: containerOutputPorts(node).length,
+  };
+});
 
 function renameContainer(event: Event) {
   const node = selectedNode.value;
@@ -168,9 +179,19 @@ function renameContainer(event: Event) {
   void redrawAfterDomUpdate();
 }
 
-function ungroupCurrent() {
+// Input/Output 端口改名（title 即端口标签）
+function renamePort(event: Event) {
   const node = selectedNode.value;
-  if (node) ungroupContainerNode(node.id);
+  if (!node) return;
+  const name = (event.target as HTMLInputElement).value.trim();
+  if (!name) return;
+  node.title = name;
+  void redrawAfterDomUpdate();
+}
+
+function enterCurrentContainer() {
+  const node = selectedNode.value;
+  if (node) enterContainer(node.id);
 }
 
 function saveCurrentToLibrary() {
@@ -335,10 +356,34 @@ const inputShapeValue = computed(() => {
       </div>
 
       <label class="form-field">
+        <span>名称</span>
+        <input type="text" :value="selectedNode.title" @change="renamePort">
+        <small>在容器里作为输入端口的名字，多个输入时便于区分</small>
+      </label>
+
+      <label class="form-field">
         <span>Input Shape 输入形状</span>
         <input id="input-shape-field" type="text" :value="inputShapeValue" @change="handleInputShapeChange">
-        <small>格式示例：1,28,28</small>
+        <small>格式示例：1,28,28（作为容器端口时，实际尺寸由外部连接决定）</small>
       </label>
+    </div>
+
+    <!-- Output（在容器里作为输出端口） -->
+    <div v-else-if="selectedNode.type === 'Output'" class="inspector-scroll">
+      <div class="inspector-title">
+        <iconify-icon class="text-rose" icon="mdi:logout-variant"></iconify-icon>
+        <h2>Output 参数</h2>
+      </div>
+
+      <label class="form-field">
+        <span>名称</span>
+        <input type="text" :value="selectedNode.title" @change="renamePort">
+        <small>在容器里作为输出端口的名字，多个输出时便于区分</small>
+      </label>
+
+      <section class="info-card">
+        <p>Output 标记数据的出口。放在容器子画板里时，它就是容器对外的一个输出端口。</p>
+      </section>
     </div>
 
     <!-- Add -->
@@ -356,7 +401,7 @@ const inputShapeValue = computed(() => {
     <div v-else-if="selectedNode.type === 'Container'" class="inspector-scroll">
       <div class="inspector-title">
         <iconify-icon class="text-teal" icon="mdi:package-variant-closed"></iconify-icon>
-        <h2>容器参数</h2>
+        <h2>容器</h2>
       </div>
 
       <label class="form-field">
@@ -365,41 +410,25 @@ const inputShapeValue = computed(() => {
         <small>作为导出代码里的子模块名</small>
       </label>
 
-      <div v-if="containerBindings.length" class="field-stack">
-        <template v-for="binding in containerBindings" :key="binding.param">
-          <ParamNumberField
-            v-if="binding.kind === 'number'"
-            :label="binding.label"
-            :value="selectedNode.params[binding.param]"
-            @change="setParam(binding.param, $event)"
-          />
-          <label v-else class="form-field switch-field">
-            <span>{{ binding.label }}</span>
-            <input
-              type="checkbox"
-              :checked="Boolean(selectedNode.params[binding.param])"
-              @change="handleBooleanChange(binding.param, $event)"
-            >
-          </label>
-        </template>
+      <div v-if="containerSummary" class="container-summary">
+        <div><strong>{{ containerSummary.layers }}</strong><span>内部层</span></div>
+        <div><strong>{{ containerSummary.inputs }}</strong><span>输入端口</span></div>
+        <div><strong>{{ containerSummary.outputs }}</strong><span>输出端口</span></div>
       </div>
-      <section v-else class="info-card">
-        <p>该容器内部各层暂无可对外调整的参数。</p>
-      </section>
 
       <div class="container-actions">
+        <button class="container-action-btn primary" @click="enterCurrentContainer">
+          <iconify-icon icon="mdi:folder-open-outline"></iconify-icon>
+          进入编辑
+        </button>
         <button class="container-action-btn" @click="saveCurrentToLibrary">
           <iconify-icon icon="mdi:content-save-outline"></iconify-icon>
-          存为可复用容器
-        </button>
-        <button class="container-action-btn danger" @click="ungroupCurrent">
-          <iconify-icon icon="mdi:package-variant"></iconify-icon>
-          解组容器
+          存为可复用
         </button>
       </div>
 
       <section class="info-card">
-        <p>容器把多个层打包成一个节点。修改上面的参数会联动到内部对应层；输入 / 输出尺寸显示在画布卡片上，展开容器可查看每一层的尺寸。</p>
+        <p>容器把一整张子图打包成一个节点。<b>双击容器</b>（或点"进入编辑"）进入子画板，像搭模型一样拖入层；子图里每个 <b>Input</b> = 一个输入端口，每个 <b>Output</b> = 一个输出端口。输入 / 输出尺寸显示在画布上各端口旁。</p>
       </section>
     </div>
 

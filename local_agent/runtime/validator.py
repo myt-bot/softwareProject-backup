@@ -443,7 +443,7 @@ def validate_layer_params(layer_config):
         if not is_positive_int(params.get("out_features")):
             add_error("INVALID_POSITIVE_INT", {"param": "out_features"})
 
-    elif layer_type in ("ReLU", "Flatten", "Output"):
+    elif layer_type in ("ReLU", "Flatten", "Output", "Identity"):
         pass
 
     else:
@@ -597,7 +597,7 @@ def infer_layer_shape(layer_config, input_shape):
     if layer_type == "Flatten":
         return infer_flatten_shape(input_shape)
 
-    if layer_type in ("ReLU", "Dropout", "Output"):
+    if layer_type in ("ReLU", "Dropout", "Output", "Identity"):
         return input_shape
 
     if layer_type == "Linear":

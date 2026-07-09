@@ -14,51 +14,40 @@ export interface GraphNode {
   color: string;
   note?: string;
   hint: string;
-  // 容器节点专用：输入侧尺寸（hint 复用为输出侧），用于画布卡片上的 输入→输出 展示
-  inputHint?: string;
   x: number;
   y: number;
   params: Record<string, unknown>;
-  // 自定义容器（type === "Container"）：内部子图、折叠态与暴露参数绑定
+  // 自定义容器（type === "Container"）：内部子图 + 折叠态
   subgraph?: SubGraph;
   collapsed?: boolean;
-  paramBindings?: ParamBinding[];
 }
 
-// 连线：[源节点 id, 目标节点 id]
+// 连线端点：普通层为节点 id；容器端口为 "容器id::内部端口层id"（见 store.PORT_SEP）
+// 连线：[源端点, 目标端点]
 export type Connection = [string, string];
 
 // —————————————————————————————————————————————
 // 自定义容器（组合容器）
 // —————————————————————————————————————————————
 
-// 容器内部子图：一组内部层 + 内部连线 + 对外输入/输出边界（内部层 id）
+// 容器内部子图：一整张可编辑的模型图。里面的 Input / Output 节点即容器对外的
+// 输入 / 输出端口（多个 Input = 多输入，多个 Output = 多输出）。
 export interface SubGraph {
   nodes: GraphNode[];
   connections: Connection[];
-  // 接收容器外部输入的内部层 id；产出容器外部输出的内部层 id
+  // 内部 Input 端口层 id 列表 / 内部 Output 端口层 id 列表（序列化时按此顺序）
   inputs: string[];
   outputs: string[];
+  // 子图自己的节点计数器（进入子画板编辑时用于生成不冲突的新节点 id）
+  nodeCounters?: Record<string, number>;
 }
 
-// 暴露参数绑定：容器级参数 param 驱动内部层 target 的参数 key
-export interface ParamBinding {
-  param: string;
-  target: string;
-  key: string;
-  // 参数编辑面板展示用
-  label: string;
-  kind: "number" | "boolean";
-}
-
-// 组件库 / 会话内可复用的容器定义
+// 会话内可复用的容器定义（左侧"我的容器"）
 export interface ContainerDef {
   defId: string;
   name: string;
   color: string;
   subgraph: SubGraph;
-  params: Record<string, unknown>;
-  paramBindings: ParamBinding[];
 }
 
 // 左侧组件库条目
