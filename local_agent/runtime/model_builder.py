@@ -77,6 +77,10 @@ def create_layer(layer_config, input_shape=None):
     
     if layer_type == 'ReLU':
         return nn.ReLU()
+
+    if layer_type == 'Identity':
+        # 容器输入/输出端口展平后的直通层
+        return nn.Identity()
     
     if layer_type == 'Flatten':
         return nn.Flatten()

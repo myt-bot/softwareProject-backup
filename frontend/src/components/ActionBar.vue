@@ -7,6 +7,7 @@ import {
   handleValidateModel,
   openCurrentTrainingMonitor,
 } from "../actions";
+import { isEditingContainer } from "../canvas";
 import { activeCanvas, clamp, getTrainingStatusLabel, isTrainingJobActive, showToast, ui } from "../store";
 import DatasetSelector from "./DatasetSelector.vue";
 import DeviceSelector from "./DeviceSelector.vue";
@@ -75,11 +76,15 @@ const jobMeta = computed(() => {
   return `Epoch ${job.value.current_epoch ?? 0}/${job.value.total_epochs ?? "-"} · ${jobPercentage.value}%`;
 });
 
+// 编辑容器子画板时：只允许"检查结构"验证内部，训练/导出面向整个模型，需退出后再用
+const editingContainer = computed(() => isEditingContainer());
+
 const trainDisabled = computed(
-  () => canvas.value.trainStarting || hasActiveJob.value || canvas.value.validationStatus !== "passing"
+  () => canvas.value.trainStarting || hasActiveJob.value || editingContainer.value || canvas.value.validationStatus !== "passing"
 );
 
 const trainButtonTitle = computed(() => {
+  if (editingContainer.value) return "正在编辑容器内部，返回主画布后才能训练整个模型。";
   if (hasActiveJob.value) return "当前画布已有训练任务进行中，请先查看训练详情。";
   if (canvas.value.validationStatus !== "passing") return "先通过“检查结构”，此按钮才会亮起";
   return "开始训练当前模型";
@@ -155,7 +160,7 @@ const needsCheck = computed(
             <button id="btn-my-projects" @click="runMore(() => (ui.projectsModalOpen = true))">
               <iconify-icon icon="mdi:folder-open-outline"></iconify-icon> 我的项目
             </button>
-            <button id="btn-export" @click="runMore(handleExportCode)">
+            <button id="btn-export" :disabled="editingContainer" :title="editingContainer ? '返回主画布后再导出整个模型' : ''" @click="runMore(handleExportCode)">
               <iconify-icon icon="mdi:code-json"></iconify-icon> 导出代码
             </button>
           </div>

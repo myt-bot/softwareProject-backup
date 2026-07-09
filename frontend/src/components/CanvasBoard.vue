@@ -6,6 +6,9 @@ import {
   cancelPendingConnection,
   centerGraphInCanvas,
   completeConnection,
+  containerBreadcrumb,
+  enterContainer,
+  exitToDepth,
   handleCanvasClick,
   handleCanvasDrop,
   handleCanvasMouseDown,
@@ -15,6 +18,7 @@ import {
   handleNodeMouseDown,
   handleZoomAction,
   initializeCanvasView,
+  isEditingContainer,
   redoGraphChange,
   registerCanvasElements,
   selectNode,
@@ -22,7 +26,16 @@ import {
   toggleContainerCollapse,
   undoGraphChange,
 } from "../canvas";
-import { activeCanvas, showToast, store } from "../store";
+import {
+  activeCanvas,
+  containerInputPorts,
+  containerOutputPorts,
+  endpointBaseId,
+  makePortEndpoint,
+  showToast,
+  store,
+} from "../store";
+import type { GraphNode } from "../types";
 import CanvasTabs from "./CanvasTabs.vue";
 
 const canvasRef = ref<HTMLElement | null>(null);
@@ -34,6 +47,11 @@ const canvas = computed(() => activeCanvas());
 
 const zoomLabel = computed(() => `${Math.round(canvas.value.zoom * 100)}%`);
 
+// 子画板编辑态：面包屑路径（主画布 / 容器名 / …）
+const editing = computed(() => isEditingContainer());
+const breadcrumb = computed(() => containerBreadcrumb());
+const currentContainerName = computed(() => breadcrumb.value[breadcrumb.value.length - 1] || "");
+
 const statusBadgeText = computed(() =>
   canvas.value.nodeBadge === "passed" ? "通过" : canvas.value.nodeBadge === "pending" ? "待检查" : "未校验"
 );
@@ -44,6 +62,21 @@ const statusBadgeClass = computed(() =>
 // 节点输出尺寸的新手友好显示：未推导时提示去检查结构，已推导时用 × 分隔（如 28×28×1）
 function shapeHintText(hint: string) {
   return hint === "?" ? "检查结构后显示" : hint.replace(/x/gi, "×");
+}
+// 端口锚点旁的紧凑尺寸：未推导显示 "?"
+function portShapeText(port: GraphNode) {
+  return port.hint && port.hint !== "?" ? port.hint.replace(/x/gi, "×") : "?";
+}
+function portEndpoint(nodeId: string, portId: string) {
+  return makePortEndpoint(nodeId, portId);
+}
+
+// 连线高亮：源/目标端点可能是容器端口，按基节点 id 比较
+function isConnectionSource(nodeId: string) {
+  return !!store.connectSourceId && endpointBaseId(store.connectSourceId) === nodeId;
+}
+function isConnectionTarget(nodeId: string) {
+  return !!store.connectTargetId && endpointBaseId(store.connectTargetId) === nodeId;
 }
 
 function onNodeClick(event: MouseEvent, nodeId: string) {
@@ -58,14 +91,15 @@ function onNodeClick(event: MouseEvent, nodeId: string) {
     event.preventDefault();
     return;
   }
-  // 按住 Shift 点击 → 多选（用于"打包为容器"）
-  selectNode(nodeId, event.shiftKey);
+  selectNode(nodeId);
 }
 
-// 多选高亮：集合里有多个节点时才显示"参与打包"的选中态
-function isMultiSelected(nodeId: string) {
-  const canvas = activeCanvas();
-  return canvas.selectedNodeIds.length > 1 && canvas.selectedNodeIds.includes(nodeId);
+// 双击容器 → 进入子画板编辑
+function onNodeDblClick(event: MouseEvent, node: GraphNode) {
+  if (node.type !== "Container") return;
+  event.preventDefault();
+  event.stopPropagation();
+  enterContainer(node.id);
 }
 
 function onNodeContextMenu(event: MouseEvent, nodeId: string) {
@@ -75,12 +109,12 @@ function onNodeContextMenu(event: MouseEvent, nodeId: string) {
   showNodeMenu(event.clientX, event.clientY, nodeId);
 }
 
-// 从节点底部端口按住拖拽 → 开始连线（更直观）
-function onPortMouseDown(event: MouseEvent, nodeId: string) {
+// 从输出端口按住拖拽 → 开始连线（endpoint 普通层为 node.id，容器端口为 容器id::端口层id）
+function onPortMouseDown(event: MouseEvent, endpoint: string) {
   if (event.button !== 0) return;
   event.preventDefault();
   event.stopPropagation();
-  beginConnectionDrag(nodeId, event.clientX, event.clientY);
+  beginConnectionDrag(endpoint, event.clientX, event.clientY);
 }
 
 function exitConnectMode() {
@@ -110,9 +144,34 @@ onBeforeUnmount(() => {
   <!-- 中间：模型画布（多画布标签页 + 画布主体） -->
   <section class="canvas-pane">
     <CanvasTabs />
+
+    <!-- 容器子画板：面包屑 + 返回 + 新手指引 -->
+    <div v-if="editing" class="container-editor-bar">
+      <nav class="breadcrumb">
+        <template v-for="(name, index) in breadcrumb" :key="index">
+          <button
+            v-if="index < breadcrumb.length - 1"
+            class="crumb crumb-link"
+            @click="exitToDepth(index)"
+          >{{ name }}</button>
+          <span v-else class="crumb crumb-current">{{ name }}</span>
+          <iconify-icon v-if="index < breadcrumb.length - 1" icon="mdi:chevron-right" class="crumb-sep"></iconify-icon>
+        </template>
+      </nav>
+      <div class="editor-hint">
+        <iconify-icon icon="mdi:information-outline"></iconify-icon>
+        正在编辑容器「{{ currentContainerName }}」：拖入层搭建，<b>Input</b>=输入端口、<b>Output</b>=输出端口（可放多个）。
+      </div>
+      <button class="editor-back" @click="exitToDepth(breadcrumb.length - 2)">
+        <iconify-icon icon="mdi:arrow-u-left-top"></iconify-icon>
+        返回上一层
+      </button>
+    </div>
+
     <main
     ref="canvasRef"
     class="canvas"
+    :class="{ 'canvas-editing-container': editing }"
     id="canvas-container"
     @mousedown="handleCanvasMouseDown"
     @click="handleCanvasClick"
@@ -148,11 +207,17 @@ onBeforeUnmount(() => {
     <div ref="gridRef" class="canvas-grid connections-svg"></div>
     <svg ref="svgRef" class="connections-svg" id="connections-svg"></svg>
 
-    <!-- 空画布引导态：告诉新手第一步该做什么 -->
+    <!-- 空画布引导态：主画布与容器子画板给不同提示 -->
     <div v-if="canvas.nodes.length === 0" class="canvas-empty-hint" id="canvas-empty-hint">
       <iconify-icon icon="mdi:gesture-tap-hold"></iconify-icon>
-      <h3>从这里开始搭建你的模型</h3>
-      <p>👈 从左侧「组件库」拖一个 <b>Input</b> 层到这里<br>或点右上角 <b>⚡ 快速开始模板</b> 一键加载示例</p>
+      <template v-if="editing">
+        <h3>开始搭建容器内部</h3>
+        <p>从左侧拖入 <b>Input</b> 作为输入端口、<b>Output</b> 作为输出端口，<br>中间放需要的层并连起来。多个 Input/Output 即多输入多输出。</p>
+      </template>
+      <template v-else>
+        <h3>从这里开始搭建你的模型</h3>
+        <p>👈 从左侧「组件库」拖一个 <b>Input</b> 层到这里<br>或点右上角 <b>⚡ 快速开始模板</b> 一键加载示例</p>
+      </template>
     </div>
 
     <div ref="nodesRef" class="nodes-container" id="nodes-container">
@@ -164,46 +229,77 @@ onBeforeUnmount(() => {
         :data-node-id="node.id"
         :class="{
           'node-selected': canvas.selectedNodeId === node.id,
-          'node-multi-selected': isMultiSelected(node.id),
           'node-container': node.type === 'Container',
-          'connection-source': store.connectSourceId === node.id,
-          'connection-target': store.connectTargetId === node.id,
+          'connection-source': isConnectionSource(node.id),
+          'connection-target': isConnectionTarget(node.id),
           'node-dragging': store.draggingNodeId === node.id,
           'node-error': !!canvas.nodeErrors[node.id],
         }"
         :style="{ left: `${node.x}px`, top: `${node.y}px` }"
         @mousedown="handleNodeMouseDown($event, node.id)"
         @click="onNodeClick($event, node.id)"
+        @dblclick="onNodeDblClick($event, node)"
         @contextmenu="onNodeContextMenu($event, node.id)"
       >
-        <!-- 自定义容器节点：折叠显示 输入→输出，展开显示每个内部层的尺寸 -->
+        <!-- 自定义容器：顶部输入端口行 + 底部输出端口行，每端口带名称与尺寸 -->
         <template v-if="node.type === 'Container'">
+          <div class="cport-row cport-row-in">
+            <div
+              v-for="port in containerInputPorts(node)"
+              :key="port.id"
+              class="cport cport-in"
+              :data-endpoint="portEndpoint(node.id, port.id)"
+              data-port-kind="in"
+              :title="`输入端口 · ${port.title}`"
+            >
+              <span class="cport-dot"></span>
+              <span class="cport-meta"><span class="cport-label">{{ port.title }}</span><span class="cport-shape">{{ portShapeText(port) }}</span></span>
+            </div>
+          </div>
+
           <div class="node-head">
             <span :class="`node-type ${node.color}`">{{ node.badge }}</span>
-            <button
-              class="container-toggle"
-              :title="node.collapsed ? '展开容器' : '折叠容器'"
-              @click.stop="toggleContainerCollapse(node.id)"
-            >
-              <iconify-icon :icon="node.collapsed ? 'mdi:chevron-down' : 'mdi:chevron-up'"></iconify-icon>
-            </button>
+            <div class="container-head-actions">
+              <span v-if="canvas.nodeErrors[node.id]" class="status-badge error">✕</span>
+              <button
+                class="container-toggle"
+                :title="node.collapsed ? '展开查看内部层' : '折叠'"
+                @click.stop="toggleContainerCollapse(node.id)"
+              >
+                <iconify-icon :icon="node.collapsed ? 'mdi:unfold-more-horizontal' : 'mdi:unfold-less-horizontal'"></iconify-icon>
+              </button>
+            </div>
           </div>
           <h4>{{ node.title }}</h4>
-          <!-- I/O 信息画在卡片上（输入 → 输出） -->
-          <div class="container-io" title="容器整体的输入 / 输出尺寸（点底部“检查结构”后推导）">
-            <span class="io-chip" :class="{ pending: !node.inputHint || node.inputHint === '?' }">{{ node.inputHint && node.inputHint !== '?' ? shapeHintText(node.inputHint) : '?' }}</span>
-            <iconify-icon icon="mdi:arrow-right-thin"></iconify-icon>
-            <span class="io-chip out" :class="{ pending: node.hint === '?' }">{{ node.hint && node.hint !== '?' ? shapeHintText(node.hint) : '?' }}</span>
-          </div>
-          <p v-if="node.collapsed" class="node-note container-collapsed-hint">{{ node.subgraph?.nodes.length }} 层 · 点顶部箭头展开</p>
-          <div v-else class="container-inner">
-            <div v-for="inner in node.subgraph?.nodes" :key="inner.id" class="container-inner-row">
+          <p class="node-note container-dbl-hint"><iconify-icon icon="mdi:cursor-default-click-outline"></iconify-icon> {{ node.note }} · 双击编辑</p>
+          <div v-if="!node.collapsed" class="container-inner">
+            <div
+              v-for="inner in node.subgraph?.nodes.filter(n => n.type !== 'Input' && n.type !== 'Output')"
+              :key="inner.id"
+              class="container-inner-row"
+            >
               <span :class="`node-type sm ${inner.color}`">{{ inner.badge }}</span>
               <span class="inner-name">{{ inner.title }}</span>
-              <strong class="inner-shape" :class="{ pending: inner.hint === '?' }">{{ shapeHintText(inner.hint) }}</strong>
+              <strong class="inner-shape" :class="{ pending: inner.hint === '?' }">{{ portShapeText(inner) }}</strong>
+            </div>
+          </div>
+
+          <div class="cport-row cport-row-out">
+            <div
+              v-for="port in containerOutputPorts(node)"
+              :key="port.id"
+              class="cport cport-out"
+              :data-endpoint="portEndpoint(node.id, port.id)"
+              data-port-kind="out"
+              :title="`输出端口 · ${port.title}（按住拖动连线）`"
+              @mousedown="onPortMouseDown($event, portEndpoint(node.id, port.id))"
+            >
+              <span class="cport-meta"><span class="cport-label">{{ port.title }}</span><span class="cport-shape">{{ portShapeText(port) }}</span></span>
+              <span class="cport-dot"></span>
             </div>
           </div>
         </template>
+
         <!-- 普通层节点 -->
         <template v-else>
           <div class="node-head">
@@ -222,20 +318,24 @@ onBeforeUnmount(() => {
             <span>输出尺寸</span>
             <strong class="shape-value" :class="{ pending: node.hint === '?' }">{{ shapeHintText(node.hint) }}</strong>
           </div>
+          <!-- 输入锚点（顶部） -->
+          <div
+            v-if="node.type !== 'Input'"
+            class="node-port node-port-in"
+            :data-endpoint="node.id"
+            data-port-kind="in"
+            title="连线接入点"
+          ></div>
+          <!-- 输出端口（底部）：按住拖到另一个节点即可连线 -->
+          <div
+            v-if="node.type !== 'Output'"
+            class="node-port node-port-out"
+            :data-endpoint="node.id"
+            data-port-kind="out"
+            title="按住拖到另一个节点即可连线"
+            @mousedown="onPortMouseDown($event, node.id)"
+          ><iconify-icon icon="mdi:plus"></iconify-icon></div>
         </template>
-        <!-- 输入锚点（顶部）：与输出端口对称，作为连线的接入点 -->
-        <div
-          v-if="node.type !== 'Input'"
-          class="node-port node-port-in"
-          title="连线接入点"
-        ></div>
-        <!-- 输出端口（底部）：按住拖到另一个节点即可连线 -->
-        <div
-          v-if="node.type !== 'Output'"
-          class="node-port node-port-out"
-          title="按住拖到另一个节点即可连线"
-          @mousedown="onPortMouseDown($event, node.id)"
-        ><iconify-icon icon="mdi:plus"></iconify-icon></div>
       </article>
     </div>
     </main>

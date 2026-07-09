@@ -14,7 +14,6 @@ import type {
   ModelGraphConnection,
   ModelGraphLayer,
   MonitorLayer,
-  ParamBinding,
   Point,
   SubGraph,
   TemplateMeta,
@@ -29,6 +28,21 @@ export const CONTAINER_TYPE = "Container";
 // 展平后内部层层级 id 分隔符（与后端 graph_utils.CONTAINER_ID_SEP 保持一致，
 // 前端据此把 /validate 返回的内部层 shape 映射回容器子图各节点）
 export const CONTAINER_ID_SEP = "__";
+// 主画布连线里"容器端口"端点的分隔符：容器id::内部端口层id（与后端 graph_utils.PORT_SEP 一致）
+export const PORT_SEP = "::";
+
+// 连线端点工具：拆出基节点 id / 端口 id
+export function endpointBaseId(endpoint: string): string {
+  const index = endpoint.indexOf(PORT_SEP);
+  return index === -1 ? endpoint : endpoint.slice(0, index);
+}
+export function endpointPortId(endpoint: string): string | null {
+  const index = endpoint.indexOf(PORT_SEP);
+  return index === -1 ? null : endpoint.slice(index + PORT_SEP.length);
+}
+export function makePortEndpoint(containerId: string, portId: string): string {
+  return `${containerId}${PORT_SEP}${portId}`;
+}
 
 export const GUIDE_VISITED_KEY = "model-workshop-visited";
 
@@ -97,6 +111,27 @@ export type ValidationStatus = "unvalidated" | "passing" | "failed";
 export type NodeBadgeState = "none" | "passed" | "pending";
 export type ExportCodeFormat = "py" | "ipynb";
 
+// 进入容器子画板编辑时压栈的"父层"快照：退出时用它还原画布，并把编辑好的
+// 子图写回对应容器节点。
+export interface EditFrame {
+  containerId: string;
+  containerName: string;
+  nodes: GraphNode[];
+  connections: Connection[];
+  edgeControls: Record<string, Point>;
+  nodeCounters: Record<string, number>;
+  selectedNodeId: string | null;
+  selectedConnectionKey: string | null;
+  validationStatus: ValidationStatus;
+  nodeBadge: NodeBadgeState;
+  nodeErrors: Record<string, string>;
+  inFeatures: number;
+  zoom: number;
+  panX: number;
+  panY: number;
+  hasCenteredInitialGraph: boolean;
+}
+
 // 一个独立画布：模型图、选中态、校验态、训练任务、导出结果、视口都相互隔离，
 // 使各画布可以并行进行结构检查 / 保存 / 导出 / 训练。
 // 异步操作在发起时捕获画布引用，完成时把结果写回原画布（即使用户已切换标签页）。
@@ -110,9 +145,9 @@ export interface WorkCanvas {
   nodeCounters: Record<string, number>;
   // 选中态
   selectedNodeId: string | null;
-  // 多选：用于"打包为容器"。selectedNodeId 仍表示参数面板聚焦的单个节点。
-  selectedNodeIds: string[];
   selectedConnectionKey: string | null;
+  // 容器子画板编辑：进入容器时把父层图压栈，画布字段换成容器子图；退出时还原
+  editStack: EditFrame[];
   // 结构校验（结果通过 toast 弹窗提示）
   validationStatus: ValidationStatus;
   nodeBadge: NodeBadgeState;
@@ -151,8 +186,8 @@ export function createCanvas(
     edgeControls: {},
     nodeCounters: {},
     selectedNodeId: null,
-    selectedNodeIds: [],
     selectedConnectionKey: null,
+    editStack: [],
     validationStatus: "unvalidated",
     nodeBadge: "none",
     nodeErrors: {},
@@ -529,9 +564,9 @@ export function updateNodeDisplay(node: GraphNode) {
     node.note = formatLayerNote({ params: node.params });
   }
 
-  // 自定义容器：用内部层数量作为节点说明
+  // 自定义容器：用内部层数量（不含端口）作为节点说明
   if (node.type === CONTAINER_TYPE && node.subgraph) {
-    node.note = `${node.subgraph.nodes.length} 层`;
+    node.note = `${containerLayerCount(node)} 层`;
   }
 }
 
@@ -589,31 +624,26 @@ export function updateShapeHints(canvas: WorkCanvas = activeCanvas(), shapes?: R
 }
 
 
-// 按层级前缀递归回填 shape：普通层取自身 output，容器取输入/输出边界并下钻内部层。
+// 按层级前缀递归回填 shape：普通层取自身 output；容器下钻内部层（含 Input/Output
+// 端口节点），端口节点的 hint 即各端口尺寸，供画布卡片在每个端口锚点旁显示。
 function applyShapeHintsToNodes(
   nodes: GraphNode[],
   shapes: Record<string, LayerShapeInfo>,
   prefix: string
 ) {
   nodes.forEach(node => {
+    const flatId = prefix + node.id;
     if (node.type === CONTAINER_TYPE && node.subgraph) {
-      const containerFlatId = prefix + node.id;
-      const innerPrefix = `${containerFlatId}${CONTAINER_ID_SEP}`;
-      const inputId = node.subgraph.inputs[0];
-      const outputId = node.subgraph.outputs[0];
-
-      const outputHint = outputId
-        ? formatShapeHint(shapes[`${innerPrefix}${outputId}`]?.output_shape)
-        : null;
-      const inputHint = inputId
-        ? formatShapeHint(shapes[`${innerPrefix}${inputId}`]?.input_shape)
+      const innerPrefix = `${flatId}${CONTAINER_ID_SEP}`;
+      // 容器整体输出摘要 = 第一个 Output 端口的输出
+      const firstOutput = node.subgraph.nodes.find(inner => inner.type === "Output");
+      const outputHint = firstOutput
+        ? formatShapeHint(shapes[`${innerPrefix}${firstOutput.id}`]?.output_shape)
         : null;
       if (outputHint) node.hint = outputHint;
-      if (inputHint) node.inputHint = inputHint;
-
       applyShapeHintsToNodes(node.subgraph.nodes, shapes, innerPrefix);
     } else {
-      const hint = formatShapeHint(shapes[prefix + node.id]?.output_shape);
+      const hint = formatShapeHint(shapes[flatId]?.output_shape);
       if (hint) {
         node.hint = hint;
       }
@@ -634,206 +664,99 @@ export function formatLayerNote(layer: { params?: Record<string, unknown> }) {
 
 
 // —————————————————————————————————————————————
-// 自定义容器（组合容器）：打包 / 解组 / 会话内可复用库
+// 自定义容器（组合容器）：空白容器 / 子画板端口 / 会话内可复用库
 // —————————————————————————————————————————————
-
-// 打包成容器时，每种内部层默认对外暴露的"招牌"参数（保持面板紧凑）。
-const CONTAINER_EXPOSED_KEYS: Record<string, Array<{ key: string; label: string; kind: "number" | "boolean" }>> = {
-  Conv2D: [{ key: "out_channels", label: "输出通道", kind: "number" }],
-  Linear: [{ key: "out_features", label: "输出神经元", kind: "number" }],
-  Pooling: [{ key: "kernel_size", label: "池化核", kind: "number" }],
-  Dropout: [{ key: "p", label: "失活比例", kind: "number" }],
-  LSTM: [{ key: "hidden_size", label: "隐藏维度", kind: "number" }],
-  TransformerEncoder: [
-    { key: "d_model", label: "特征维度", kind: "number" },
-    { key: "num_heads", label: "注意力头数", kind: "number" },
-  ],
-  SelfAttention: [
-    { key: "embed_dim", label: "嵌入维度", kind: "number" },
-    { key: "num_heads", label: "注意力头数", kind: "number" },
-  ],
-};
 
 // 会话内可复用容器库（组件库底部"我的容器"来源；跨设备持久化为后续里程碑）
 export const containerLibrary = reactive<{ items: ContainerDef[] }>({ items: [] });
 let containerDefSeq = 0;
 
-function cloneSubgraph(subgraph: SubGraph): SubGraph {
+// 新建空容器时子图里预置的入口示例形状
+const DEFAULT_CONTAINER_INPUT_SHAPE = [1, 28, 28];
+
+export function cloneSubgraph(subgraph: SubGraph): SubGraph {
   return {
-    nodes: subgraph.nodes.map(node => ({ ...node, params: { ...node.params } })),
+    nodes: subgraph.nodes.map(node => ({
+      ...node,
+      params: { ...node.params },
+      subgraph: node.subgraph ? cloneSubgraph(node.subgraph) : undefined,
+    })),
     connections: subgraph.connections.map(connection => [...connection] as Connection),
     inputs: [...subgraph.inputs],
     outputs: [...subgraph.outputs],
+    nodeCounters: { ...(subgraph.nodeCounters || {}) },
   };
 }
 
-export type GroupResult =
-  | { ok: true; container: GraphNode; keepNodes: GraphNode[]; keepConnections: Connection[] }
-  | { ok: false; reason: string };
+// 容器的输入/输出端口 = 子图里的 Input / Output 节点（按数组顺序，多个即多输入/多输出）
+export function containerInputPorts(node: GraphNode): GraphNode[] {
+  return node.subgraph ? node.subgraph.nodes.filter(inner => inner.type === "Input") : [];
+}
+export function containerOutputPorts(node: GraphNode): GraphNode[] {
+  return node.subgraph ? node.subgraph.nodes.filter(inner => inner.type === "Output") : [];
+}
 
-// 从当前画布的一组选中节点计算出容器节点与改写后的外层图（纯数据，不改状态）。
-export function buildContainerFromSelection(canvas: WorkCanvas, ids: string[]): GroupResult {
-  const idSet = new Set(ids);
-  const selected = canvas.nodes.filter(node => idSet.has(node.id));
+// 容器内部“真正的层数”（不含 Input/Output 端口）
+export function containerLayerCount(node: GraphNode): number {
+  if (!node.subgraph) return 0;
+  return node.subgraph.nodes.filter(inner => inner.type !== "Input" && inner.type !== "Output").length;
+}
 
-  if (selected.length < 2) {
-    return { ok: false, reason: "请先按住 Shift 选择至少 2 个节点再打包。" };
-  }
-  const forbidden = selected.find(node => ["Input", "Output", "Add"].includes(node.type));
-  if (forbidden) {
-    return { ok: false, reason: "Input / Output / Add 节点不能打包进容器。" };
-  }
-  if (selected.some(node => node.type === CONTAINER_TYPE)) {
-    return { ok: false, reason: "暂不支持把已有容器再嵌套打包。" };
-  }
+// 从一组节点推导节点计数器（进入子画板编辑时避免新增节点 id 冲突）
+export function deriveNodeCounters(nodes: GraphNode[]): Record<string, number> {
+  const counters: Record<string, number> = {};
+  nodes.forEach(node => {
+    const match = /_(\d+)$/.exec(node.id);
+    const n = match ? Number(match[1]) : 0;
+    counters[node.type] = Math.max(counters[node.type] || 0, n);
+  });
+  return counters;
+}
 
-  const hasExternalPred = (nodeId: string) =>
-    canvas.connections.some(([source, target]) => target === nodeId && !idSet.has(source));
-  const hasExternalSucc = (nodeId: string) =>
-    canvas.connections.some(([source, target]) => source === nodeId && !idSet.has(target));
-  const hasInternalPred = (nodeId: string) =>
-    canvas.connections.some(([source, target]) => target === nodeId && idSet.has(source));
-  const hasInternalSucc = (nodeId: string) =>
-    canvas.connections.some(([source, target]) => source === nodeId && idSet.has(target));
+// 把编辑好的子画板（节点+连线）打包回一个 SubGraph（端口 = Input/Output 节点）
+export function subgraphFromCanvas(
+  nodes: GraphNode[],
+  connections: Connection[],
+  nodeCounters: Record<string, number>
+): SubGraph {
+  return {
+    nodes: nodes.map(node => ({ ...node })),
+    connections: connections.map(connection => [...connection] as Connection),
+    inputs: nodes.filter(node => node.type === "Input").map(node => node.id),
+    outputs: nodes.filter(node => node.type === "Output").map(node => node.id),
+    nodeCounters: { ...nodeCounters },
+  };
+}
 
-  const inputs = selected.filter(node => hasExternalPred(node.id) || !hasInternalPred(node.id)).map(node => node.id);
-  const outputs = selected.filter(node => hasExternalSucc(node.id) || !hasInternalSucc(node.id)).map(node => node.id);
-
-  if (inputs.length !== 1 || outputs.length !== 1) {
-    return { ok: false, reason: "当前仅支持单入口、单出口的容器，请选择一段连续相连的层。" };
-  }
-
+// 从组件库拖入的“空白容器”：预置一个 Input 和一个 Output 端口，等待双击进入编辑
+export function createEmptyContainerNode(canvas: WorkCanvas, x: number, y: number): GraphNode {
   canvas.nodeCounters[CONTAINER_TYPE] = (canvas.nodeCounters[CONTAINER_TYPE] || 0) + 1;
   const containerId = `container_${canvas.nodeCounters[CONTAINER_TYPE]}`;
 
-  // 暴露参数 + 绑定
-  const params: Record<string, unknown> = {};
-  const paramBindings: ParamBinding[] = [];
-  selected.forEach(node => {
-    (CONTAINER_EXPOSED_KEYS[node.type] || []).forEach(({ key, label, kind }) => {
-      if (node.params[key] === undefined) return;
-      const paramName = `${node.id}.${key}`;
-      params[paramName] = node.params[key];
-      paramBindings.push({ param: paramName, target: node.id, key, label: `${node.title} · ${label}`, kind });
-    });
-  });
-
-  // 内部子图：拷贝节点并转为相对坐标（展开视图用）
-  const minX = Math.min(...selected.map(node => node.x));
-  const minY = Math.min(...selected.map(node => node.y));
-  const innerNodes = selected.map(node => ({
-    ...node,
-    params: { ...node.params },
-    x: node.x - minX,
-    y: node.y - minY,
-  }));
-  const internalConnections = canvas.connections
-    .filter(([source, target]) => idSet.has(source) && idSet.has(target))
-    .map(connection => [...connection] as Connection);
-
-  const centerX = Math.round(selected.reduce((sum, node) => sum + node.x, 0) / selected.length);
-  const centerY = Math.round(selected.reduce((sum, node) => sum + node.y, 0) / selected.length);
-
-  const container: GraphNode = {
-    id: containerId,
-    type: CONTAINER_TYPE,
-    title: "Container",
-    badge: "容器",
-    color: "teal",
-    note: `${innerNodes.length} 层`,
-    hint: "?",
-    x: centerX,
-    y: centerY,
-    params,
-    paramBindings,
-    collapsed: true,
-    subgraph: { nodes: innerNodes, connections: internalConnections, inputs, outputs },
+  const inputNode: GraphNode = {
+    id: "input_1", type: "Input", title: "Input", badge: "Input", color: "emerald",
+    hint: DEFAULT_CONTAINER_INPUT_SHAPE.join("x"),
+    x: 96, y: 48, params: { shape: [...DEFAULT_CONTAINER_INPUT_SHAPE] },
+  };
+  const outputNode: GraphNode = {
+    id: "output_1", type: "Output", title: "Output", badge: "Output", color: "rose",
+    hint: "?", x: 96, y: 320, params: {},
+  };
+  const subgraph: SubGraph = {
+    nodes: [inputNode, outputNode],
+    connections: [],
+    inputs: ["input_1"],
+    outputs: ["output_1"],
+    nodeCounters: { Input: 1, Output: 1 },
   };
 
-  // 改写外层：删除被选中节点、加入容器，跨边界连线改接到容器
-  const keepNodes = canvas.nodes.filter(node => !idSet.has(node.id));
-  keepNodes.push(container);
-
-  const keepConnections: Connection[] = [];
-  const seen = new Set<string>();
-  const addConn = (source: string, target: string) => {
-    const key = `${source}->${target}`;
-    if (source !== target && !seen.has(key)) {
-      seen.add(key);
-      keepConnections.push([source, target]);
-    }
+  return {
+    id: containerId, type: CONTAINER_TYPE, title: "Container", badge: "容器", color: "teal",
+    note: "空容器 · 双击编辑", hint: "?", x, y, params: {}, collapsed: true, subgraph,
   };
-  canvas.connections.forEach(([source, target]) => {
-    const sourceIn = idSet.has(source);
-    const targetIn = idSet.has(target);
-    if (sourceIn && targetIn) return; // 内部连线（已进子图）
-    if (!sourceIn && !targetIn) addConn(source, target);
-    else if (!sourceIn && targetIn) addConn(source, containerId);
-    else if (sourceIn && !targetIn) addConn(containerId, target);
-  });
-
-  return { ok: true, container, keepNodes, keepConnections };
 }
 
-// 解组：把容器还原成内部层（纯数据）。返回改写后的外层图，找不到容器时返回 null。
-export function expandContainerToNodes(
-  canvas: WorkCanvas,
-  containerId: string
-): { keepNodes: GraphNode[]; keepConnections: Connection[] } | null {
-  const container = canvas.nodes.find(node => node.id === containerId && node.type === CONTAINER_TYPE);
-  if (!container || !container.subgraph) return null;
-
-  const subgraph = container.subgraph;
-  // 把编辑过的暴露参数写回内部层
-  const bindingsByTarget = new Map<string, Array<{ key: string; value: unknown }>>();
-  (container.paramBindings || []).forEach(binding => {
-    const value = container.params[binding.param];
-    if (value === undefined) return;
-    const list = bindingsByTarget.get(binding.target) || [];
-    list.push({ key: binding.key, value });
-    bindingsByTarget.set(binding.target, list);
-  });
-
-  const restoredNodes = subgraph.nodes.map(node => {
-    const params = { ...node.params };
-    (bindingsByTarget.get(node.id) || []).forEach(({ key, value }) => {
-      params[key] = value;
-    });
-    return {
-      ...node,
-      params,
-      x: container.x + node.x,
-      y: container.y + node.y,
-    };
-  });
-
-  const keepNodes = canvas.nodes.filter(node => node.id !== containerId).concat(restoredNodes);
-  const keepConnections: Connection[] = [];
-  const seen = new Set<string>();
-  const addConn = (source: string, target: string) => {
-    const key = `${source}->${target}`;
-    if (source !== target && !seen.has(key)) {
-      seen.add(key);
-      keepConnections.push([source, target]);
-    }
-  };
-  // 内部连线还原
-  subgraph.connections.forEach(([source, target]) => addConn(source, target));
-  // 外层连线：到容器的改接到入口层，从容器出的改接到出口层
-  canvas.connections.forEach(([source, target]) => {
-    if (source === containerId) {
-      subgraph.outputs.forEach(outputId => addConn(outputId, target));
-    } else if (target === containerId) {
-      subgraph.inputs.forEach(inputId => addConn(source, inputId));
-    } else {
-      addConn(source, target);
-    }
-  });
-
-  return { keepNodes, keepConnections };
-}
-
-// 把容器节点存入会话内可复用库
+// 把容器存入会话内可复用库
 export function saveContainerToLibrary(container: GraphNode, name: string): ContainerDef | null {
   if (container.type !== CONTAINER_TYPE || !container.subgraph) return null;
   containerDefSeq += 1;
@@ -842,32 +765,22 @@ export function saveContainerToLibrary(container: GraphNode, name: string): Cont
     name: name.trim() || container.title || "Container",
     color: container.color || "teal",
     subgraph: cloneSubgraph(container.subgraph),
-    params: { ...container.params },
-    paramBindings: (container.paramBindings || []).map(binding => ({ ...binding })),
   };
   containerLibrary.items.push(def);
   return def;
 }
 
-// 从库定义实例化一个容器节点（内部层 id 沿用定义，靠容器 id 前缀保证展平后唯一）
+// 从库定义实例化一个容器节点（内部 id 沿用定义，靠容器 id 前缀保证展平后唯一）
 export function instantiateContainerDef(canvas: WorkCanvas, def: ContainerDef, x: number, y: number): GraphNode {
   canvas.nodeCounters[CONTAINER_TYPE] = (canvas.nodeCounters[CONTAINER_TYPE] || 0) + 1;
   const containerId = `container_${canvas.nodeCounters[CONTAINER_TYPE]}`;
-  return {
-    id: containerId,
-    type: CONTAINER_TYPE,
-    title: def.name,
-    badge: "容器",
-    color: def.color,
-    note: `${def.subgraph.nodes.length} 层`,
-    hint: "?",
-    x,
-    y,
-    params: { ...def.params },
-    paramBindings: def.paramBindings.map(binding => ({ ...binding })),
-    collapsed: true,
-    subgraph: cloneSubgraph(def.subgraph),
+  const subgraph = cloneSubgraph(def.subgraph);
+  const node: GraphNode = {
+    id: containerId, type: CONTAINER_TYPE, title: def.name, badge: "容器", color: def.color,
+    note: "", hint: "?", x, y, params: {}, collapsed: true, subgraph,
   };
+  node.note = `${containerLayerCount(node)} 层`;
+  return node;
 }
 
 
@@ -943,7 +856,8 @@ function buildBackendModelGraph(nodes: GraphNode[], connections: Connection[]) {
 }
 
 // 把一组节点 + 连线序列化为后端模型图（Add 折叠为 merge 参数）。
-// 遇到自定义容器时递归序列化其内部子图，并附带 subgraph / param_bindings。
+// 遇到自定义容器时递归序列化其内部子图，端口 inputs/outputs 取子图里的
+// Input/Output 节点 id（后端展平时把它们变为 Identity 直通端口）。
 function serializeGraph(nodes: GraphNode[], connections: Connection[]): {
   layers: ModelGraphLayer[];
   connections: ModelGraphConnection[];
@@ -965,14 +879,9 @@ function serializeGraph(nodes: GraphNode[], connections: Connection[]): {
         layer.subgraph = {
           layers: sub.layers,
           connections: sub.connections,
-          inputs: node.subgraph.inputs,
-          outputs: node.subgraph.outputs,
+          inputs: node.subgraph.nodes.filter(inner => inner.type === "Input").map(inner => inner.id),
+          outputs: node.subgraph.nodes.filter(inner => inner.type === "Output").map(inner => inner.id),
         };
-        layer.param_bindings = (node.paramBindings || []).map(({ param, target, key }) => ({
-          param,
-          target,
-          key,
-        }));
       }
 
       return layer;

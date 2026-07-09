@@ -213,6 +213,9 @@ def generate_layer_code(layer_config, input_shape=None):
     if layer_type == "ReLU":
         return "nn.ReLU()"
 
+    if layer_type == "Identity":
+        return "nn.Identity()"
+
     if layer_type == "Flatten":
         return "nn.Flatten()"
 

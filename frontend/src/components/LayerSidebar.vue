@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { NEW_CONTAINER_PAYLOAD } from "../canvas";
 import { containerLibrary, layerGroups } from "../store";
 
 const searchQuery = ref("");
+
+function handleNewContainerDragStart(event: DragEvent) {
+  event.dataTransfer?.setData("text/plain", NEW_CONTAINER_PAYLOAD);
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "copy";
+  }
+}
 
 // "我的容器"：会话内已保存的可复用容器（按搜索词过滤）
 const filteredContainers = computed(() => {
@@ -64,6 +72,38 @@ function handleDragStart(event: DragEvent, layerType: string) {
       <input type="text" id="layer-search-input" placeholder="搜索组件，例如 Conv" v-model="searchQuery">
     </div>
     <div class="layer-list" id="layer-palette">
+      <!-- 自定义容器：拖入空白容器，双击进入子画板搭建内部 -->
+      <section class="layer-group">
+        <h3>自定义容器 / Container</h3>
+        <div class="layer-items">
+          <article
+            class="layer-item layer-item-container"
+            draggable="true"
+            title="拖到画布 → 双击进入子画板，像搭模型一样构建内部；用 Input/Output 定义输入输出端口"
+            @dragstart="handleNewContainerDragStart"
+          >
+            <span class="layer-icon teal"><iconify-icon icon="mdi:package-variant-closed"></iconify-icon></span>
+            <div>
+              <strong>空白容器</strong>
+              <span>拖入后双击进入编辑</span>
+            </div>
+          </article>
+          <article
+            v-for="def in filteredContainers"
+            :key="def.defId"
+            class="layer-item"
+            draggable="true"
+            @dragstart="handleContainerDragStart($event, def.defId)"
+          >
+            <span :class="`layer-icon ${def.color}`"><iconify-icon icon="mdi:package-variant"></iconify-icon></span>
+            <div>
+              <strong>{{ def.name }}</strong>
+              <span>已保存容器</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <section
         v-for="group in filteredGroups"
         :key="group.title"
@@ -87,29 +127,6 @@ function handleDragStart(event: DragEvent, layerType: string) {
             <div>
               <strong>{{ layer.type }}</strong>
               <span>{{ layer.desc }}</span>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <!-- 我的容器：把打包好的组合容器拖到画布上复用 -->
-      <section
-        v-if="filteredContainers.length"
-        class="layer-group"
-      >
-        <h3>我的容器 / Containers</h3>
-        <div class="layer-items">
-          <article
-            v-for="def in filteredContainers"
-            :key="def.defId"
-            class="layer-item"
-            draggable="true"
-            @dragstart="handleContainerDragStart($event, def.defId)"
-          >
-            <span :class="`layer-icon ${def.color}`"><iconify-icon icon="mdi:package-variant-closed"></iconify-icon></span>
-            <div>
-              <strong>{{ def.name }}</strong>
-              <span>{{ def.subgraph.nodes.length }} 层组合容器</span>
             </div>
           </article>
         </div>
