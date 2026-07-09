@@ -132,6 +132,16 @@ export interface EpochMetrics {
   eval?: { loss?: number; accuracy?: number };
 }
 
+export interface DatasetProgress {
+  dataset_name?: string;
+  status?: "pending" | "checking" | "downloading" | "ready" | "cancelled" | "failed";
+  percent?: number;
+  downloaded_bytes?: number;
+  total_bytes?: number;
+  file_name?: string;
+  message?: string;
+}
+
 export interface TrainingStatus {
   job_id?: string;
   status?: string;
@@ -141,6 +151,7 @@ export interface TrainingStatus {
   total_steps?: number;
   progress?: number;
   metrics?: EpochMetrics[];
+  dataset_progress?: DatasetProgress | null;
   error?: string;
 }
 
@@ -190,6 +201,7 @@ export interface WsMessage {
   total_steps?: number;
   progress?: number;
   metrics?: EpochMetrics[];
+  dataset_progress?: DatasetProgress | null;
   loss?: number;
   accuracy?: number;
   device?: string;
@@ -249,6 +261,7 @@ export interface LoginPayload {
 // 前端本地维护的训练任务（底部任务面板）
 export interface TrainingJob extends TrainingStatus {
   trainConfig?: TrainConfig;
+  modelSummary?: TrainingModelSummary;
 }
 
 export interface DevicesResponse {
@@ -334,4 +347,11 @@ export interface Toast {
 export interface MonitorLayer {
   type: string;
   color: string;
+}
+
+export interface TrainingModelSummary {
+  modelName: string;
+  inputShape: number[] | null;
+  numClasses: number | null;
+  paramCount: number;
 }

@@ -191,6 +191,7 @@ function routeTrainingMessage(message: WsMessage, isFinal: boolean) {
       total_epochs: message.total_epochs,
       progress: isFinal ? 1 : message.progress,
       metrics: message.metrics,
+      dataset_progress: message.dataset_progress,
     });
   }
 
@@ -230,6 +231,7 @@ function messageToStatus(message: WsMessage): TrainingStatus {
     total_steps: message.total_steps,
     progress: message.progress,
     metrics: message.metrics,
+    dataset_progress: message.dataset_progress,
     error: message.error,
   };
 }
@@ -243,6 +245,7 @@ function messageToResult(message: WsMessage): TrainingResult {
     loss: message.loss,
     device: message.device,
     metrics: message.metrics,
+    dataset_progress: message.dataset_progress,
     error: message.error,
   };
 }

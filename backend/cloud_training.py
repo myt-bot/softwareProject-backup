@@ -315,6 +315,15 @@ async def create_cloud_training_job(request: CloudTrainRequest, user_id: str = Q
         "total_steps": 0,
         "progress": 0.0,
         "metrics": [],
+        "dataset_progress": {
+            "dataset_name": train_config.get("dataset_name", "MNIST"),
+            "status": "pending",
+            "percent": 0.0,
+            "downloaded_bytes": 0,
+            "total_bytes": 0,
+            "file_name": "",
+            "message": "等待准备数据集",
+        },
         "result": None,
         "error": None,
         "created_at": time.time(),
@@ -365,6 +374,7 @@ def get_cloud_training_status(job_id: str, user_id: str = Query(...)) -> dict[st
         "total_steps": record["total_steps"],
         "progress": record["progress"],
         "metrics": record["metrics"],
+        "dataset_progress": record.get("dataset_progress"),
         "error": record["error"],
     }
 
@@ -396,6 +406,7 @@ async def cancel_cloud_training_job(job_id: str, user_id: str = Query(...)) -> d
         "total_steps": record["total_steps"],
         "progress": record["progress"],
         "metrics": record["metrics"],
+        "dataset_progress": record.get("dataset_progress"),
     })
     return {"job_id": job_id, "cancelled": True, "status": record["status"], "message": "已向本机 Agent 转发取消请求。"}
 
@@ -414,6 +425,7 @@ def get_cloud_training_result(job_id: str, user_id: str = Query(...)) -> dict[st
         "loss": result.get("loss"),
         "accuracy": result.get("accuracy"),
         "metrics": record["metrics"],
+        "dataset_progress": record.get("dataset_progress"),
         "device": result.get("device"),
         "artifacts": result.get("artifacts"),
         "error": record["error"],
@@ -864,6 +876,8 @@ def handle_agent_training_update(agent_id: str, message: dict[str, Any]) -> dict
         record["progress"] = message["progress"]
     if message.get("metrics") is not None:
         record["metrics"] = message["metrics"]
+    if message.get("dataset_progress") is not None:
+        record["dataset_progress"] = message["dataset_progress"]
     if message.get("error") is not None:
         record["error"] = message["error"]
 
@@ -873,6 +887,7 @@ def handle_agent_training_update(agent_id: str, message: dict[str, Any]) -> dict
             "accuracy": message.get("accuracy"),
             "device": message.get("device"),
             "artifacts": message.get("artifacts"),
+            "dataset_progress": message.get("dataset_progress"),
         }
 
     return {"status": "ok", "job_id": job_id, "accepted": True, "message": "已更新"}

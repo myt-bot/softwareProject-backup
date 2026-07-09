@@ -220,7 +220,17 @@ def _run_and_stream(job_id: str, local_job_id: str) -> None:
                 status = runtime_trainer.get_job_status(local_job_id)
             except Exception:
                 break
-            signature = (status.get("status"), status.get("current_epoch"), status.get("current_step"), len(status.get("metrics", [])))
+            dataset_progress = status.get("dataset_progress") or {}
+            signature = (
+                status.get("status"),
+                status.get("current_epoch"),
+                status.get("current_step"),
+                len(status.get("metrics", [])),
+                dataset_progress.get("status"),
+                dataset_progress.get("percent"),
+                dataset_progress.get("downloaded_bytes"),
+                dataset_progress.get("file_name"),
+            )
             if signature != last_signature:
                 last_signature = signature
                 send_training_update(job_id, status.get("status", "running"), {
@@ -231,6 +241,7 @@ def _run_and_stream(job_id: str, local_job_id: str) -> None:
                     "total_steps": status.get("total_steps", 0),
                     "progress": status.get("progress", 0.0),
                     "metrics": status.get("metrics", []),
+                    "dataset_progress": dataset_progress,
                 })
             if status.get("status") in ("completed", "failed", "cancelled"):
                 break
@@ -263,6 +274,7 @@ def _run_and_stream(job_id: str, local_job_id: str) -> None:
         "device": result.get("device"),
         "metrics": metrics,
         "artifacts": result.get("artifacts"),
+        "dataset_progress": result.get("dataset_progress"),
         "error": result.get("error"),
     })
 

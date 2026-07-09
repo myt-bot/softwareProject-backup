@@ -4175,6 +4175,10 @@ body.is-connecting .node-port {
   background: rgba(255, 255, 255, 0.85);
 }
 
+.tm-ep-track.dataset i {
+  background: linear-gradient(90deg, #fb7185, #ef4444);
+}
+
 .tm-ep-track.overall i {
   background: linear-gradient(90deg, #10b981, #22d3ee);
 }

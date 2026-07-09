@@ -11,7 +11,7 @@
 
 import { reactive } from "vue";
 import { showToast } from "./store";
-import type { CancelTrainingResponse, EpochMetrics, MonitorLayer, TrainingResult, TrainingStatus } from "./types";
+import type { CancelTrainingResponse, DatasetProgress, EpochMetrics, MonitorLayer, TrainingModelSummary, TrainingResult, TrainingStatus } from "./types";
 
 // 预设指标曲线（mock），趋势合理：loss 下降、acc 上升、val 略低但接近。
 export const MOCK = {
@@ -51,6 +51,13 @@ const DEFAULT_HYPERPARAMS: MonitorHyperparams = {
   device: "CPU",
 };
 
+const DEFAULT_MODEL_SUMMARY: TrainingModelSummary = {
+  modelName: "模型",
+  inputShape: null,
+  numClasses: null,
+  paramCount: 0,
+};
+
 export interface MonitorSeries {
   totalEpochs: number;
   loss: number[];
@@ -80,6 +87,7 @@ export interface OpenMonitorOptions {
   hyperparams?: Partial<MonitorHyperparams>;
   layers?: MonitorLayer[];
   paramCount?: number;
+  modelSummary?: Partial<TrainingModelSummary>;
 }
 
 // 非响应式的回调（live 进度由客户端 WebSocket 推送，不再轮询）
@@ -95,13 +103,15 @@ export const monitor = reactive({
   jobId: null as string | null,
   hyperparams: { ...DEFAULT_HYPERPARAMS } as MonitorHyperparams,
   layers: DEFAULT_LAYERS as MonitorLayer[],
-  paramCount: 367114,
+  modelSummary: { ...DEFAULT_MODEL_SUMMARY } as TrainingModelSummary,
+  paramCount: 0,
   pollAttempt: 0,
   progress: 0.3,
   currentEpoch: 3,
   currentStep: 180,
   totalSteps: 600,
   series: emptySeries(10) as MonitorSeries, // live 模式的真实逐轮指标
+  datasetProgress: null as DatasetProgress | null,
   result: null as TrainingResult | null,
   error: null as string | null,
   stopping: false, // 停止请求已发出、等待后端确认
@@ -117,7 +127,8 @@ export function openTrainingMonitor(options: OpenMonitorOptions = {}) {
   monitor.stopping = false;
   monitor.hyperparams = { ...DEFAULT_HYPERPARAMS, ...(options.hyperparams || {}) };
   monitor.layers = options.layers?.length ? options.layers : DEFAULT_LAYERS;
-  monitor.paramCount = options.paramCount || monitor.paramCount;
+  monitor.modelSummary = { ...DEFAULT_MODEL_SUMMARY, ...(options.modelSummary || {}) };
+  monitor.paramCount = options.paramCount ?? monitor.modelSummary.paramCount ?? 0;
 
   monitor.state = "running";
   monitor.visibleEpochs = 3;
@@ -126,6 +137,7 @@ export function openTrainingMonitor(options: OpenMonitorOptions = {}) {
   monitor.currentStep = monitor.live ? 0 : 180;
   monitor.totalSteps = monitor.live ? 0 : 600;
   monitor.series = emptySeries(monitor.hyperparams.epochs);
+  monitor.datasetProgress = null;
   monitor.result = null;
   monitor.error = null;
   monitor.pollAttempt = 0;
@@ -246,6 +258,7 @@ export async function handleRerun() {
   monitor.currentStep = monitor.live ? 0 : 180;
   monitor.totalSteps = monitor.live ? 0 : 600;
   monitor.series = emptySeries(monitor.hyperparams.epochs);
+  monitor.datasetProgress = null;
   monitor.result = null;
   monitor.error = null;
 
@@ -301,6 +314,9 @@ export function applyStatusMessage(status: TrainingStatus) {
   monitor.progress = typeof status?.progress === "number"
     ? status.progress
     : (total ? current / total : 0);
+  if (status?.dataset_progress !== undefined) {
+    monitor.datasetProgress = status.dataset_progress;
+  }
   monitor.state = "running";
   monitor.stopping = status?.status === "cancelling" || monitor.stopping;
   monitor.error = status?.error || null;
@@ -322,6 +338,9 @@ export function applyResultMessage(result: TrainingResult) {
   monitor.stopping = false;
   monitor.result = result;
   ingestMetrics(result?.metrics, result?.total_epochs || monitor.hyperparams.epochs);
+  if (result?.dataset_progress !== undefined) {
+    monitor.datasetProgress = result.dataset_progress;
+  }
   monitor.state = "completed";
   monitor.progress = 1;
   monitor.currentEpoch = monitor.series.loss.length || monitor.hyperparams.epochs;

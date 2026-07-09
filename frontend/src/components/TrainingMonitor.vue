@@ -78,15 +78,44 @@ const hpRows = computed(() => [
   { label: "设备 device", value: monitor.hyperparams.device },
 ]);
 
+const modelName = computed(() => monitor.modelSummary.modelName || "模型");
+const inputShapeText = computed(() => formatShape(monitor.modelSummary.inputShape));
+const numClassesText = computed(() => monitor.modelSummary.numClasses ?? "--");
+
 // —— 进度总览（新手友好的主视觉区）——
 const overallPercent = computed(() =>
   Math.round((isRunning.value ? monitor.progress : 1) * 100)
 );
 
+const datasetProgress = computed(() => monitor.datasetProgress);
+const datasetStatus = computed(() => datasetProgress.value?.status || "");
+const datasetPercent = computed(() => {
+  const raw = datasetProgress.value?.percent;
+  if (typeof raw === "number" && Number.isFinite(raw)) return clampPercent(raw);
+  if (datasetStatus.value === "ready" || monitor.totalSteps > 0) return 100;
+  return 0;
+});
+const datasetPercentText = computed(() => `${datasetPercent.value.toFixed(datasetPercent.value % 1 === 0 ? 0 : 1)}%`);
+const datasetBytesText = computed(() => {
+  const downloaded = datasetProgress.value?.downloaded_bytes || 0;
+  const total = datasetProgress.value?.total_bytes || 0;
+  if (!downloaded || !total) return "";
+  return `${formatBytes(downloaded)} / ${formatBytes(total)}`;
+});
+const datasetStageActive = computed(() =>
+  isRunning.value && ["pending", "checking", "downloading"].includes(datasetStatus.value)
+);
+const datasetLabel = computed(() => datasetProgress.value?.dataset_name || "数据集");
+const datasetFileLabel = computed(() => datasetProgress.value?.file_name || datasetLabel.value);
+
 const heroTitle = computed(() => {
   if (monitor.error) return "训练失败";
-  if (monitor.stopping) return `正在停止：等待第 ${displayEpoch.value}/${totalEpochs.value} 轮结束`;
+  if (monitor.stopping) return "正在停止训练";
   if (isCancelled.value) return "训练已停止";
+  if (datasetStageActive.value) {
+    if (datasetStatus.value === "downloading") return `正在下载 ${datasetFileLabel.value} · ${datasetPercentText.value}`;
+    return `正在准备 ${datasetLabel.value} 数据集`;
+  }
   if (isRunning.value) return `正在进行第 ${displayEpoch.value}/${totalEpochs.value} 轮训练`;
   return "训练完成 🎉";
 });
@@ -94,7 +123,7 @@ const heroTitle = computed(() => {
 const heroSubtitle = computed(() => {
   if (monitor.error) return monitor.error;
   if (monitor.stopping) {
-    return "停止请求已发送。当前轮会继续跑完并写入 loss / accuracy 曲线，完成后训练会自动停止。";
+    return "停止请求已发送。数据集准备 / 下载阶段会尽快中断；训练批次进行中时会在可中断点安全停止。";
   }
   if (isCancelled.value) {
     return "训练已按请求停止，曲线保留了停止前已完成轮次的真实指标。";
@@ -151,6 +180,24 @@ const logLines = computed(() => {
 
   return lines;
 });
+
+function formatShape(shape: number[] | null | undefined) {
+  if (!Array.isArray(shape) || shape.length === 0) return "--";
+  if (shape.length === 3) {
+    return `${shape[1]}×${shape[2]}×${shape[0]}`;
+  }
+  return shape.join("×");
+}
+
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, value));
+}
+
+function formatBytes(value: number) {
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${value} B`;
+}
 </script>
 
 <template>
@@ -165,7 +212,7 @@ const logLines = computed(() => {
           <nav class="tm-breadcrumb">
             <span>项目</span>
             <iconify-icon icon="mdi:chevron-right"></iconify-icon>
-            <span>MNIST-CNN</span>
+            <span>{{ modelName }}</span>
             <iconify-icon icon="mdi:chevron-right"></iconify-icon>
             <strong>Training</strong>
           </nav>
@@ -220,8 +267,8 @@ const logLines = computed(() => {
             </div>
             <div class="tm-summary-grid">
               <div><span>#params</span><strong>{{ formatInt(monitor.paramCount) }}</strong></div>
-              <div><span>Input shape</span><strong>28×28×1</strong></div>
-              <div><span>num_classes</span><strong>10</strong></div>
+              <div><span>Input shape</span><strong>{{ inputShapeText }}</strong></div>
+              <div><span>num_classes</span><strong>{{ numClassesText }}</strong></div>
             </div>
           </section>
 
@@ -246,6 +293,11 @@ const logLines = computed(() => {
               </div>
             </div>
             <div v-if="isRunning" class="tm-hero-bars">
+              <div class="tm-hero-bar dataset">
+                <span class="tm-hero-bar-label">数据集下载</span>
+                <div class="tm-ep-track big dataset"><i :style="{ width: `${datasetPercent}%` }"></i></div>
+                <span class="tm-hero-bar-value">{{ datasetPercentText }}<template v-if="datasetBytesText"> · {{ datasetBytesText }}</template></span>
+              </div>
               <div class="tm-hero-bar">
                 <span class="tm-hero-bar-label">本轮进度</span>
                 <div class="tm-ep-track big"><i :style="{ width: `${epochPercent}%` }"></i></div>

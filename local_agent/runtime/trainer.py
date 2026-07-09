@@ -1,5 +1,6 @@
 """本地 PyTorch 训练流程。"""
 
+from contextlib import contextmanager
 import json
 import os
 
@@ -16,6 +17,10 @@ from .model_builder import build_model
 
 TRANING_JOBS = {} #后续改为数据库存储
 
+
+class _DatasetPreparationCancelled(Exception):
+    """内部异常：用户在数据集准备/下载阶段请求取消训练。"""
+
 # 训练产物（模型权重、指标）默认保存目录。
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 ARTIFACTS_ROOT = os.path.join(PROJECT_ROOT, "training_artifacts")
@@ -24,7 +29,7 @@ ARTIFACTS_ROOT = os.path.join(PROJECT_ROOT, "training_artifacts")
 STATUS_MESSAGES = {
     "pending": "训练任务已创建，等待开始",
     "running": "正在训练",
-    "cancelling": "正在停止，等待当前轮结束",
+    "cancelling": "正在停止训练",
     "completed": "训练完成",
     "failed": "训练失败",
     "cancelled": "训练已取消",
@@ -84,7 +89,16 @@ def create_training_job(model_graph, train_config):
         "total_epochs": train_config["epochs"],
         "metrics": [],
         "error": None,
-        "cancel_requested": False
+        "cancel_requested": False,
+        "dataset_progress": {
+            "dataset_name": train_config.get("dataset_name", "MNIST"),
+            "status": "pending",
+            "percent": 0.0,
+            "downloaded_bytes": 0,
+            "total_bytes": 0,
+            "file_name": "",
+            "message": "等待准备数据集",
+        },
     }
 
     return {
@@ -143,7 +157,12 @@ def run_training_job(job_id):
             dataset_name=dataset_name,
             batch_size=batch_size,
             data_dir=train_config.get("data_dir") or None,
+            cancel_check=lambda: job.get("cancel_requested"),
+            progress_callback=lambda progress: _set_dataset_progress(job, progress),
         )
+
+        if job.get("cancel_requested"):
+            raise _DatasetPreparationCancelled()
 
         metrics = []
         job["total_steps"] = len(train_loader)
@@ -206,6 +225,20 @@ def run_training_job(job_id):
         }
         job["result"] = completed_result
         return completed_result
+
+    except _DatasetPreparationCancelled:
+        _set_dataset_progress(job, {
+            "status": "cancelled",
+            "message": "数据集下载已取消",
+        })
+        job["status"] = "cancelled"
+        cancelled_result = {
+            "job_id": job_id,
+            "status": "cancelled",
+            "metrics": job.get("metrics", []),
+        }
+        job["result"] = cancelled_result
+        return cancelled_result
 
     except Exception as exc:
         job["status"] = "failed"
@@ -330,13 +363,15 @@ def _build_optimizer(optimizer_config, model, rate):
     raise ValueError(f"暂不支持的优化器配置: {optimizer_config}")
 
 
-def prepare_dataset(dataset_name, batch_size, data_dir=None):
+def prepare_dataset(dataset_name, batch_size, data_dir=None, cancel_check=None, progress_callback=None):
     """加载并预处理用户选择的内置数据集。
 
     参数：
         dataset_name：数据集名称，例如 "MNIST"、"FashionMNIST" 或 "CIFAR10"。
         batch_size：每个训练批次的数据量，用于构造 DataLoader。
         data_dir：数据集下载/缓存目录；为空时使用各数据集的默认位置。
+        cancel_check：可选回调；返回 True 时中断数据集准备，用于首次下载较慢时立即响应停止请求。
+        progress_callback：可选回调；下载/准备状态变化时回传进度信息。
 
     返回：
         训练集 DataLoader 和测试集 DataLoader。
@@ -345,18 +380,40 @@ def prepare_dataset(dataset_name, batch_size, data_dir=None):
     dataset_spec = DATASET_SPECS[dataset_key]
     dataset_class = dataset_spec["class"]
     transform = _build_dataset_transform(dataset_key)
+    _report_dataset_progress(progress_callback, {
+        "dataset_name": dataset_key,
+        "status": "checking",
+        "percent": 0.0,
+        "downloaded_bytes": 0,
+        "total_bytes": 0,
+        "file_name": "",
+        "message": f"正在检查 {dataset_key} 数据集",
+    })
 
     if data_dir:
         dataset_root = os.path.join(os.path.expanduser(data_dir), dataset_key)
     else:
         dataset_root = dataset_spec["root"]
 
-    train_data = dataset_class(
-        root=dataset_root,
-        train=True,
-        transform=transform,
-        download=True
-    )
+    _raise_if_cancelled(cancel_check)
+    with _interruptible_torchvision_download(cancel_check, progress_callback, dataset_key):
+        train_data = dataset_class(
+            root=dataset_root,
+            train=True,
+            transform=transform,
+            download=True
+        )
+
+    _raise_if_cancelled(cancel_check)
+    _report_dataset_progress(progress_callback, {
+        "dataset_name": dataset_key,
+        "status": "ready",
+        "percent": 100.0,
+        "downloaded_bytes": 0,
+        "total_bytes": 0,
+        "file_name": "",
+        "message": f"{dataset_key} 数据集已就绪",
+    })
 
     test_data = dataset_class(
         root=dataset_root,
@@ -376,6 +433,111 @@ def prepare_dataset(dataset_name, batch_size, data_dir=None):
     )
 
     return train_dataloader, test_dataloader
+
+
+def _raise_if_cancelled(cancel_check):
+    if cancel_check is not None and cancel_check():
+        raise _DatasetPreparationCancelled()
+
+
+def _set_dataset_progress(job, progress):
+    current = dict(job.get("dataset_progress") or {})
+    current.update({key: value for key, value in progress.items() if value is not None})
+    job["dataset_progress"] = current
+
+
+def _report_dataset_progress(progress_callback, progress):
+    if progress_callback is not None:
+        progress_callback(progress)
+
+
+@contextmanager
+def _interruptible_torchvision_download(cancel_check, progress_callback=None, dataset_name=""):
+    """让 torchvision 数据集下载在收到取消请求后尽快退出。
+
+    torchvision 的 download=True 默认是同步下载；如果不接管下载循环，停止请求
+    只能等下载完成后才生效。这里临时包装 datasets.utils._urlretrieve，在每个
+    chunk 之间检查取消标记，并清理未完成的临时文件。
+    """
+    if cancel_check is None:
+        yield
+        return
+
+    utils = torchvision.datasets.utils
+    original_urlretrieve = getattr(utils, "_urlretrieve", None)
+    if original_urlretrieve is None:
+        yield
+        return
+
+    def cancellable_urlretrieve(url, filename, chunk_size=1024 * 32):
+        import urllib.request
+
+        _raise_if_cancelled(cancel_check)
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        file_name = os.path.basename(str(filename)) or str(url).rsplit("/", 1)[-1]
+        try:
+            with urllib.request.urlopen(request) as response, open(filename, "wb") as output:  # noqa: S310
+                total_bytes = int(response.headers.get("Content-Length") or 0)
+                downloaded_bytes = 0
+                last_percent = -1.0
+                _report_dataset_progress(progress_callback, {
+                    "dataset_name": dataset_name,
+                    "status": "downloading",
+                    "percent": 0.0,
+                    "downloaded_bytes": 0,
+                    "total_bytes": total_bytes,
+                    "file_name": file_name,
+                    "message": f"正在下载 {file_name}",
+                })
+                while True:
+                    _raise_if_cancelled(cancel_check)
+                    chunk = response.read(chunk_size)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded_bytes += len(chunk)
+                    if total_bytes > 0:
+                        percent = round(downloaded_bytes / total_bytes * 100, 1)
+                        if percent != last_percent:
+                            print(f"{percent:.1f}%", flush=True)
+                            _report_dataset_progress(progress_callback, {
+                                "dataset_name": dataset_name,
+                                "status": "downloading",
+                                "percent": percent,
+                                "downloaded_bytes": downloaded_bytes,
+                                "total_bytes": total_bytes,
+                                "file_name": file_name,
+                                "message": f"正在下载 {file_name}",
+                            })
+                            last_percent = percent
+                if total_bytes <= 0:
+                    _report_dataset_progress(progress_callback, {
+                        "dataset_name": dataset_name,
+                        "status": "downloading",
+                        "percent": 100.0,
+                        "downloaded_bytes": downloaded_bytes,
+                        "total_bytes": downloaded_bytes,
+                        "file_name": file_name,
+                        "message": f"{file_name} 下载完成",
+                    })
+        except _DatasetPreparationCancelled:
+            _report_dataset_progress(progress_callback, {
+                "dataset_name": dataset_name,
+                "status": "cancelled",
+                "file_name": file_name,
+                "message": "数据集下载已取消",
+            })
+            try:
+                if os.path.exists(filename):
+                    os.remove(filename)
+            finally:
+                raise
+
+    utils._urlretrieve = cancellable_urlretrieve
+    try:
+        yield
+    finally:
+        utils._urlretrieve = original_urlretrieve
 
 
 def _resolve_dataset_key(dataset_name):
@@ -579,6 +741,7 @@ def get_job_status(job_id):
         "total_steps": total_steps,
         "progress": progress,
         "metrics": job.get("metrics", []),
+        "dataset_progress": job.get("dataset_progress"),
         "error": job.get("error"),
     }
 
@@ -620,6 +783,7 @@ def get_job_result(job_id):
         "metrics": metrics,
         "device": job.get("device"),
         "artifacts": result.get("artifacts"),
+        "dataset_progress": job.get("dataset_progress"),
         "error": job.get("error"),
     }
 

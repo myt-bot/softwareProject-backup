@@ -27,6 +27,13 @@ function handleContainerDragStart(event: DragEvent, defId: string) {
 
 // 组件库节点悬停详细介绍卡（自定义样式，替代原生 title）
 type LayerLike = { type: string; desc: string; icon: string; color: string; hint?: string };
+const blankContainerLayer: LayerLike = {
+  type: "空白容器",
+  desc: "封装可复用子网络",
+  icon: "mdi:package-variant-closed",
+  color: "teal",
+  hint: "把一段完整的网络结构打包成一个节点。拖到画布后双击进入子画板，在里面像搭普通模型一样放入层并连线；子图里的每个 Input 都会变成容器顶部的一个输入端口，每个 Output 都会变成底部的一个输出端口。适合封装残差块、编码器、分类头等重复结构，保存后还能在“我的容器”中反复拖入复用。",
+};
 const hovered = ref<{ layer: LayerLike; top: number; left: number } | null>(null);
 
 function showTip(event: MouseEvent, layer: LayerLike) {
@@ -79,8 +86,9 @@ function handleDragStart(event: DragEvent, layerType: string) {
           <article
             class="layer-item layer-item-container"
             draggable="true"
-            title="拖到画布 → 双击进入子画板，像搭模型一样构建内部；用 Input/Output 定义输入输出端口"
-            @dragstart="handleNewContainerDragStart"
+            @mouseenter="showTip($event, blankContainerLayer)"
+            @mouseleave="hideTip"
+            @dragstart="handleNewContainerDragStart($event); hideTip()"
           >
             <span class="layer-icon teal"><iconify-icon icon="mdi:package-variant-closed"></iconify-icon></span>
             <div>

@@ -24,6 +24,7 @@ import {
   getCurrentModelGraph,
   getTrainConfig,
   getTrainingLayers,
+  getTrainingSummary,
   isTrainingJobActive,
   setTrainingJob,
   showToast,
@@ -399,6 +400,7 @@ export async function handleStartTraining() {
       total_epochs: trainConfig.epochs,
       progress: 0,
       trainConfig,
+      modelSummary: getTrainingSummary(canvas),
     });
     showToast("success", `训练任务已下发到本机 Agent。`);
     if (jobId) {
@@ -430,6 +432,7 @@ function openTrainingMonitorForCanvas(canvas: WorkCanvas) {
     cancelJob: (jobId: string) => cancelTraining(jobId, auth.user!.id!),
     hyperparams: canvas.trainingJob.trainConfig || getTrainConfig(canvas),
     layers: getTrainingLayers(canvas),
+    modelSummary: canvas.trainingJob.modelSummary || getTrainingSummary(canvas),
     onRerun: async () => {
       const { jobId, trainConfig, result } = await submitTrainingJob(canvas);
       if (result?.agent_status === "offline") {
@@ -443,6 +446,7 @@ function openTrainingMonitorForCanvas(canvas: WorkCanvas) {
         total_epochs: trainConfig.epochs,
         progress: 0,
         trainConfig,
+        modelSummary: getTrainingSummary(canvas),
       });
       return { jobId };
     },

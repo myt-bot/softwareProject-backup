@@ -21,6 +21,7 @@ import type {
   ToastType,
   TrainConfig,
   TrainingJob,
+  TrainingModelSummary,
 } from "./types";
 
 // 自定义容器节点的类型标识（与后端 graph_utils.CONTAINER_TYPE 对应）
@@ -926,6 +927,174 @@ export function getTrainingLayers(canvas: WorkCanvas = activeCanvas()): MonitorL
       type: node.badge || node.type,
       color: node.color || "cyan",
     }));
+}
+
+
+export function getTrainingSummary(canvas: WorkCanvas = activeCanvas()): TrainingModelSummary {
+  const inputNode = canvas.nodes.find(node => node.type === "Input");
+  const inputShape = numericShape(inputNode?.params.shape);
+
+  return {
+    modelName: canvas.name,
+    inputShape,
+    numClasses: inferNumClasses(canvas),
+    paramCount: countModelParams(canvas, inputShape),
+  };
+}
+
+
+function inferNumClasses(canvas: WorkCanvas): number | null {
+  const outputIds = new Set(canvas.nodes.filter(node => node.type === "Output").map(node => node.id));
+  const nodeMap = new Map(canvas.nodes.map(node => [node.id, node]));
+  const visited = new Set<string>();
+  const queue = canvas.connections
+    .filter(([, target]) => outputIds.has(endpointBaseId(target)))
+    .map(([source]) => endpointBaseId(source));
+
+  while (queue.length > 0) {
+    const nodeId = queue.shift()!;
+    if (visited.has(nodeId)) continue;
+    visited.add(nodeId);
+
+    const node = nodeMap.get(nodeId);
+    const outFeatures = positiveNumber(node?.params.out_features);
+    if (node?.type === "Linear" && outFeatures !== null) {
+      return outFeatures;
+    }
+
+    canvas.connections
+      .filter(([, target]) => endpointBaseId(target) === nodeId)
+      .forEach(([source]) => queue.push(endpointBaseId(source)));
+  }
+
+  const linearNodes = canvas.nodes.filter(node => node.type === "Linear");
+  const lastLinear = linearNodes[linearNodes.length - 1];
+  return positiveNumber(lastLinear?.params.out_features);
+}
+
+
+function countModelParams(canvas: WorkCanvas, initialShape: number[] | null): number {
+  const shapeByNode = new Map<string, number[]>();
+  const pending = new Set(canvas.nodes.map(node => node.id));
+  let total = 0;
+  let changed = true;
+
+  while (pending.size > 0 && changed) {
+    changed = false;
+    for (const node of canvas.nodes) {
+      if (!pending.has(node.id)) continue;
+
+      const inputShapes = incomingShapes(canvas, node.id, shapeByNode);
+      if (node.type !== "Input" && inputShapes.length === 0 && canvas.connections.some(([, target]) => endpointBaseId(target) === node.id)) {
+        continue;
+      }
+
+      const primaryInput = inputShapes[0] || null;
+      const result = inferNodeParamAndShape(node, primaryInput, inputShapes, initialShape);
+      total += result.params;
+      if (result.shape) {
+        shapeByNode.set(node.id, result.shape);
+      }
+      pending.delete(node.id);
+      changed = true;
+    }
+  }
+
+  return total;
+}
+
+
+function incomingShapes(canvas: WorkCanvas, nodeId: string, shapeByNode: Map<string, number[]>): number[][] {
+  return canvas.connections
+    .filter(([, target]) => endpointBaseId(target) === nodeId)
+    .map(([source]) => shapeByNode.get(endpointBaseId(source)))
+    .filter((shape): shape is number[] => Array.isArray(shape));
+}
+
+
+function inferNodeParamAndShape(
+  node: GraphNode,
+  primaryInput: number[] | null,
+  inputShapes: number[][],
+  initialShape: number[] | null
+): { params: number; shape: number[] | null } {
+  if (node.type === "Input") {
+    return { params: 0, shape: numericShape(node.params.shape) || initialShape };
+  }
+
+  if (node.type === "Conv2D" && primaryInput?.length === 3) {
+    const inChannels = primaryInput[0]!;
+    const outChannels = positiveNumber(node.params.out_channels);
+    const kernel = positiveNumber(node.params.kernel_size);
+    const stride = positiveNumber(node.params.stride) || 1;
+    const padding = nonNegativeNumber(node.params.padding) ?? 0;
+    if (outChannels === null || kernel === null) return { params: 0, shape: primaryInput };
+    const outH = Math.floor((primaryInput[1]! + 2 * padding - kernel) / stride + 1);
+    const outW = Math.floor((primaryInput[2]! + 2 * padding - kernel) / stride + 1);
+    return {
+      params: outChannels * (inChannels * kernel * kernel + 1),
+      shape: outH > 0 && outW > 0 ? [outChannels, outH, outW] : [outChannels],
+    };
+  }
+
+  if ((node.type === "MaxPooling" || node.type === "Pooling") && primaryInput?.length === 3) {
+    const kernel = positiveNumber(node.params.kernel_size) || 2;
+    const stride = positiveNumber(node.params.stride) || kernel;
+    const padding = nonNegativeNumber(node.params.padding) ?? 0;
+    const outH = Math.floor((primaryInput[1]! + 2 * padding - kernel) / stride + 1);
+    const outW = Math.floor((primaryInput[2]! + 2 * padding - kernel) / stride + 1);
+    return { params: 0, shape: outH > 0 && outW > 0 ? [primaryInput[0]!, outH, outW] : primaryInput };
+  }
+
+  if (node.type === "Flatten") {
+    return { params: 0, shape: primaryInput ? [shapeProduct(primaryInput)] : null };
+  }
+
+  if (node.type === "Linear") {
+    const outFeatures = positiveNumber(node.params.out_features);
+    if (outFeatures === null) return { params: 0, shape: primaryInput };
+    const inFeatures = positiveNumber(node.params.in_features) ?? (primaryInput ? shapeProduct(primaryInput) : 0);
+    return { params: inFeatures > 0 ? outFeatures * (inFeatures + 1) : 0, shape: [outFeatures] };
+  }
+
+  if (node.type === "GraphConv") {
+    const outFeatures = positiveNumber(node.params.out_features);
+    const inFeatures = primaryInput?.[primaryInput.length - 1] || 0;
+    return {
+      params: outFeatures && inFeatures ? outFeatures * (inFeatures + 1) : 0,
+      shape: outFeatures && primaryInput ? [...primaryInput.slice(0, -1), outFeatures] : primaryInput,
+    };
+  }
+
+  if (node.type === "Add" && inputShapes.length > 0) {
+    return { params: 0, shape: inputShapes[0]! };
+  }
+
+  return { params: 0, shape: primaryInput };
+}
+
+
+function numericShape(value: unknown): number[] | null {
+  if (!Array.isArray(value)) return null;
+  const shape = value.map(item => Number(item));
+  return shape.length > 0 && shape.every(item => Number.isFinite(item) && item > 0) ? shape : null;
+}
+
+
+function shapeProduct(shape: number[]): number {
+  return shape.reduce((total, value) => total * value, 1);
+}
+
+
+function positiveNumber(value: unknown): number | null {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? num : null;
+}
+
+
+function nonNegativeNumber(value: unknown): number | null {
+  const num = Number(value);
+  return Number.isFinite(num) && num >= 0 ? num : null;
 }
 
 
