@@ -48,8 +48,8 @@
 
 - Python 3.10 或更高版本
 - Node.js 20.19 或更高版本（前端 Vue 3 + TypeScript + Vite）
-- MySQL 8（后端存储；推荐直接用 Docker Compose 启动，见下文「Docker Compose 一键部署」）
-- Docker（可选，用于一键部署云端后端与数据库）
+- SQLite（默认部署数据库，使用 `DATABASE_URL=sqlite:////abs/path/app.db` 配置）
+- MySQL 8（可选，仅在需要独立数据库服务或更高并发时使用）
 - CUDA GPU 可选
 - 无 GPU 时自动使用 CPU
 
@@ -87,12 +87,10 @@ npm run preview     # 预览生产构建产物
 
 终端二：启动云端后端 FastAPI 服务。
 
-云端后端存储使用 MySQL，启动后端前需保证 `DATABASE_URL` 环境变量（缺省为
-`mysql+pymysql://root:devroot@127.0.0.1:3306/visual_dl`）指向的数据库可用。
-最简单的方式是先用 Docker 只启动数据库：
+云端后端部署时使用 SQLite，可通过 `DATABASE_URL` 环境变量指定数据库文件路径。例如：
 
 ```bash
-docker compose up -d db
+DATABASE_URL=sqlite:///./visual_dl.db
 ```
 
 然后启动云端后端：
@@ -153,70 +151,22 @@ python local_agent/launcher.py --server http://127.0.0.1:8000 --token <你的JWT
 Agent 连接成功后，网页顶栏会显示「本机训练已连接」，此时才能进行结构校验、训练与
 代码导出（这些都需要本机的 PyTorch 运行时）。
 
-## Docker Compose 一键部署（云端后端 + MySQL）
+## SQLite 数据库配置
 
-仓库提供了 `docker-compose.yml`，可一条命令同时启动 MySQL 数据库和云端后端 API，适合演示答辩、服务器部署和新成员快速上手。云端后端只负责用户、项目、数据库和训练任务中转，不在服务器上执行 PyTorch 训练。
-
-### 首次启动
+当前部署方式使用 SQLite。推荐在项目根目录创建 `.env`，显式指定数据库文件和密钥：
 
 ```bash
-# （可选）自定义密码/密钥：复制环境变量模板并按需编辑；跳过则使用开发默认值
-cp .env.example .env
-
-# 构建镜像并启动全部云端服务（MySQL + 云端后端 API）
-docker compose up -d --build
-
-# （可选）把 data/ 下的历史 JSON 数据导入 MySQL（幂等脚本，可重复执行）
-python -m backend.migrate_json_to_mysql
+DATABASE_URL=sqlite:////var/www/visualdl/visual_dl.db
+JWT_SECRET_KEY=请替换为生产环境随机密钥
 ```
 
-启动后：云端后端 API 在 `http://127.0.0.1:8000`，MySQL 在 `127.0.0.1:3306`（只绑定本机回环地址，不对外网暴露）。前端仍按上文方式用 npm 启动；训练功能需要用户本机 Agent 在线。
-
-### 常用命令
-
-| 命令                             | 作用                                             |
-| -------------------------------- | ------------------------------------------------ |
-| `docker compose ps`            | 查看服务状态                                     |
-| `docker compose logs -f api`   | 跟踪后端日志                                     |
-| `docker compose down`          | 停止并删除容器（**数据卷保留，数据不丢**） |
-| `docker compose down -v`       | ⚠️ 连数据卷一起删除，数据库数据将清空          |
-| `docker compose up -d --build` | 代码更新后重新构建镜像并启动                     |
-
-### 数据持久化与备份
-
-MySQL 数据存放在命名数据卷 `softwareproject_mysql_data` 中（位于宿主机磁盘），
-容器删除、重建、镜像升级均不影响数据；只有显式执行 `docker compose down -v`
-或 `docker volume rm` 才会删除数据。
-
-备份与恢复：
+开发环境也可以使用相对路径：
 
 ```bash
-# 备份（在项目根目录执行）
-docker exec vdl-mysql mysqldump -uroot -p密码 visual_dl > backup_$(date +%F).sql
-
-# 恢复
-docker exec -i vdl-mysql mysql -uroot -p密码 visual_dl < backup_2026-07-06.sql
+DATABASE_URL=sqlite:///./visual_dl.db
 ```
 
-### 环境变量
-
-| 变量                    | 默认值        | 说明                                                 |
-| ----------------------- | ------------- | ---------------------------------------------------- |
-| `MYSQL_ROOT_PASSWORD` | `devroot`   | MySQL root 密码（生产部署必改）                      |
-| `MYSQL_DATABASE`      | `visual_dl` | 数据库名                                             |
-| `JWT_SECRET_KEY`      | 开发默认值    | JWT 签名密钥（生产部署必改）                         |
-| `DATABASE_URL`        | 指向本机 3306 | 后端数据库连接串；手动运行后端时可用它指向任意 MySQL |
-
-在项目根目录创建 `.env`（参考 `.env.example`）即可覆盖默认值；`.env` 已被
-`.gitignore` 忽略，不会提交到仓库。
-
-### 端口说明与常见问题
-
-- Docker 方式启动的后端与「服务启动方法」中手动 `uvicorn` 启动的后端**共用
-  8000 端口，二者同一时间只能运行一个**。若 `docker compose up` 报
-  `bind: address already in use`，先停掉手动启动的后端（包括其他项目副本里
-  启动的）再执行。
-- 只想用 Docker 跑数据库、后端仍在本机调试：`docker compose up -d db`。
+SQLite 数据就是一个本地文件，部署时需要确保 uvicorn 进程对该文件所在目录有读写权限。备份时直接复制 `.db` 文件即可；如果服务正在运行，建议先停服务或使用 SQLite 在线备份方式，避免复制到未落盘的中间状态。
 
 ## 生产部署（Nginx + uvicorn，域名访问）
 
@@ -331,7 +281,6 @@ project/
     M7_templates_docs/  # M7 内置模板模块测试
   requirements.txt      # Python 依赖
   docker-compose.yml    # 一键部署编排：MySQL + 云端后端 API
-  Dockerfile            # 云端后端 API 镜像构建配方
   .env.example          # 部署环境变量模板（复制为 .env 使用）
   README.md             # 项目开发文档
 ```

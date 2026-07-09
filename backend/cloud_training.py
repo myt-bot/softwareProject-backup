@@ -884,5 +884,5 @@ def get_online_agent_for_user(user_id: str) -> Optional[dict[str, Any]]:
     return agent.meta() if agent is not None else None
 
 
-# 供 Docker/环境变量覆盖：训练产物默认目录（仅当 Agent 未指定时使用）
+# 供环境变量覆盖：训练产物默认目录（仅当 Agent 未指定时使用）
 DEFAULT_ARTIFACTS_ROOT = os.getenv("ARTIFACTS_ROOT", "training_artifacts")

@@ -1,7 +1,7 @@
 """Lightweight .env loading for local development.
 
-Docker Compose reads .env by itself, but manual uvicorn runs do not. This keeps
-local startup predictable without adding a runtime dependency.
+Manual uvicorn runs do not load .env files by default. This keeps local startup
+predictable without adding a runtime dependency.
 """
 
 from __future__ import annotations
