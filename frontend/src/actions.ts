@@ -20,6 +20,7 @@ import { openTrainingMonitor } from "./monitor";
 import {
   activeCanvas,
   agent,
+  CONTAINER_ID_SEP,
   getCurrentModelGraph,
   getTrainConfig,
   getTrainingLayers,
@@ -130,8 +131,11 @@ function applyValidationResult(canvas: WorkCanvas, result: ValidationResult) {
   const shapes = result?.shapes || {};
   for (const [layerId, info] of Object.entries(shapes)) {
     if (info?.status && info.status !== "ok") {
-      const node = canvas.nodes.find(n => n.id === layerId);
-      nodeErrors[layerId] = friendlyShapeError(node?.title || layerId, info);
+      // 容器内部层的错误（层级 id 形如 容器id__内部层id）归到容器节点上标红
+      const containerId = layerId.split(CONTAINER_ID_SEP)[0]!;
+      const node = canvas.nodes.find(n => n.id === layerId) || canvas.nodes.find(n => n.id === containerId);
+      const targetId = node ? node.id : layerId;
+      nodeErrors[targetId] = friendlyShapeError(node?.title || layerId, info);
     }
   }
   canvas.nodeErrors = nodeErrors;

@@ -5,7 +5,7 @@ import keyword
 import re
 from typing import Any
 
-from .graph_utils import build_predecessor_map, topological_sort_layers
+from .graph_utils import build_predecessor_map, flatten_graph, topological_sort_layers
 from .validator import infer_all_shapes, validate_model_graph
 
 
@@ -919,10 +919,11 @@ def _extract_train_config(model_graph, explicit_train_config=None):
 
 def _normalize_graph(model_graph):
     if isinstance(model_graph, str):
-        return json.loads(model_graph)
+        model_graph = json.loads(model_graph)
     if not isinstance(model_graph, dict):
         raise ValueError("模型图必须是 JSON 对象")
-    return model_graph
+    # 自定义容器：展平成纯层扁平图后再导出（幂等，不含容器时原样返回）。
+    return flatten_graph(model_graph)
 
 
 def _ensure_valid_graph(model_graph):

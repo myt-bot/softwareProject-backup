@@ -2,6 +2,14 @@
 
 import json
 
+# 自定义容器（组合容器）节点的类型标识。容器把若干内部层打包成一个命名节点，
+# 携带自己的子图 subgraph、对外暴露参数 params 以及参数绑定 param_bindings。
+CONTAINER_TYPE = "Container"
+
+# 展平后内部层 id 的层级分隔符。用双下划线而非 "/"，保证结果 id 仍是合法的
+# Python 标识符与合法的 nn.ModuleDict 键（前端按同一规则拼接以回查 shape）。
+CONTAINER_ID_SEP = "__"
+
 
 def normalize_model_graph(model_graph):
     """将 JSON 字符串或字典形式的模型图统一成字典。"""
@@ -9,6 +17,155 @@ def normalize_model_graph(model_graph):
         return json.loads(model_graph)
 
     return model_graph
+
+
+def prefixed_layer_id(container_id, inner_id):
+    """按统一规则拼接容器内部层的层级 id（前端 store 需保持同一规则以回查 shape）。"""
+    return f"{container_id}{CONTAINER_ID_SEP}{inner_id}"
+
+
+def graph_has_container(model_graph):
+    """判断模型图顶层是否包含自定义容器节点。"""
+    model_graph = normalize_model_graph(model_graph)
+    return any(
+        isinstance(layer, dict) and layer.get("type") == CONTAINER_TYPE
+        for layer in model_graph.get("layers", [])
+    )
+
+
+def flatten_graph(model_graph):
+    """把含自定义容器的模型图递归展平成纯层的扁平 DAG。
+
+    容器被就地内联：内部层 id 加容器 id 前缀（保证全局唯一），暴露参数按
+    param_bindings 写入对应内部层，跨容器边界的外部连线改接到内部入口/出口层。
+    对不含容器的图是幂等的（原样返回），因此可安全地在每个入口重复调用。
+
+    参数：
+        model_graph：可能含 Container 节点的模型图（前端画布导出格式）。
+
+    返回：
+        不含任何 Container 节点的扁平模型图 {layers, connections}。
+    """
+    model_graph = normalize_model_graph(model_graph)
+    layers = model_graph.get("layers", []) or []
+    connections = model_graph.get("connections", []) or []
+
+    # 幂等快路径：顶层没有容器就无需改写
+    if not any(
+        isinstance(layer, dict) and layer.get("type") == CONTAINER_TYPE
+        for layer in layers
+    ):
+        return model_graph
+
+    layer_by_id = {
+        layer["id"]: layer
+        for layer in layers
+        if isinstance(layer, dict) and "id" in layer
+    }
+    container_ids = {
+        layer_id
+        for layer_id, layer in layer_by_id.items()
+        if layer.get("type") == CONTAINER_TYPE
+    }
+
+    flat_layers = []
+    flat_connections = []
+
+    # 1) 逐个节点落地：普通层原样保留，容器就地内联（内部子图已递归展平）
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        if layer.get("type") == CONTAINER_TYPE:
+            _inline_container(layer, flat_layers, flat_connections)
+        else:
+            flat_layers.append(layer)
+
+    # 2) 改写外层连线：两端都非容器的原样保留；涉及容器的改接到其内部边界层
+    for connection in connections:
+        source = connection["source"]
+        target = connection["target"]
+        source_ids = (
+            _container_boundary(layer_by_id[source], "outputs")
+            if source in container_ids
+            else [source]
+        )
+        target_ids = (
+            _container_boundary(layer_by_id[target], "inputs")
+            if target in container_ids
+            else [target]
+        )
+        for real_source in source_ids:
+            for real_target in target_ids:
+                flat_connections.append({"source": real_source, "target": real_target})
+
+    return {"layers": flat_layers, "connections": flat_connections}
+
+
+def _inline_container(container, flat_layers, flat_connections):
+    """把单个容器的内部子图内联进扁平图（内部子图先递归展平以支持容器嵌套）。"""
+    container_id = container["id"]
+    subgraph = flatten_graph(container.get("subgraph") or {})
+
+    # 暴露参数 → 内部层参数：{内部层 id: {参数名: 值}}
+    exposed_params = container.get("params") or {}
+    binding_map = {}
+    for binding in container.get("param_bindings") or []:
+        value = exposed_params.get(binding.get("param"))
+        if value is None:
+            continue
+        binding_map.setdefault(binding.get("target"), {})[binding.get("key")] = value
+
+    for layer in subgraph.get("layers", []) or []:
+        if not isinstance(layer, dict):
+            continue
+        new_layer = dict(layer)
+        new_layer["id"] = prefixed_layer_id(container_id, layer["id"])
+        merged_params = dict(layer.get("params") or {})
+        if layer["id"] in binding_map:
+            merged_params.update(binding_map[layer["id"]])
+        new_layer["params"] = merged_params
+        flat_layers.append(new_layer)
+
+    for connection in subgraph.get("connections", []) or []:
+        flat_connections.append({
+            "source": prefixed_layer_id(container_id, connection["source"]),
+            "target": prefixed_layer_id(container_id, connection["target"]),
+        })
+
+
+def _container_boundary(container, key):
+    """返回容器对外边界层的（前缀化后）id 列表。
+
+    参数：
+        container：容器层配置。
+        key："inputs"（接收外部输入的内部层）或 "outputs"（产出外部输出的内部层）。
+    """
+    container_id = container["id"]
+    subgraph = container.get("subgraph") or {}
+    boundary_ids = subgraph.get(key)
+
+    if not boundary_ids:
+        boundary_ids = _infer_boundary_ids(subgraph, key)
+
+    return [prefixed_layer_id(container_id, inner_id) for inner_id in boundary_ids]
+
+
+def _infer_boundary_ids(subgraph, key):
+    """未显式声明边界时的兜底：inputs=无内部前驱的层，outputs=无内部后继的层。"""
+    layers = subgraph.get("layers", []) or []
+    connections = subgraph.get("connections", []) or []
+    has_predecessor = set()
+    has_successor = set()
+    for connection in connections:
+        has_successor.add(connection["source"])
+        has_predecessor.add(connection["target"])
+
+    seen = has_predecessor if key == "inputs" else has_successor
+    return [
+        layer["id"]
+        for layer in layers
+        if isinstance(layer, dict) and layer.get("id") not in seen
+    ]
 
 
 def topological_sort_layers(model_graph):

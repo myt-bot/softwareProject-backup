@@ -14,13 +14,52 @@ export interface GraphNode {
   color: string;
   note?: string;
   hint: string;
+  // 容器节点专用：输入侧尺寸（hint 复用为输出侧），用于画布卡片上的 输入→输出 展示
+  inputHint?: string;
   x: number;
   y: number;
   params: Record<string, unknown>;
+  // 自定义容器（type === "Container"）：内部子图、折叠态与暴露参数绑定
+  subgraph?: SubGraph;
+  collapsed?: boolean;
+  paramBindings?: ParamBinding[];
 }
 
 // 连线：[源节点 id, 目标节点 id]
 export type Connection = [string, string];
+
+// —————————————————————————————————————————————
+// 自定义容器（组合容器）
+// —————————————————————————————————————————————
+
+// 容器内部子图：一组内部层 + 内部连线 + 对外输入/输出边界（内部层 id）
+export interface SubGraph {
+  nodes: GraphNode[];
+  connections: Connection[];
+  // 接收容器外部输入的内部层 id；产出容器外部输出的内部层 id
+  inputs: string[];
+  outputs: string[];
+}
+
+// 暴露参数绑定：容器级参数 param 驱动内部层 target 的参数 key
+export interface ParamBinding {
+  param: string;
+  target: string;
+  key: string;
+  // 参数编辑面板展示用
+  label: string;
+  kind: "number" | "boolean";
+}
+
+// 组件库 / 会话内可复用的容器定义
+export interface ContainerDef {
+  defId: string;
+  name: string;
+  color: string;
+  subgraph: SubGraph;
+  params: Record<string, unknown>;
+  paramBindings: ParamBinding[];
+}
 
 // 左侧组件库条目
 export interface LayerPaletteItem {
@@ -46,6 +85,14 @@ export interface ModelGraphLayer {
   type: string;
   name?: string;
   params?: Record<string, unknown>;
+  // 自定义容器序列化：内部子图（后端格式）与暴露参数绑定
+  subgraph?: {
+    layers: ModelGraphLayer[];
+    connections: ModelGraphConnection[];
+    inputs: string[];
+    outputs: string[];
+  };
+  param_bindings?: Array<{ param: string; target: string; key: string }>;
 }
 
 export interface ModelGraphConnection {

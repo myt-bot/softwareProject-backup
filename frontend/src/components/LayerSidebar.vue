@@ -1,8 +1,21 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { layerGroups } from "../store";
+import { containerLibrary, layerGroups } from "../store";
 
 const searchQuery = ref("");
+
+// "我的容器"：会话内已保存的可复用容器（按搜索词过滤）
+const filteredContainers = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase();
+  return containerLibrary.items.filter(def => !query || def.name.toLowerCase().includes(query));
+});
+
+function handleContainerDragStart(event: DragEvent, defId: string) {
+  event.dataTransfer?.setData("text/plain", `container:${defId}`);
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "copy";
+  }
+}
 
 // 组件库节点悬停详细介绍卡（自定义样式，替代原生 title）
 type LayerLike = { type: string; desc: string; icon: string; color: string; hint?: string };
@@ -74,6 +87,29 @@ function handleDragStart(event: DragEvent, layerType: string) {
             <div>
               <strong>{{ layer.type }}</strong>
               <span>{{ layer.desc }}</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- 我的容器：把打包好的组合容器拖到画布上复用 -->
+      <section
+        v-if="filteredContainers.length"
+        class="layer-group"
+      >
+        <h3>我的容器 / Containers</h3>
+        <div class="layer-items">
+          <article
+            v-for="def in filteredContainers"
+            :key="def.defId"
+            class="layer-item"
+            draggable="true"
+            @dragstart="handleContainerDragStart($event, def.defId)"
+          >
+            <span :class="`layer-icon ${def.color}`"><iconify-icon icon="mdi:package-variant-closed"></iconify-icon></span>
+            <div>
+              <strong>{{ def.name }}</strong>
+              <span>{{ def.subgraph.nodes.length }} 层组合容器</span>
             </div>
           </article>
         </div>

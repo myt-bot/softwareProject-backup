@@ -4,11 +4,16 @@
 import { nextTick } from "vue";
 import {
   activeCanvas,
+  buildContainerFromSelection,
   clamp,
+  containerLibrary,
+  CONTAINER_TYPE,
   createCanvas,
+  expandContainerToNodes,
   formatLayerNote,
   getConnectionKey,
   getLayerConfig,
+  instantiateContainerDef,
   isTrainingJobActive,
   isKnownLayerType,
   nextCanvasName,
@@ -319,6 +324,7 @@ function applySnapshot(snapshot: GraphSnapshot) {
   );
   canvas.nodeCounters = { ...snapshot.nodeCounters };
   canvas.selectedNodeId = null;
+  canvas.selectedNodeIds = [];
   canvas.selectedConnectionKey = null;
   resetValidationAfterGraphChange(canvas);
   void redrawAfterDomUpdate();
@@ -1248,6 +1254,7 @@ export function deleteMenuNode(event: Event) {
   if (activeCanvas().selectedNodeId === nodeId) {
     activeCanvas().selectedNodeId = null;
   }
+  activeCanvas().selectedNodeIds = activeCanvas().selectedNodeIds.filter(id => id !== nodeId);
   if (store.connectSourceId === nodeId) {
     cancelPendingConnection();
   }
@@ -1315,12 +1322,91 @@ export function handleCanvasClick(event: MouseEvent) {
 
 export function handleCanvasDrop(event: DragEvent) {
   event.preventDefault();
-  const layerType = event.dataTransfer?.getData("text/plain");
-  // 只接受组件库拖来的已知层类型；忽略浏览器原生拖拽（选中文本、文件等）
-  if (!layerType || !isKnownLayerType(layerType)) return;
+  const payload = event.dataTransfer?.getData("text/plain");
+  if (!payload) return;
 
   const point = getCanvasPoint(event.clientX, event.clientY);
-  addNodeFromLayer(layerType, point.x - 112, point.y - 70);
+
+  // 从"我的容器"库拖入：实例化一个容器节点
+  if (payload.startsWith("container:")) {
+    const def = containerLibrary.items.find(item => item.defId === payload.slice("container:".length));
+    if (!def) return;
+    recordHistory();
+    const node = instantiateContainerDef(activeCanvas(), def, point.x - 112, point.y - 70);
+    activeCanvas().nodes.push(node);
+    void redrawAfterDomUpdate();
+    selectNode(node.id);
+    resetValidationAfterGraphChange();
+    showToast("success", `已添加容器 ${def.name}。`);
+    return;
+  }
+
+  // 只接受组件库拖来的已知层类型；忽略浏览器原生拖拽（选中文本、文件等）
+  if (!isKnownLayerType(payload)) return;
+  addNodeFromLayer(payload, point.x - 112, point.y - 70);
+}
+
+
+// —————————————————————————————————————————————
+// 自定义容器：打包 / 解组 / 折叠
+// —————————————————————————————————————————————
+
+export function groupSelectedIntoContainer() {
+  const canvas = activeCanvas();
+  const result = buildContainerFromSelection(canvas, canvas.selectedNodeIds);
+  if (!result.ok) {
+    showToast("warning", result.reason);
+    return;
+  }
+
+  recordHistory();
+  canvas.nodes = result.keepNodes;
+  canvas.connections = result.keepConnections;
+  canvas.selectedNodeId = result.container.id;
+  canvas.selectedNodeIds = [result.container.id];
+  resetValidationAfterGraphChange(canvas);
+  void redrawAfterDomUpdate();
+  showToast("success", `已把 ${result.container.subgraph!.nodes.length} 个节点打包为容器。`);
+}
+
+
+export function ungroupContainerNode(containerId: string) {
+  const canvas = activeCanvas();
+  const result = expandContainerToNodes(canvas, containerId);
+  if (!result) return;
+
+  recordHistory();
+  canvas.nodes = result.keepNodes;
+  canvas.connections = result.keepConnections;
+  canvas.selectedNodeId = null;
+  canvas.selectedNodeIds = [];
+  resetValidationAfterGraphChange(canvas);
+  void redrawAfterDomUpdate();
+  showToast("success", "已解组容器，内部层已还原到画布。");
+}
+
+
+export function toggleContainerCollapse(nodeId: string) {
+  const node = activeCanvas().nodes.find(item => item.id === nodeId);
+  if (!node || node.type !== CONTAINER_TYPE) return;
+  node.collapsed = !node.collapsed;
+  // 折叠态变化会改变卡片高度，需要重绘连线
+  void redrawAfterDomUpdate();
+}
+
+
+export function groupFromMenu(event: Event) {
+  event.stopPropagation();
+  hideNodeMenu();
+  groupSelectedIntoContainer();
+}
+
+
+export function ungroupFromMenu(event: Event) {
+  event.stopPropagation();
+  const nodeId = store.menuNodeId;
+  hideNodeMenu();
+  if (nodeId) ungroupContainerNode(nodeId);
 }
 
 
@@ -1423,9 +1509,23 @@ export function applyTemplateGraph(modelGraph: ModelGraph) {
 // 选中状态
 // —————————————————————————————————————————————
 
-export function selectNode(nodeId: string) {
-  activeCanvas().selectedNodeId = nodeId;
-  activeCanvas().selectedConnectionKey = null;
+export function selectNode(nodeId: string, additive = false) {
+  const canvas = activeCanvas();
+  if (additive) {
+    // Shift 点击：加入/移出多选集合（用于"打包为容器"）
+    const selection = new Set(canvas.selectedNodeIds);
+    if (selection.has(nodeId)) {
+      selection.delete(nodeId);
+    } else {
+      selection.add(nodeId);
+    }
+    canvas.selectedNodeIds = [...selection];
+    canvas.selectedNodeId = canvas.selectedNodeIds[canvas.selectedNodeIds.length - 1] ?? null;
+  } else {
+    canvas.selectedNodeId = nodeId;
+    canvas.selectedNodeIds = [nodeId];
+  }
+  canvas.selectedConnectionKey = null;
   // 点击节点卡片时重新展开参数面板
   ui.inspectorCollapsed = false;
 }
@@ -1433,6 +1533,7 @@ export function selectNode(nodeId: string) {
 
 export function deselectNode() {
   activeCanvas().selectedNodeId = null;
+  activeCanvas().selectedNodeIds = [];
   activeCanvas().selectedConnectionKey = null;
 }
 

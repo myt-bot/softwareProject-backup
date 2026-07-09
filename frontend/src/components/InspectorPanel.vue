@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { validateModelStructure } from "../api/client";
-import { recordHistory, redrawAfterDomUpdate } from "../canvas";
-import { activeCanvas, getCurrentModelGraph, showToast, ui, updateNodeParam } from "../store";
+import { recordHistory, redrawAfterDomUpdate, ungroupContainerNode } from "../canvas";
+import {
+  activeCanvas,
+  getCurrentModelGraph,
+  saveContainerToLibrary,
+  showToast,
+  ui,
+  updateNodeParam,
+} from "../store";
 import ParamNumberField from "./ParamNumberField.vue";
 
 const canvas = computed(() => activeCanvas());
@@ -148,6 +155,32 @@ const ADVANCED_INSPECTORS: Record<string, AdvancedInspector> = {
 const advancedInspector = computed(() =>
   selectedNode.value ? ADVANCED_INSPECTORS[selectedNode.value.type] ?? null : null
 );
+
+// —— 自定义容器编辑 ——
+const containerBindings = computed(() => selectedNode.value?.paramBindings ?? []);
+
+function renameContainer(event: Event) {
+  const node = selectedNode.value;
+  if (!node) return;
+  const name = (event.target as HTMLInputElement).value.trim();
+  if (!name) return;
+  node.title = name;
+  void redrawAfterDomUpdate();
+}
+
+function ungroupCurrent() {
+  const node = selectedNode.value;
+  if (node) ungroupContainerNode(node.id);
+}
+
+function saveCurrentToLibrary() {
+  const node = selectedNode.value;
+  if (!node) return;
+  const def = saveContainerToLibrary(node, node.title);
+  if (def) {
+    showToast("success", `已保存容器「${def.name}」到组件库，可在左侧"我的容器"复用。`);
+  }
+}
 
 function handleBooleanChange(key: string, event: Event) {
   setParam(key, (event.target as HTMLInputElement).checked);
@@ -316,6 +349,57 @@ const inputShapeValue = computed(() => {
       </div>
       <section class="info-card">
         <p>Add 节点会在导出给后端时折叠为目标节点的 add 合并方式。</p>
+      </section>
+    </div>
+
+    <!-- 自定义容器（组合容器） -->
+    <div v-else-if="selectedNode.type === 'Container'" class="inspector-scroll">
+      <div class="inspector-title">
+        <iconify-icon class="text-teal" icon="mdi:package-variant-closed"></iconify-icon>
+        <h2>容器参数</h2>
+      </div>
+
+      <label class="form-field">
+        <span>容器名称</span>
+        <input type="text" :value="selectedNode.title" @change="renameContainer">
+        <small>作为导出代码里的子模块名</small>
+      </label>
+
+      <div v-if="containerBindings.length" class="field-stack">
+        <template v-for="binding in containerBindings" :key="binding.param">
+          <ParamNumberField
+            v-if="binding.kind === 'number'"
+            :label="binding.label"
+            :value="selectedNode.params[binding.param]"
+            @change="setParam(binding.param, $event)"
+          />
+          <label v-else class="form-field switch-field">
+            <span>{{ binding.label }}</span>
+            <input
+              type="checkbox"
+              :checked="Boolean(selectedNode.params[binding.param])"
+              @change="handleBooleanChange(binding.param, $event)"
+            >
+          </label>
+        </template>
+      </div>
+      <section v-else class="info-card">
+        <p>该容器内部各层暂无可对外调整的参数。</p>
+      </section>
+
+      <div class="container-actions">
+        <button class="container-action-btn" @click="saveCurrentToLibrary">
+          <iconify-icon icon="mdi:content-save-outline"></iconify-icon>
+          存为可复用容器
+        </button>
+        <button class="container-action-btn danger" @click="ungroupCurrent">
+          <iconify-icon icon="mdi:package-variant"></iconify-icon>
+          解组容器
+        </button>
+      </div>
+
+      <section class="info-card">
+        <p>容器把多个层打包成一个节点。修改上面的参数会联动到内部对应层；输入 / 输出尺寸显示在画布卡片上，展开容器可查看每一层的尺寸。</p>
       </section>
     </div>
 

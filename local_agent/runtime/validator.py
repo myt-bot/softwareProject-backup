@@ -2,7 +2,7 @@
 
 import json
 
-from .graph_utils import build_predecessor_map, topological_sort_layers
+from .graph_utils import build_predecessor_map, flatten_graph, topological_sort_layers
 
 
 def validate_model_graph(model_graph):
@@ -20,6 +20,20 @@ def validate_model_graph(model_graph):
 
     if not isinstance(model_graph, dict):
         errors.append(build_error_message("INVALID_MODEL_GRAPH"))
+        return {
+            "valid": False,
+            "errors": errors,
+            "warnings": warnings,
+            "shapes": shapes,
+            "message": errors[0],
+        }
+
+    # 自定义容器：先展平成纯层扁平图，后续所有校验/维度推导逻辑无需感知容器。
+    # 展平是幂等的，不含容器的图原样返回。
+    try:
+        model_graph = flatten_graph(model_graph)
+    except Exception as exc:
+        errors.append(build_error_message("CONTAINER_FLATTEN_FAILED", {"reason": str(exc)}))
         return {
             "valid": False,
             "errors": errors,
@@ -446,8 +460,12 @@ def infer_all_shapes(model_graph):
 
     返回：
         后续应返回每一层的 input_shape、output_shape 和推导状态。
+        含自定义容器时，返回的 shapes 以层级 id（容器id__内部层id）带出每个内部层的维度，
+        前端据此在展开视图中显示各内部层 shape，并推导容器自身的输入/输出维度。
     """
 
+    # 幂等展平：容器内部层以层级 id 进入推导，直接产出每个内部层的 shape
+    model_graph = flatten_graph(model_graph)
     ordered_layers = topological_sort_layers(model_graph)
     predecessors = build_predecessor_map(model_graph)
     shape_by_layer = {}
@@ -817,6 +835,7 @@ def build_error_message(error_code, context=None):
         "INVALID_BOOL": f"{prefix}: {param} 必须是布尔值 true 或 false",
         "INVALID_ATTENTION_HEADS": f"{prefix}: 注意力维度必须能被 num_heads 整除",
         "UNSUPPORTED_LAYER_TYPE": f"{prefix}: 暂不支持该层类型",
+        "CONTAINER_FLATTEN_FAILED": f"自定义容器展开失败: {context.get('reason')}",
         "LINEAR_IN_FEATURES_MISMATCH": (
             f"{prefix}: Linear 输入维度与 in_features 不匹配，"
             f"当前输入 shape 为 {context.get('input_shape')}，"

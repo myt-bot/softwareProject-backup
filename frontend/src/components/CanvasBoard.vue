@@ -19,6 +19,7 @@ import {
   registerCanvasElements,
   selectNode,
   showNodeMenu,
+  toggleContainerCollapse,
   undoGraphChange,
 } from "../canvas";
 import { activeCanvas, showToast, store } from "../store";
@@ -57,7 +58,14 @@ function onNodeClick(event: MouseEvent, nodeId: string) {
     event.preventDefault();
     return;
   }
-  selectNode(nodeId);
+  // 按住 Shift 点击 → 多选（用于"打包为容器"）
+  selectNode(nodeId, event.shiftKey);
+}
+
+// 多选高亮：集合里有多个节点时才显示"参与打包"的选中态
+function isMultiSelected(nodeId: string) {
+  const canvas = activeCanvas();
+  return canvas.selectedNodeIds.length > 1 && canvas.selectedNodeIds.includes(nodeId);
 }
 
 function onNodeContextMenu(event: MouseEvent, nodeId: string) {
@@ -156,6 +164,8 @@ onBeforeUnmount(() => {
         :data-node-id="node.id"
         :class="{
           'node-selected': canvas.selectedNodeId === node.id,
+          'node-multi-selected': isMultiSelected(node.id),
+          'node-container': node.type === 'Container',
           'connection-source': store.connectSourceId === node.id,
           'connection-target': store.connectTargetId === node.id,
           'node-dragging': store.draggingNodeId === node.id,
@@ -166,22 +176,53 @@ onBeforeUnmount(() => {
         @click="onNodeClick($event, node.id)"
         @contextmenu="onNodeContextMenu($event, node.id)"
       >
-        <div class="node-head">
-          <span :class="`node-type ${node.color}`">{{ node.badge }}</span>
-          <span v-if="canvas.nodeErrors[node.id]" class="status-badge error">✕ 有问题</span>
-          <span v-else :class="statusBadgeClass">{{ statusBadgeText }}</span>
-        </div>
-        <h4>{{ node.title }}</h4>
-        <p v-if="node.note" class="node-note">{{ node.note }}</p>
-        <!-- 出错节点的人话提示，直接显示在节点上 -->
-        <p v-if="canvas.nodeErrors[node.id]" class="node-error-msg">
-          <iconify-icon icon="mdi:alert-circle-outline"></iconify-icon>
-          {{ canvas.nodeErrors[node.id] }}
-        </p>
-        <div v-else class="shape-row" title="这一层输出数据的尺寸，点击底部“检查结构”后自动推导">
-          <span>输出尺寸</span>
-          <strong class="shape-value" :class="{ pending: node.hint === '?' }">{{ shapeHintText(node.hint) }}</strong>
-        </div>
+        <!-- 自定义容器节点：折叠显示 输入→输出，展开显示每个内部层的尺寸 -->
+        <template v-if="node.type === 'Container'">
+          <div class="node-head">
+            <span :class="`node-type ${node.color}`">{{ node.badge }}</span>
+            <button
+              class="container-toggle"
+              :title="node.collapsed ? '展开容器' : '折叠容器'"
+              @click.stop="toggleContainerCollapse(node.id)"
+            >
+              <iconify-icon :icon="node.collapsed ? 'mdi:chevron-down' : 'mdi:chevron-up'"></iconify-icon>
+            </button>
+          </div>
+          <h4>{{ node.title }}</h4>
+          <!-- I/O 信息画在卡片上（输入 → 输出） -->
+          <div class="container-io" title="容器整体的输入 / 输出尺寸（点底部“检查结构”后推导）">
+            <span class="io-chip" :class="{ pending: !node.inputHint || node.inputHint === '?' }">{{ node.inputHint && node.inputHint !== '?' ? shapeHintText(node.inputHint) : '?' }}</span>
+            <iconify-icon icon="mdi:arrow-right-thin"></iconify-icon>
+            <span class="io-chip out" :class="{ pending: node.hint === '?' }">{{ node.hint && node.hint !== '?' ? shapeHintText(node.hint) : '?' }}</span>
+          </div>
+          <p v-if="node.collapsed" class="node-note container-collapsed-hint">{{ node.subgraph?.nodes.length }} 层 · 点顶部箭头展开</p>
+          <div v-else class="container-inner">
+            <div v-for="inner in node.subgraph?.nodes" :key="inner.id" class="container-inner-row">
+              <span :class="`node-type sm ${inner.color}`">{{ inner.badge }}</span>
+              <span class="inner-name">{{ inner.title }}</span>
+              <strong class="inner-shape" :class="{ pending: inner.hint === '?' }">{{ shapeHintText(inner.hint) }}</strong>
+            </div>
+          </div>
+        </template>
+        <!-- 普通层节点 -->
+        <template v-else>
+          <div class="node-head">
+            <span :class="`node-type ${node.color}`">{{ node.badge }}</span>
+            <span v-if="canvas.nodeErrors[node.id]" class="status-badge error">✕ 有问题</span>
+            <span v-else :class="statusBadgeClass">{{ statusBadgeText }}</span>
+          </div>
+          <h4>{{ node.title }}</h4>
+          <p v-if="node.note" class="node-note">{{ node.note }}</p>
+          <!-- 出错节点的人话提示，直接显示在节点上 -->
+          <p v-if="canvas.nodeErrors[node.id]" class="node-error-msg">
+            <iconify-icon icon="mdi:alert-circle-outline"></iconify-icon>
+            {{ canvas.nodeErrors[node.id] }}
+          </p>
+          <div v-else class="shape-row" title="这一层输出数据的尺寸，点击底部“检查结构”后自动推导">
+            <span>输出尺寸</span>
+            <strong class="shape-value" :class="{ pending: node.hint === '?' }">{{ shapeHintText(node.hint) }}</strong>
+          </div>
+        </template>
         <!-- 输入锚点（顶部）：与输出端口对称，作为连线的接入点 -->
         <div
           v-if="node.type !== 'Input'"

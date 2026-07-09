@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 from .graph_model import ExecutableGraphModel
-from .graph_utils import topological_sort_layers
+from .graph_utils import flatten_graph, topological_sort_layers
 from .validator import infer_all_shapes
 
 
@@ -20,6 +20,8 @@ def build_model(model_graph):
         ExecutableGraphModel：支持 DAG 前向传播的 PyTorch 模型。
     """
     normalized_graph = json.loads(model_graph) if isinstance(model_graph, str) else model_graph
+    # 自定义容器：展平成纯层扁平图后再构建，内部层以层级 id 进入 ModuleDict。
+    normalized_graph = flatten_graph(normalized_graph)
     ordered_layers = order_layers(normalized_graph)
     shape_info = infer_all_shapes(normalized_graph)
 
