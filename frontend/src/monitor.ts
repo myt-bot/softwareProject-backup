@@ -110,6 +110,8 @@ export const monitor = reactive({
   currentEpoch: 3,
   currentStep: 180,
   totalSteps: 600,
+  activeLayerId: null as string | null,
+  activeLayerIndex: -1,
   series: emptySeries(10) as MonitorSeries, // live 模式的真实逐轮指标
   datasetProgress: null as DatasetProgress | null,
   result: null as TrainingResult | null,
@@ -136,6 +138,8 @@ export function openTrainingMonitor(options: OpenMonitorOptions = {}) {
   monitor.currentEpoch = monitor.live ? 0 : 3;
   monitor.currentStep = monitor.live ? 0 : 180;
   monitor.totalSteps = monitor.live ? 0 : 600;
+  monitor.activeLayerId = null;
+  monitor.activeLayerIndex = -1;
   monitor.series = emptySeries(monitor.hyperparams.epochs);
   monitor.datasetProgress = null;
   monitor.result = null;
@@ -152,6 +156,8 @@ export function openTrainingMonitor(options: OpenMonitorOptions = {}) {
 
 export function closeTrainingMonitor() {
   monitor.visible = false;
+  monitor.activeLayerId = null;
+  monitor.activeLayerIndex = -1;
 }
 
 
@@ -257,6 +263,8 @@ export async function handleRerun() {
   monitor.currentEpoch = monitor.live ? 0 : 3;
   monitor.currentStep = monitor.live ? 0 : 180;
   monitor.totalSteps = monitor.live ? 0 : 600;
+  monitor.activeLayerId = null;
+  monitor.activeLayerIndex = -1;
   monitor.series = emptySeries(monitor.hyperparams.epochs);
   monitor.datasetProgress = null;
   monitor.result = null;
@@ -289,6 +297,8 @@ export function handleSimulateComplete() {
   monitor.progress = 1;
   monitor.currentEpoch = MOCK.totalEpochs;
   monitor.currentStep = monitor.totalSteps;
+  monitor.activeLayerId = null;
+  monitor.activeLayerIndex = -1;
   showToast("success", "训练完成，Final Accuracy 93.0%");
 }
 
@@ -323,6 +333,23 @@ export function applyStatusMessage(status: TrainingStatus) {
 }
 
 
+export function applyLayerPulseMessage(message: { layer_id?: string; layer_index?: number }) {
+  if (!monitor.visible || monitor.state !== "running") return;
+
+  let nextIndex = -1;
+  if (message.layer_id) {
+    nextIndex = monitor.layers.findIndex(layer => layer.id === message.layer_id);
+  }
+  if (nextIndex < 0 && !message.layer_id && typeof message.layer_index === "number") {
+    nextIndex = message.layer_index;
+  }
+  if (nextIndex < 0 || nextIndex >= monitor.layers.length) return;
+
+  monitor.activeLayerId = monitor.layers[nextIndex]?.id || message.layer_id || null;
+  monitor.activeLayerIndex = nextIndex;
+}
+
+
 function restoreInitialStatus(status: TrainingStatus) {
   const finalStatuses = new Set(["completed", "failed", "cancelled"]);
   if (finalStatuses.has(status.status || "")) {
@@ -344,6 +371,8 @@ export function applyResultMessage(result: TrainingResult) {
   monitor.state = "completed";
   monitor.progress = 1;
   monitor.currentEpoch = monitor.series.loss.length || monitor.hyperparams.epochs;
+  monitor.activeLayerId = null;
+  monitor.activeLayerIndex = -1;
   monitor.error = result?.status === "failed" ? result?.error || "训练失败" : null;
   if (result?.device) {
     monitor.hyperparams.device = String(result.device).toUpperCase();

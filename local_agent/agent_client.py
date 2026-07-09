@@ -250,9 +250,20 @@ def _run_and_stream(job_id: str, local_job_id: str) -> None:
     poller = threading.Thread(target=poll_loop, daemon=True)
     poller.start()
 
+    def emit_layer_pulse(event: dict[str, Any]) -> None:
+        send_training_update(job_id, "running", {
+            "type": "layer_pulse",
+            "layer_id": event.get("layer_id"),
+            "layer_type": event.get("layer_type"),
+            "layer_index": event.get("layer_index"),
+            "current_epoch": event.get("current_epoch", 0),
+            "current_step": event.get("current_step", 0),
+            "sent_at": _now_iso(),
+        })
+
     # 在当前线程阻塞执行真实训练（PyTorch）
     try:
-        runtime_trainer.run_training_job(local_job_id)
+        runtime_trainer.run_training_job(local_job_id, layer_pulse_callback=emit_layer_pulse)
     except Exception:
         pass  # 失败状态由 trainer 写入任务，poll_loop 会读取并上报
 

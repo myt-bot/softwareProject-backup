@@ -195,6 +195,9 @@ export interface WsMessage {
   type: string;
   job_id?: string;
   status?: string;
+  layer_id?: string;
+  layer_type?: string;
+  layer_index?: number;
   current_epoch?: number;
   total_epochs?: number;
   current_step?: number;
@@ -345,6 +348,7 @@ export interface Toast {
 
 // 训练监控页左侧 minimap 的层
 export interface MonitorLayer {
+  id?: string;
   type: string;
   color: string;
 }

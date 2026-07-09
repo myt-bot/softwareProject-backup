@@ -10,7 +10,7 @@
 //   command_ack      —— Agent 对指令的回执（如拒绝训练）
 
 import { clientWebSocketUrl } from "./api/client";
-import { applyResultMessage, applyStatusMessage, monitor } from "./monitor";
+import { applyLayerPulseMessage, applyResultMessage, applyStatusMessage, monitor } from "./monitor";
 import {
   agent,
   getTrainingStatusLabel,
@@ -154,6 +154,10 @@ function handleMessage(message: WsMessage) {
       routeTrainingMessage(message, true);
       break;
 
+    case "layer_pulse":
+      routeLayerPulseMessage(message);
+      break;
+
     case "command_ack":
       if (message.accepted === false) {
         showToast("error", message.message || "本机 Agent 拒绝了训练指令。");
@@ -173,6 +177,19 @@ function handleMessage(message: WsMessage) {
       }
       break;
     }
+  }
+}
+
+
+function routeLayerPulseMessage(message: WsMessage) {
+  const jobId = message.job_id;
+  if (!jobId) return;
+
+  if (monitor.visible && monitor.jobId === jobId) {
+    applyLayerPulseMessage({
+      layer_id: message.layer_id,
+      layer_index: message.layer_index,
+    });
   }
 }
 
