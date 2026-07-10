@@ -265,11 +265,11 @@ const inputShapeValue = computed(() => {
       </div>
 
       <div class="field-stack">
-        <ParamNumberField label="Out Channels (输出通道)" :value="selectedNode.params.out_channels" hint="输出多少个特征图。越大能学到越丰富的特征，但更慢、更容易过拟合。" recommend="推荐 8 ~ 64" @change="setParam('out_channels', $event)" />
-        <ParamNumberField label="Kernel Size (卷积核大小)" :value="selectedNode.params.kernel_size" hint="每次扫描覆盖的局部区域边长。数值越大，一次看到的范围越广，但输出尺寸缩得越多、计算也越大。" recommend="常用 3 或 5" @change="setParam('kernel_size', $event)" />
+        <ParamNumberField label="Out Channels (输出通道)" :value="selectedNode.params.out_channels" hint="输出多少个特征图。越大能学到越丰富的特征，但更慢、更容易过拟合。" recommend="推荐 8 ~ 64" :min="1" range-message="输出通道数必须为正整数。" integer-message="输出通道数必须为正整数。" empty-message="输出通道数不能为空。" @change="setParam('out_channels', $event)" />
+        <ParamNumberField label="Kernel Size (卷积核大小)" :value="selectedNode.params.kernel_size" hint="每次扫描覆盖的局部区域边长。数值越大，一次看到的范围越广，但输出尺寸缩得越多、计算也越大。" recommend="常用 3 或 5" :min="1" range-message="卷积核大小必须为正整数。" integer-message="卷积核大小必须为正整数。" empty-message="卷积核大小不能为空。" @change="setParam('kernel_size', $event)" />
         <div class="field-grid">
-          <ParamNumberField label="Stride" :value="selectedNode.params.stride" hint="卷积核每次移动的步长。越大输出尺寸越小。" recommend="常用 1" @change="setParam('stride', $event)" />
-          <ParamNumberField label="Padding" :value="selectedNode.params.padding" hint="在边缘补几圈 0，用来保持输出尺寸不缩得太快。" recommend="常用 0 或 1" @change="setParam('padding', $event)" />
+          <ParamNumberField label="Stride" :value="selectedNode.params.stride" hint="卷积核每次移动的步长。越大输出尺寸越小。" recommend="常用 1" :min="1" range-message="Stride 必须为正整数。" integer-message="Stride 必须为正整数。" empty-message="Stride 不能为空。" @change="setParam('stride', $event)" />
+          <ParamNumberField label="Padding" :value="selectedNode.params.padding" hint="在边缘补几圈 0，用来保持输出尺寸不缩得太快。" recommend="常用 0 或 1" :min="0" range-message="Padding 必须是非负整数。" integer-message="Padding 必须是非负整数。" empty-message="Padding 不能为空。" @change="setParam('padding', $event)" />
         </div>
       </div>
 
@@ -304,7 +304,7 @@ const inputShapeValue = computed(() => {
           <small>由前一层自动推导</small>
         </label>
 
-        <ParamNumberField label="Out Features 输出神经元" :value="selectedNode.params.out_features" hint="这一层输出多少个数。若是整张网络的最后一层，一般把它设成要区分的类别总数。" recommend="末层 = 类别数" @change="setParam('out_features', $event)" />
+        <ParamNumberField label="Out Features 输出神经元" :value="selectedNode.params.out_features" hint="这一层输出多少个数。若是整张网络的最后一层，一般把它设成要区分的类别总数。" recommend="末层 = 类别数" :min="1" range-message="输出神经元数必须为正整数。" integer-message="输出神经元数必须为正整数。" empty-message="输出神经元数不能为空。" @change="setParam('out_features', $event)" />
       </div>
 
       <div class="shape-preview">
@@ -321,9 +321,9 @@ const inputShapeValue = computed(() => {
       </div>
 
       <div class="field-stack">
-        <ParamNumberField label="Kernel Size 池化核大小" :value="selectedNode.params.kernel_size" hint="池化窗口大小。2 表示每 2×2 区域取一个值，把特征图缩小一半。" recommend="推荐 2" @change="setParam('kernel_size', $event)" />
-        <ParamNumberField label="Stride 步长" :value="selectedNode.params.stride" hint="窗口每次移动的步长，通常与池化核大小相同。" recommend="常用 2" @change="setParam('stride', $event)" />
-        <ParamNumberField label="Padding 填充" :value="selectedNode.params.padding" hint="边缘补零圈数，一般不用。" recommend="常用 0" @change="setParam('padding', $event)" />
+        <ParamNumberField label="Kernel Size 池化核大小" :value="selectedNode.params.kernel_size" hint="池化窗口大小。2 表示每 2×2 区域取一个值，把特征图缩小一半。" recommend="推荐 2" :min="1" range-message="池化核大小必须为正整数。" integer-message="池化核大小必须为正整数。" empty-message="池化核大小不能为空。" @change="setParam('kernel_size', $event)" />
+        <ParamNumberField label="Stride 步长" :value="selectedNode.params.stride" hint="窗口每次移动的步长，通常与池化核大小相同。" recommend="常用 2" :min="1" range-message="池化步长必须为正整数。" integer-message="池化步长必须为正整数。" empty-message="池化步长不能为空。" @change="setParam('stride', $event)" />
+        <ParamNumberField label="Padding 填充" :value="selectedNode.params.padding" hint="边缘补零圈数，一般不用。" recommend="常用 0" :min="0" range-message="池化填充必须是非负整数。" integer-message="池化填充必须是非负整数。" empty-message="池化填充不能为空。" @change="setParam('padding', $event)" />
       </div>
 
       <div class="shape-preview">
@@ -340,7 +340,7 @@ const inputShapeValue = computed(() => {
       </div>
 
       <div class="field-stack">
-        <ParamNumberField label="Dropout Rate 随机失活比例" :value="selectedNode.params.p" @change="setParam('p', $event)" />
+        <ParamNumberField label="Dropout Rate 随机失活比例" :value="selectedNode.params.p" :min="0" :max="1" :integer="false" step="0.01" range-message="Dropout Rate 必须在 0 到 1 之间。" empty-message="Dropout Rate 不能为空。" @change="setParam('p', $event)" />
       </div>
 
       <section class="info-card">
@@ -445,6 +445,13 @@ const inputShapeValue = computed(() => {
             v-if="field.kind === 'number'"
             :label="field.label"
             :value="selectedNode.params[field.key]"
+            :min="field.key === 'dropout' ? 0 : 1"
+            :max="field.key === 'dropout' ? 1 : undefined"
+            :integer="field.key !== 'dropout'"
+            :step="field.key === 'dropout' ? 0.01 : 1"
+            :range-message="field.key === 'dropout' ? 'Dropout 比例必须在 0 到 1 之间。' : `${field.label} 必须为正整数。`"
+            :integer-message="`${field.label} 必须为正整数。`"
+            :empty-message="`${field.label} 不能为空。`"
             @change="setParam(field.key, $event)"
           />
           <label v-else class="form-field switch-field">
