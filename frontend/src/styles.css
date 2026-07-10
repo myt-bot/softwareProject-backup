@@ -204,6 +204,8 @@ button:disabled {
   padding: 6px;
   box-shadow: var(--shadow-lg);
   z-index: 1000;
+  max-height: 260px;      /* 数据集较多时限高 */
+  overflow-y: auto;       /* 超出部分滚动，菜单不会太长 */
 
   opacity: 0;
   visibility: hidden;
@@ -2162,11 +2164,10 @@ button:disabled {
   outline: none;
 }
 
+/* Teleport 到 body 的说明气泡：fixed 定位，居中于 left、置于 top 之上，不被面板裁切 */
 .info-tip-bubble {
-  position: absolute;
-  bottom: calc(100% + 9px);
-  left: 50%;
-  transform: translateX(-50%) translateY(4px);
+  position: fixed;
+  transform: translate(-50%, -100%);
   width: max-content;
   max-width: 250px;
   background: #1f2a44;
@@ -2177,20 +2178,16 @@ button:disabled {
   padding: 8px 11px;
   border-radius: 9px;
   box-shadow: var(--shadow-lg);
-  opacity: 0;
-  visibility: hidden;
   pointer-events: none;
-  transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 2000;
+  z-index: 5000;
   white-space: normal;
   text-align: left;
+  animation: info-tip-in 0.14s ease;
 }
 
-.info-tip:hover .info-tip-bubble,
-.info-tip:focus .info-tip-bubble {
-  opacity: 1;
-  visibility: visible;
-  transform: translateX(-50%) translateY(0);
+@keyframes info-tip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .info-tip-bubble::after {
@@ -2628,6 +2625,7 @@ body.is-connecting .node-port {
 .inspector-scroll {
   height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;   /* 说明气泡已 Teleport 到 body，这里不再需要横向滚动 */
   padding: 24px 20px;
 }
 
@@ -2735,8 +2733,11 @@ body.is-connecting .node-port {
 }
 
 /* 训练超参数弹窗：两列网格，损失函数占整行 */
-.train-settings-card {
+/* 用 .modal-card.train-settings-card 提高优先级，覆盖 .modal-card 的 overflow:hidden，
+   否则自定义下拉会被弹窗底边裁切（内容不长，无需卡片内滚动）。 */
+.modal-card.train-settings-card {
   width: min(680px, 100%);
+  overflow: visible;
 }
 
 .train-settings-body {
@@ -2834,6 +2835,8 @@ body.is-connecting .node-port {
   padding: 6px;
   box-shadow: var(--shadow-lg);
   z-index: 1200;
+  max-height: 320px;      /* 容纳当前全部选项；更多时才滚动 */
+  overflow-y: auto;       /* 超出部分滚动，避免被弹窗裁切 */
   opacity: 0;
   visibility: hidden;
   transform: translateY(-4px);

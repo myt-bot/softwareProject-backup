@@ -7,14 +7,21 @@ const canvas = computed(() => activeCanvas());
 
 const MAX_EPOCHS = 100;
 
-// 后端 _build_optimizer / _build_loss_fn 目前支持的取值
+// 与后端 _build_optimizer / _build_loss_fn 支持的取值一一对应
 const OPTIMIZERS = [
   { value: "sgd", label: "SGD（随机梯度下降，稳健）" },
-  { value: "adam", label: "Adam（自适应，收敛快，常用）" },
+  { value: "adam", label: "Adam（自适应，收敛快，最常用）" },
+  { value: "adamw", label: "AdamW（Adam + 权重衰减，泛化更好）" },
+  { value: "rmsprop", label: "RMSprop（自适应学习率）" },
+  { value: "adagrad", label: "Adagrad（累积梯度自适应）" },
+  { value: "adadelta", label: "Adadelta（无需手调学习率）" },
 ];
 const LOSSES = [
-  { value: "cross_entropy", label: "交叉熵 Cross Entropy（分类常用）" },
+  { value: "cross_entropy", label: "交叉熵 Cross Entropy（分类首选）" },
+  { value: "nll", label: "负对数似然 NLL（配合 LogSoftmax 的分类损失）" },
   { value: "mse", label: "均方误差 MSE（回归常用）" },
+  { value: "l1", label: "平均绝对误差 L1 / MAE（回归，对异常值更稳）" },
+  { value: "smooth_l1", label: "平滑 L1 / Huber（介于 MSE 与 L1 之间）" },
 ];
 
 function setEpochs(event: Event) {

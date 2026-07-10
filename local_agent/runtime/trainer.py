@@ -61,6 +61,23 @@ DATASET_SPECS = {
         "root": "./CIFAR100",
         "aliases": ("cifar100", "cifar-100", "cifar_100"),
     },
+    "QMNIST": {
+        "class": torchvision.datasets.QMNIST,
+        "root": "./QMNIST",
+        "aliases": ("qmnist",),
+    },
+    "USPS": {
+        "class": torchvision.datasets.USPS,
+        "root": "./USPS",
+        "aliases": ("usps",),
+    },
+    "SVHN": {
+        "class": torchvision.datasets.SVHN,
+        "root": "./SVHN",
+        "aliases": ("svhn",),
+        # SVHN 用 split="train"/"test" 而非 train=True/False
+        "split_api": True,
+    },
 }
 
 
@@ -353,19 +370,47 @@ def _run_demo_job(job_id):
 
 
 def _build_loss_fn(loss_fn_config):
-    """根据训练配置创建损失函数。"""
-    if loss_fn_config is None:
-        return nn.CrossEntropyLoss()
+    """根据训练配置创建损失函数。
 
+    分类数据集的标签是整数类别：交叉熵、NLL 可直接使用；而 MSE / L1 / Huber 这类
+    回归损失要求与模型输出同形，这里自动把整数标签 one-hot 成 [N, 类别数] 再计算，
+    使这些经典损失也能用于分类演示而不至于报错。
+    """
     if isinstance(loss_fn_config, nn.Module):
         return loss_fn_config
 
-    if isinstance(loss_fn_config, str):
-        loss_fn_name = loss_fn_config.lower()
-        if loss_fn_name in ("cross_entropy", "crossentropyloss", "ce"):
-            return nn.CrossEntropyLoss()
-        if loss_fn_name in ("mse", "mseloss"):
-            return nn.MSELoss()
+    name = loss_fn_config.lower() if isinstance(loss_fn_config, str) else "cross_entropy"
+
+    if name in ("cross_entropy", "crossentropyloss", "ce"):
+        return nn.CrossEntropyLoss()
+
+    if name in ("nll", "nllloss", "negative_log_likelihood"):
+        base = nn.NLLLoss()
+        log_softmax = nn.LogSoftmax(dim=1)
+
+        def nll_loss(output, target):
+            return base(log_softmax(output), target)
+
+        return nll_loss
+
+    regression_losses = {
+        "mse": nn.MSELoss, "mseloss": nn.MSELoss,
+        "l1": nn.L1Loss, "mae": nn.L1Loss, "l1loss": nn.L1Loss,
+        "smooth_l1": nn.SmoothL1Loss, "smoothl1": nn.SmoothL1Loss,
+        "smoothl1loss": nn.SmoothL1Loss, "huber": nn.SmoothL1Loss,
+    }
+    if name in regression_losses:
+        base = regression_losses[name]()
+
+        def regression_loss(output, target):
+            # 分类整数标签 → one-hot 成与输出同形的浮点张量
+            if target.dim() == 1 and output.dim() == 2:
+                target = torch.nn.functional.one_hot(
+                    target, num_classes=output.size(1)
+                ).to(output.dtype)
+            return base(output, target)
+
+        return regression_loss
 
     raise ValueError(f"暂不支持的损失函数配置: {loss_fn_config}")
 
@@ -375,22 +420,21 @@ def _build_optimizer(optimizer_config, model, rate):
     if isinstance(optimizer_config, torch.optim.Optimizer):
         return optimizer_config
 
-    if optimizer_config is None:
-        optimizer_config = "sgd"
+    name = optimizer_config.lower() if isinstance(optimizer_config, str) else "sgd"
+    params = model.parameters()
 
-    if isinstance(optimizer_config, str):
-        optimizer_name = optimizer_config.lower()
-        if optimizer_name == "sgd":
-            return torch.optim.SGD(
-                model.parameters(),
-                lr=rate,
-                momentum=0.9,
-            )
-        if optimizer_name == "adam":
-            return torch.optim.Adam(
-                model.parameters(),
-                lr=rate,
-            )
+    if name == "sgd":
+        return torch.optim.SGD(params, lr=rate, momentum=0.9)
+    if name == "adam":
+        return torch.optim.Adam(params, lr=rate)
+    if name == "adamw":
+        return torch.optim.AdamW(params, lr=rate)
+    if name == "rmsprop":
+        return torch.optim.RMSprop(params, lr=rate)
+    if name == "adagrad":
+        return torch.optim.Adagrad(params, lr=rate)
+    if name == "adadelta":
+        return torch.optim.Adadelta(params, lr=rate)
 
     raise ValueError(f"暂不支持的优化器配置: {optimizer_config}")
 
@@ -427,14 +471,27 @@ def prepare_dataset(dataset_name, batch_size, data_dir=None, cancel_check=None, 
     else:
         dataset_root = dataset_spec["root"]
 
+    # 不同数据集加载方式不同：多数用 train=True/False，少数（如 SVHN）用 split="train"/"test"
+    use_split_api = dataset_spec.get("split_api", False)
+
+    def _load_split(is_train):
+        if use_split_api:
+            return dataset_class(
+                root=dataset_root,
+                split="train" if is_train else "test",
+                transform=transform,
+                download=True,
+            )
+        return dataset_class(
+            root=dataset_root,
+            train=is_train,
+            transform=transform,
+            download=True,
+        )
+
     _raise_if_cancelled(cancel_check)
     with _interruptible_torchvision_download(cancel_check, progress_callback, dataset_key):
-        train_data = dataset_class(
-            root=dataset_root,
-            train=True,
-            transform=transform,
-            download=True
-        )
+        train_data = _load_split(True)
 
     _raise_if_cancelled(cancel_check)
     _report_dataset_progress(progress_callback, {
@@ -447,11 +504,7 @@ def prepare_dataset(dataset_name, batch_size, data_dir=None, cancel_check=None, 
         "message": f"{dataset_key} 数据集已就绪",
     })
 
-    test_data = dataset_class(
-        root=dataset_root,
-        train=False,
-        transform=transform
-    )
+    test_data = _load_split(False)
 
     train_dataloader = torch.utils.data.DataLoader(
         dataset=train_data,

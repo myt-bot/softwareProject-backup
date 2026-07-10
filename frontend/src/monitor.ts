@@ -115,7 +115,7 @@ export const monitor = reactive({
   series: emptySeries(10) as MonitorSeries, // live 模式的真实逐轮指标
   datasetProgress: null as DatasetProgress | null,
   result: null as TrainingResult | null,
-  error: null as string | null,
+  error: null as string | null,       // 训练失败时的中文提示（不展示英文原文）
   stopping: false, // 停止请求已发出、等待后端确认
 });
 
@@ -379,7 +379,7 @@ export function applyStatusMessage(status: TrainingStatus) {
   }
   monitor.state = "running";
   monitor.stopping = status?.status === "cancelling" || monitor.stopping;
-  monitor.error = status?.error || null;
+  monitor.error = status?.error ? TRAIN_FAILED_MESSAGE : null;
 }
 
 
@@ -406,6 +406,12 @@ function clearActiveLayer() {
   monitor.activeLayerIndex = -1;
 }
 
+// 训练失败时给新手看的中文提示（直接替换英文报错，不展示英文原文）。
+// 训练失败绝大多数是「模型与所选数据集不匹配」（输入维度 / 输出类别数对不上）。
+const TRAIN_FAILED_MESSAGE =
+  "训练失败：模型和所选数据集可能不匹配（比如输入维度或输出类别数对不上）。" +
+  "请点「检查结构」排查，或换用适配该数据集的模板后重试。";
+
 
 function restoreInitialStatus(status: TrainingStatus) {
   const finalStatuses = new Set(["completed", "failed", "cancelled"]);
@@ -430,7 +436,7 @@ export function applyResultMessage(result: TrainingResult) {
   monitor.currentEpoch = monitor.series.loss.length || monitor.hyperparams.epochs;
   monitor.activeLayerId = null;
   monitor.activeLayerIndex = -1;
-  monitor.error = result?.status === "failed" ? result?.error || "训练失败" : null;
+  monitor.error = result?.status === "failed" ? TRAIN_FAILED_MESSAGE : null;
   if (result?.device) {
     monitor.hyperparams.device = String(result.device).toUpperCase();
   }

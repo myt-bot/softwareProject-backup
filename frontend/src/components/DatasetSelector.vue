@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { datasetChoices, store } from "../store";
+import { applyDatasetInputShapes, datasetChoices, datasetInputShape, showToast, store } from "../store";
+import { redrawAfterDomUpdate } from "../canvas";
 import InfoTip from "./InfoTip.vue";
 
 const dropdownOpen = ref(false);
@@ -13,8 +14,19 @@ function toggleDropdown(event: MouseEvent) {
 
 function selectDataset(event: MouseEvent, value: string) {
   event.stopPropagation();
-  store.dataset = value;
   dropdownOpen.value = false;
+  if (store.dataset === value) return;
+
+  store.dataset = value;
+  // 切换数据集：把所有画布的 Input 形状同步为该数据集对应的维度，新手无需手动记忆
+  const changed = applyDatasetInputShapes();
+  const shapeText = datasetInputShape().join("×");
+  if (changed) {
+    showToast("success", `已切换到 ${value}，输入维度自动设为 ${shapeText}（请重新「检查结构」）。`);
+    void redrawAfterDomUpdate();
+  } else {
+    showToast("info", `已切换到 ${value}，输入维度为 ${shapeText}。`);
+  }
 }
 
 // 点击页面其他区域时关闭下拉菜单

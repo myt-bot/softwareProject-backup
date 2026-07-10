@@ -51,9 +51,26 @@ export const datasetChoices = [
   { value: "MNIST", label: "MNIST · 手写数字" },
   { value: "FashionMNIST", label: "FashionMNIST · 服饰图片" },
   { value: "KMNIST", label: "KMNIST · 日文假名" },
+  { value: "QMNIST", label: "QMNIST · 手写数字（扩展）" },
+  { value: "USPS", label: "USPS · 手写数字（小图）" },
   { value: "CIFAR10", label: "CIFAR10 · 彩色小图" },
   { value: "CIFAR100", label: "CIFAR100 · 彩色百类" },
+  { value: "SVHN", label: "SVHN · 街景门牌号" },
 ];
+
+// 各内置数据集对应的输入张量形状（通道×高×宽）。
+// MNIST 系列是 28×28 灰度（1 通道）；CIFAR 系列是 32×32 彩色（3 通道）。
+// 切换数据集时会据此自动同步 Input 节点的形状，新手无需手动记忆。
+export const DATASET_INPUT_SHAPES: Record<string, number[]> = {
+  MNIST: [1, 28, 28],
+  FashionMNIST: [1, 28, 28],
+  KMNIST: [1, 28, 28],
+  QMNIST: [1, 28, 28],
+  USPS: [1, 16, 16],
+  CIFAR10: [3, 32, 32],
+  CIFAR100: [3, 32, 32],
+  SVHN: [3, 32, 32],
+};
 
 export const layerGroups: LayerGroup[] = [
   {
@@ -242,6 +259,51 @@ export const store = reactive({
 
 export function activeCanvas(): WorkCanvas {
   return store.canvases.find(canvas => canvas.id === store.activeCanvasId) ?? store.canvases[0]!;
+}
+
+// 当前（或指定）数据集对应的输入形状；未知数据集回退到 MNIST 形状。
+export function datasetInputShape(dataset: string = store.dataset): number[] {
+  const shape = DATASET_INPUT_SHAPES[dataset];
+  return shape ? [...shape] : [1, 28, 28];
+}
+
+// 把一组节点里的 Input 形状同步为目标形状，并递归进入容器子图。返回是否有改动。
+function setInputsToShape(nodes: GraphNode[], shape: number[], shapeKey: string): boolean {
+  let changed = false;
+  for (const node of nodes) {
+    if (node.type === "Input") {
+      const current = Array.isArray(node.params.shape) ? node.params.shape.join(",") : "";
+      if (current !== shapeKey) {
+        node.params.shape = [...shape];
+        node.hint = shape.join("x");
+        changed = true;
+      }
+    }
+    // 容器内部子图的 Input 也一起同步
+    if (node.type === CONTAINER_TYPE && node.subgraph) {
+      if (setInputsToShape(node.subgraph.nodes, shape, shapeKey)) changed = true;
+    }
+  }
+  return changed;
+}
+
+// 把所有画布（含容器内部）里的 Input 节点形状同步为当前数据集对应的形状。
+// 形状变了的画布同时清空其结构校验状态（旧的“通过”不再可信，需重新检查）。
+// 返回是否有节点被改动。
+export function applyDatasetInputShapes(): boolean {
+  const shape = datasetInputShape();
+  const shapeKey = shape.join(",");
+  let changedAny = false;
+  for (const canvas of store.canvases) {
+    const canvasChanged = setInputsToShape(canvas.nodes, shape, shapeKey);
+    if (canvasChanged) {
+      canvas.validationStatus = "unvalidated";
+      canvas.nodeBadge = "none";
+      canvas.nodeErrors = {};
+      changedAny = true;
+    }
+  }
+  return changedAny;
 }
 
 // 模板库（从后端 /projects/templates 拉取，失败时用兜底列表）
@@ -679,9 +741,6 @@ export function formatLayerNote(layer: { params?: Record<string, unknown> }) {
 export const containerLibrary = reactive<{ items: ContainerDef[] }>({ items: [] });
 let containerDefSeq = 0;
 
-// 新建空容器时子图里预置的入口示例形状
-const DEFAULT_CONTAINER_INPUT_SHAPE = [1, 28, 28];
-
 export function cloneSubgraph(subgraph: SubGraph): SubGraph {
   return {
     nodes: subgraph.nodes.map(node => ({
@@ -741,10 +800,12 @@ export function createEmptyContainerNode(canvas: WorkCanvas, x: number, y: numbe
   canvas.nodeCounters[CONTAINER_TYPE] = (canvas.nodeCounters[CONTAINER_TYPE] || 0) + 1;
   const containerId = `container_${canvas.nodeCounters[CONTAINER_TYPE]}`;
 
+  // 容器内部入口维度跟随当前数据集（如 MNIST→[1,28,28]、CIFAR/SVHN→[3,32,32]）
+  const shape = datasetInputShape();
   const inputNode: GraphNode = {
     id: "input_1", type: "Input", title: "Input", badge: "Input", color: "emerald",
-    hint: DEFAULT_CONTAINER_INPUT_SHAPE.join("x"),
-    x: 96, y: 48, params: { shape: [...DEFAULT_CONTAINER_INPUT_SHAPE] },
+    hint: shape.join("x"),
+    x: 96, y: 48, params: { shape: [...shape] },
   };
   const outputNode: GraphNode = {
     id: "output_1", type: "Output", title: "Output", badge: "Output", color: "rose",
@@ -783,6 +844,14 @@ export function instantiateContainerDef(canvas: WorkCanvas, def: ContainerDef, x
   canvas.nodeCounters[CONTAINER_TYPE] = (canvas.nodeCounters[CONTAINER_TYPE] || 0) + 1;
   const containerId = `container_${canvas.nodeCounters[CONTAINER_TYPE]}`;
   const subgraph = cloneSubgraph(def.subgraph);
+  // 复用已保存容器时，内部入口维度也跟随当前数据集（保存时可能是别的数据集维度）
+  const shape = datasetInputShape();
+  for (const inner of subgraph.nodes) {
+    if (inner.type === "Input") {
+      inner.params = { ...inner.params, shape: [...shape] };
+      inner.hint = shape.join("x");
+    }
+  }
   const node: GraphNode = {
     id: containerId, type: CONTAINER_TYPE, title: def.name, badge: "容器", color: def.color,
     note: "", hint: "?", x, y, params: {}, collapsed: true, subgraph,
