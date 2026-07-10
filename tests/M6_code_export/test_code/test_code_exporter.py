@@ -163,6 +163,28 @@ def add_branch_graph():
     }
 
 
+def concat_branch_graph():
+    return {
+        "layers": [
+            layer("input", "Input", {"shape": [4]}),
+            layer("left", "Linear", {"out_features": 3}),
+            layer("right", "Linear", {"out_features": 5}),
+            layer("merge_relu", "ReLU", {"merge": "concat", "dim": 1}),
+            layer("classifier", "Linear", {"out_features": 2}),
+            layer("out", "Output"),
+        ],
+        "connections": [
+            connection("input", "left"),
+            connection("input", "right"),
+            connection("left", "merge_relu"),
+            connection("right", "merge_relu"),
+            connection("merge_relu", "classifier"),
+            connection("classifier", "out"),
+        ],
+        "train_config": train_config("MNIST"),
+    }
+
+
 def missing_output_graph():
     graph = cnn_graph()
     graph["layers"] = [item for item in graph["layers"] if item["type"] != "Output"]
@@ -253,6 +275,54 @@ class CodeExporterTests(unittest.TestCase):
 
         completed = self.run_generated_python(path)
         self.assertIn("(1, 4)", completed.stdout)
+
+    def test_exports_and_runs_concat_branch_python_code(self):
+        path, source = self.write_python_export(concat_branch_graph(), "M6ConcatBranchModel")
+
+        self.assertIn("torch.cat([outputs['left'], outputs['right']], dim=1)", source)
+        self.assertIn("nn.Linear(in_features=8, out_features=2)", source)
+
+        completed = self.run_generated_python(path)
+        self.assertIn("(1, 2)", completed.stdout)
+
+    def test_export_model_code_dispatches_python_format(self):
+        source = export_model_code(cnn_graph(), "M6DispatchModel", "py")
+
+        self.assertIn("class M6DispatchModel(nn.Module):", source)
+        self.assertIn("TRAIN_CONFIG", source)
+        self.assertNotIn('"nbformat"', source)
+
+    def test_export_rejects_unsupported_format(self):
+        with self.assertRaisesRegex(ValueError, "不支持的导出格式: markdown"):
+            export_model_code(cnn_graph(), "M6UnsupportedFormat", "markdown")
+
+    def test_explicit_train_config_overrides_embedded_graph_config(self):
+        source = export_model_code(
+            cnn_graph(),
+            "M6TrainConfigModel",
+            "py",
+            train_config={
+                "dataset_name": "CIFAR100",
+                "epochs": 3,
+                "batch_size": 16,
+                "learning_rate": 0.02,
+                "device": "cuda",
+                "loss_fn": "mse",
+                "optimizer": "adam",
+                "data_dir": "datasets/custom",
+                "artifacts_dir": "runs/custom",
+            },
+        )
+
+        self.assertIn("'dataset_name': 'CIFAR100'", source)
+        self.assertIn("'epochs': 3", source)
+        self.assertIn("'batch_size': 16", source)
+        self.assertIn("'rate': 0.02", source)
+        self.assertIn("'device': 'cuda'", source)
+        self.assertIn("'loss_fn': 'mse'", source)
+        self.assertIn("'optimizer': 'adam'", source)
+        self.assertIn("'data_dir': 'datasets/custom'", source)
+        self.assertIn("'artifacts_dir': 'runs/custom'", source)
 
     def test_exports_valid_ipynb_file(self):
         notebook_json = export_model_code(cnn_graph(), "M6NotebookModel", "ipynb")
@@ -346,6 +416,31 @@ class CodeExporterTests(unittest.TestCase):
     def test_invalid_linear_mismatch_model_cannot_export(self):
         with self.assertRaisesRegex(ValueError, "Linear 输入维度与 in_features 不匹配"):
             export_to_pytorch(linear_mismatch_graph(), "InvalidLinearMismatch")
+
+
+class FrontendExportContractTests(unittest.TestCase):
+    def test_export_modal_exposes_python_and_notebook_controls(self):
+        modal_source = (ROOT_DIR / "frontend" / "src" / "components" / "ExportModal.vue").read_text(encoding="utf-8")
+
+        self.assertIn("setExportFormat('py')", modal_source)
+        self.assertIn("setExportFormat('ipynb')", modal_source)
+        self.assertIn("mdi:language-python", modal_source)
+        self.assertIn("mdi:notebook-outline", modal_source)
+        self.assertIn('canvas.exportFormat === "ipynb" ? ".ipynb" : ".py"', modal_source)
+        self.assertIn("canvas.exportCodeDisplay", modal_source)
+        self.assertIn("downloadExportCode", modal_source)
+
+    def test_export_action_sends_format_model_and_train_config_to_agent(self):
+        actions_source = (ROOT_DIR / "frontend" / "src" / "actions.ts").read_text(encoding="utf-8")
+
+        self.assertIn('requestAgent<ExportAgentResult>("export"', actions_source)
+        self.assertIn("model: getCurrentModelGraph(canvas)", actions_source)
+        self.assertIn('class_name: "GeneratedModel"', actions_source)
+        self.assertIn("format: canvas.exportFormat", actions_source)
+        self.assertIn("train_config: getTrainConfig(canvas)", actions_source)
+        self.assertIn("canvas.exportFilename = result?.filename", actions_source)
+        self.assertIn("application/x-ipynb+json;charset=utf-8", actions_source)
+        self.assertIn("text/x-python;charset=utf-8", actions_source)
 
 
 if __name__ == "__main__":

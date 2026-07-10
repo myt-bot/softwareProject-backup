@@ -906,12 +906,16 @@ def _extract_train_config(model_graph, explicit_train_config=None):
             config.update(embedded)
     if isinstance(explicit_train_config, dict):
         config.update(explicit_train_config)
+        if "rate" not in explicit_train_config and "learning_rate" in explicit_train_config:
+            config["rate"] = explicit_train_config["learning_rate"]
+    elif "rate" not in config and "learning_rate" in config:
+        config["rate"] = config["learning_rate"]
 
     return {
         "dataset_name": config.get("dataset_name", config.get("dataset", "MNIST")),
         "epochs": int(config.get("epochs", 1) or 1),
         "batch_size": int(config.get("batch_size", 64) or 64),
-        "rate": float(config.get("rate", config.get("learning_rate", 0.001)) or 0.001),
+        "rate": float(config.get("rate", 0.001) or 0.001),
         "device": config.get("device", "cpu"),
         "loss_fn": config.get("loss_fn", "cross_entropy"),
         "optimizer": config.get("optimizer", "sgd"),
