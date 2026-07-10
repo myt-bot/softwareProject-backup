@@ -2206,6 +2206,18 @@ button:disabled {
   font-size: 11px;
 }
 
+/* 参数输入错误提示：回车或确认后展示，不覆盖原推荐说明 */
+.param-error {
+  color: var(--rose) !important;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.param-input-error {
+  border-color: var(--rose) !important;
+  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.12) !important;
+}
+
 /* 实时输出尺寸预览 */
 .shape-preview {
   display: flex;
