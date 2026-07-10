@@ -42,6 +42,12 @@ def valid_cnn_graph():
 
 
 class ValidatorShapeUnitTests(unittest.TestCase):
+    def assert_error_contains_any(self, errors, keywords):
+        self.assertTrue(
+            any(any(keyword in error for keyword in keywords) for error in errors),
+            f"errors={errors} did not contain any of {keywords}",
+        )
+
     def test_validate_model_graph_accepts_valid_cnn_and_infers_shapes(self):
         result = validate_model_graph(valid_cnn_graph())
 
@@ -51,6 +57,54 @@ class ValidatorShapeUnitTests(unittest.TestCase):
         self.assertEqual([8, 14, 14], result["shapes"]["pool"]["output_shape"])
         self.assertEqual([1568], result["shapes"]["flatten"]["output_shape"])
         self.assertEqual([10], result["shapes"]["linear"]["output_shape"])
+
+    def test_validate_model_graph_accepts_valid_mlp_and_infers_shapes(self):
+        graph = {
+            "layers": [
+                layer("input", "Input", {"shape": [1, 28, 28]}),
+                layer("flatten", "Flatten"),
+                layer("fc1", "Linear", {"out_features": 64}),
+                layer("relu", "ReLU"),
+                layer("fc2", "Linear", {"out_features": 10}),
+                layer("output", "Output"),
+            ],
+            "connections": [
+                connection("input", "flatten"),
+                connection("flatten", "fc1"),
+                connection("fc1", "relu"),
+                connection("relu", "fc2"),
+                connection("fc2", "output"),
+            ],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertTrue(result["valid"])
+        self.assertEqual([], result["errors"])
+        self.assertEqual([784], result["shapes"]["flatten"]["output_shape"])
+        self.assertEqual([64], result["shapes"]["fc1"]["output_shape"])
+        self.assertEqual([10], result["shapes"]["fc2"]["output_shape"])
+
+    def test_concat_merge_valid_graph_infers_merged_shape(self):
+        graph = {
+            "layers": [
+                layer("input_a", "Input", {"shape": [8, 28, 28]}),
+                layer("input_b", "Input", {"shape": [8, 28, 28]}),
+                layer("merge", "ReLU", {"merge": "concat", "dim": 0}),
+                layer("output", "Output"),
+            ],
+            "connections": [
+                connection("input_a", "merge"),
+                connection("input_b", "merge"),
+                connection("merge", "output"),
+            ],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertTrue(result["valid"])
+        self.assertEqual([], result["errors"])
+        self.assertEqual([16, 28, 28], result["shapes"]["merge"]["output_shape"])
 
     def test_missing_input_node_is_invalid(self):
         graph = {
@@ -143,6 +197,38 @@ class ValidatorShapeUnitTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("out_channels 必须是正整数" in error for error in result["errors"]))
 
+    def test_invalid_conv2d_out_channels_values_are_rejected(self):
+        for out_channels in (0, -1, "8"):
+            with self.subTest(out_channels=out_channels):
+                graph = {
+                    "layers": [
+                        layer("input", "Input", {"shape": [1, 28, 28]}),
+                        layer("conv", "Conv2D", {"out_channels": out_channels, "kernel_size": 3}),
+                        layer("output", "Output"),
+                    ],
+                    "connections": [connection("input", "conv"), connection("conv", "output")],
+                }
+
+                result = validate_model_graph(graph)
+
+                self.assertFalse(result["valid"])
+                self.assert_error_contains_any(result["errors"], ["out_channels", "正整数"])
+
+    def test_conv2d_kernel_size_too_large_is_invalid(self):
+        graph = {
+            "layers": [
+                layer("input", "Input", {"shape": [1, 4, 4]}),
+                layer("conv", "Conv2D", {"out_channels": 8, "kernel_size": 5, "stride": 1, "padding": 0}),
+                layer("output", "Output"),
+            ],
+            "connections": [connection("input", "conv"), connection("conv", "output")],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assert_error_contains_any(result["errors"], ["shape", "维度", "输出尺寸", "Conv2D"])
+
     def test_conv2d_shape_inference(self):
         output_shape = infer_layer_shape(
             layer("conv", "Conv2D", {"out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 0}),
@@ -159,8 +245,40 @@ class ValidatorShapeUnitTests(unittest.TestCase):
 
         self.assertEqual([16, 14, 14], output_shape)
 
+    def test_pooling_kernel_size_too_large_is_invalid(self):
+        graph = {
+            "layers": [
+                layer("input", "Input", {"shape": [8, 2, 2]}),
+                layer("pool", "Pooling", {"kernel_size": 3, "stride": 1, "padding": 0}),
+                layer("output", "Output"),
+            ],
+            "connections": [connection("input", "pool"), connection("pool", "output")],
+        }
+
+        result = validate_model_graph(graph)
+
+        self.assertFalse(result["valid"])
+        self.assert_error_contains_any(result["errors"], ["shape", "维度", "输出尺寸", "Pooling"])
+
     def test_flatten_shape_inference(self):
         self.assertEqual([1568], infer_flatten_shape([8, 14, 14]))
+
+    def test_invalid_linear_out_features_values_are_rejected(self):
+        for params in ({}, {"out_features": 0}, {"out_features": -1}, {"out_features": "10"}):
+            with self.subTest(params=params):
+                graph = {
+                    "layers": [
+                        layer("input", "Input", {"shape": [784]}),
+                        layer("linear", "Linear", params),
+                        layer("output", "Output"),
+                    ],
+                    "connections": [connection("input", "linear"), connection("linear", "output")],
+                }
+
+                result = validate_model_graph(graph)
+
+                self.assertFalse(result["valid"])
+                self.assert_error_contains_any(result["errors"], ["out_features", "正整数"])
 
     def test_linear_input_dimension_mismatch_is_invalid(self):
         graph = {
@@ -176,6 +294,23 @@ class ValidatorShapeUnitTests(unittest.TestCase):
 
         self.assertFalse(result["valid"])
         self.assertTrue(any("Linear" in error and ("维度" in error or "in_features" in error) for error in result["errors"]))
+
+    def test_invalid_dropout_p_values_are_rejected(self):
+        for p in (-0.1, 1.1, "0.5"):
+            with self.subTest(p=p):
+                graph = {
+                    "layers": [
+                        layer("input", "Input", {"shape": [4]}),
+                        layer("dropout", "Dropout", {"p": p}),
+                        layer("output", "Output"),
+                    ],
+                    "connections": [connection("input", "dropout"), connection("dropout", "output")],
+                }
+
+                result = validate_model_graph(graph)
+
+                self.assertFalse(result["valid"])
+                self.assert_error_contains_any(result["errors"], ["Dropout", "p", "概率", "0 到 1"])
 
     def test_dangling_branch_not_reaching_output_is_invalid(self):
         graph = {

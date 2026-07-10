@@ -4,6 +4,14 @@ from fastapi.testclient import TestClient
 
 from local_agent.main import app
 
+try:
+    from backend.main import app as backend_app
+except Exception as exc:  # pragma: no cover - depends on optional backend environment.
+    backend_app = None
+    backend_import_error = exc
+else:
+    backend_import_error = None
+
 
 def layer(layer_id, layer_type, params=None):
     return {
@@ -77,6 +85,35 @@ class ValidateApiTests(unittest.TestCase):
         response = self.client.post("/validate", json={"model": {"layers": "bad", "connections": []}})
 
         self.assertEqual(422, response.status_code)
+
+
+class BackendValidateApiTests(unittest.TestCase):
+    def setUp(self):
+        if backend_app is None:
+            self.skipTest(f"backend.main import unavailable: {backend_import_error}")
+        self.client = TestClient(backend_app)
+
+    def test_backend_validate_endpoint_handles_valid_and_business_invalid_models(self):
+        valid_response = self.client.post("/validate", json={"model": valid_cnn_graph()})
+
+        self.assertEqual(200, valid_response.status_code)
+        valid_body = valid_response.json()
+        self.assertTrue(valid_body["valid"])
+        self.assertEqual([], valid_body["errors"])
+
+        invalid_graph = {
+            "layers": [
+                layer("input", "Input", {"shape": [1, 28, 28]}),
+                layer("flatten", "Flatten"),
+            ],
+            "connections": [connection("input", "flatten")],
+        }
+        invalid_response = self.client.post("/validate", json={"model": invalid_graph})
+
+        self.assertEqual(200, invalid_response.status_code)
+        invalid_body = invalid_response.json()
+        self.assertFalse(invalid_body["valid"])
+        self.assertIn("模型缺少必要节点: Output", invalid_body["errors"])
 
 
 if __name__ == "__main__":

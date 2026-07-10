@@ -764,16 +764,26 @@ def infer_pooling_shape(input_shape, params):
     返回：
         后续应返回池化层输出形状 [C, H_out, W_out]。
     """
-    if input_shape is None:
+    if not isinstance(input_shape, (list, tuple)) or len(input_shape) != 3:
         return None
 
+    params = params or {}
     channels, height, width = input_shape
     kernel_size = params.get("kernel_size", 2)
     stride = params.get("stride", kernel_size)
     padding = params.get("padding", 0)
 
+    values = [channels, height, width, kernel_size, stride, padding]
+    if not all(isinstance(value, int) for value in values):
+        return None
+    if channels <= 0 or height <= 0 or width <= 0 or kernel_size <= 0 or stride <= 0 or padding < 0:
+        return None
+
     output_height = (height + 2 * padding - kernel_size) // stride + 1
     output_width = (width + 2 * padding - kernel_size) // stride + 1
+
+    if output_height <= 0 or output_width <= 0:
+        raise ValueError("Pooling 输出尺寸无效，请检查 kernel_size、stride、padding 与输入 shape")
 
     return [channels, output_height, output_width]
 
