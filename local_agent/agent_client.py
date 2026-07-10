@@ -157,9 +157,41 @@ def _handle_agent_request(command: dict[str, Any]) -> dict[str, Any]:
         return fail(str(exc))
 
 
-def _list_directory(path: Optional[str]) -> dict[str, Any]:
-    """列出本机某目录下的子目录，供前端浏览选择存储位置。"""
+_DRIVES_ROOT = "__drives__"   # “此电脑”视图的特殊路径：列出所有盘符
+
+
+def _list_drives() -> list[dict[str, Any]]:
+    """列出本机所有可用盘符（Windows）或根目录（*nix）。"""
     import os
+    import string
+
+    if os.name == "nt":
+        drives = []
+        for letter in string.ascii_uppercase:
+            root = f"{letter}:\\"
+            if os.path.exists(root):
+                drives.append({"name": f"{letter}: 盘", "path": root, "kind": "drive"})
+        return drives
+    return [{"name": "/", "path": "/", "kind": "drive"}]
+
+
+def _list_directory(path: Optional[str]) -> dict[str, Any]:
+    """列出本机某目录下的子目录，供前端浏览选择存储位置。
+
+    支持“此电脑”视图（path == "__drives__"）以在不同盘符间切换；从盘根再向上会
+    回到该视图，从而可以选择 C 盘以外的其它盘。
+    """
+    import os
+
+    # “此电脑”：列出所有盘符
+    if path == _DRIVES_ROOT:
+        return {
+            "path": _DRIVES_ROOT,
+            "display": "此电脑",
+            "is_root": True,
+            "parent": None,
+            "entries": _list_drives(),
+        }
 
     base = os.path.expanduser(path) if path else os.path.expanduser("~")
     base = os.path.abspath(base)
@@ -173,14 +205,20 @@ def _list_directory(path: Optional[str]) -> dict[str, Any]:
                 continue  # 隐藏以点开头的目录，界面更清爽
             full = os.path.join(base, name)
             if os.path.isdir(full):
-                entries.append({"name": name, "path": full})
+                entries.append({"name": name, "path": full, "kind": "dir"})
     except PermissionError:
         pass
 
     parent = os.path.dirname(base)
+    if parent == base:
+        # 已到盘根（Windows: C:\）或文件系统根：向上回到“此电脑”以便切换其它盘符
+        parent = _DRIVES_ROOT if os.name == "nt" else None
+
     return {
         "path": base,
-        "parent": parent if parent != base else None,
+        "display": base,
+        "is_root": False,
+        "parent": parent,
         "entries": entries,
     }
 
@@ -250,20 +288,13 @@ def _run_and_stream(job_id: str, local_job_id: str) -> None:
     poller = threading.Thread(target=poll_loop, daemon=True)
     poller.start()
 
-    def emit_layer_pulse(event: dict[str, Any]) -> None:
-        send_training_update(job_id, "running", {
-            "type": "layer_pulse",
-            "layer_id": event.get("layer_id"),
-            "layer_type": event.get("layer_type"),
-            "layer_index": event.get("layer_index"),
-            "current_epoch": event.get("current_epoch", 0),
-            "current_step": event.get("current_step", 0),
-            "sent_at": _now_iso(),
-        })
+    # 层高亮已改为前端按拓扑顺序、可感知节奏地自行推进（见前端 startLayerSweep）。
+    # Agent 不再对「每个 batch 的每一层」发送 layer_pulse——原先 forward 每层每批都发一条，
+    # 微秒级、量极大，会刷爆 WebSocket 且前端也已不再消费，故直接不发。
 
     # 在当前线程阻塞执行真实训练（PyTorch）
     try:
-        runtime_trainer.run_training_job(local_job_id, layer_pulse_callback=emit_layer_pulse)
+        runtime_trainer.run_training_job(local_job_id)
     except Exception:
         pass  # 失败状态由 trainer 写入任务，poll_loop 会读取并上报
 

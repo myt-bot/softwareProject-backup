@@ -22,8 +22,8 @@ class _DatasetPreparationCancelled(Exception):
     """内部异常：用户在数据集准备/下载阶段请求取消训练。"""
 
 # 训练产物（模型权重、指标）默认保存目录。
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-ARTIFACTS_ROOT = os.path.join(PROJECT_ROOT, "training_artifacts")
+# 放在用户主目录下的固定位置，方便用户直接找到（旧版放在 Agent 程序目录里，很难找）。
+ARTIFACTS_ROOT = os.path.join(os.path.expanduser("~"), "VisualDL", "training_artifacts")
 
 # 训练任务状态对应的中文提示，用于前端状态可见性（NFR4）。
 STATUS_MESSAGES = {

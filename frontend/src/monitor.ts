@@ -151,6 +151,7 @@ export function openTrainingMonitor(options: OpenMonitorOptions = {}) {
     restoreInitialStatus(options.initialStatus);
   }
   // live 进度由客户端 WebSocket 推送到 applyStatusMessage / applyResultMessage
+  startLayerSweep();
 }
 
 
@@ -158,6 +159,52 @@ export function closeTrainingMonitor() {
   monitor.visible = false;
   monitor.activeLayerId = null;
   monitor.activeLayerIndex = -1;
+  stopLayerSweep();
+}
+
+
+// —————————————————————————————————————————————
+// 层高亮：模拟「一个 batch 的数据正逐层向前流动」
+//
+// 真实 forward 一遍只需微秒级、且每个 batch 都会重来，无法逐层实时展示。
+// 因此在训练真正进行时，用一个可感知节奏的高亮沿拓扑顺序逐层前移（Input→…→Output），
+// 让用户看到「数据流到了这一层，正在这里参与训练」。只在训练进行中推进，
+// 数据集下载阶段、以及训练结束/取消后自动停下。
+// —————————————————————————————————————————————
+
+let _sweepTimer: ReturnType<typeof setInterval> | undefined;
+const LAYER_SWEEP_MS = 480;   // 每层停留时长，约等于一次脉冲，便于肉眼跟随
+
+function isTrainingForwardActive(): boolean {
+  if (monitor.state !== "running" || !monitor.layers.length) return false;
+  // 实况训练：数据集还在下载、或还没跑出第一步时，数据尚未流经网络
+  if (monitor.live && monitor.currentStep <= 0) return false;
+  return true;
+}
+
+export function startLayerSweep() {
+  stopLayerSweep();
+  _sweepTimer = setInterval(() => {
+    if (!isTrainingForwardActive()) {
+      if (monitor.activeLayerIndex !== -1) {
+        monitor.activeLayerIndex = -1;
+        monitor.activeLayerId = null;
+      }
+      return;
+    }
+    const count = monitor.layers.length;
+    const current = monitor.activeLayerIndex;
+    const next = current < 0 || current >= count - 1 ? 0 : current + 1;
+    monitor.activeLayerIndex = next;
+    monitor.activeLayerId = monitor.layers[next]?.id ?? null;
+  }, LAYER_SWEEP_MS);
+}
+
+export function stopLayerSweep() {
+  if (_sweepTimer) {
+    clearInterval(_sweepTimer);
+    _sweepTimer = undefined;
+  }
 }
 
 
@@ -336,20 +383,11 @@ export function applyStatusMessage(status: TrainingStatus) {
 }
 
 
-export function applyLayerPulseMessage(message: { layer_id?: string; layer_index?: number }) {
-  if (!monitor.visible || monitor.state !== "running") return;
-
-  let nextIndex = -1;
-  if (message.layer_id) {
-    nextIndex = monitor.layers.findIndex(layer => layer.id === message.layer_id);
-  }
-  if (nextIndex < 0 && !message.layer_id && typeof message.layer_index === "number") {
-    nextIndex = message.layer_index;
-  }
-  if (nextIndex < 0 || nextIndex >= monitor.layers.length) return;
-
-  monitor.activeLayerId = monitor.layers[nextIndex]?.id || message.layer_id || null;
-  monitor.activeLayerIndex = nextIndex;
+export function applyLayerPulseMessage(_message: { layer_id?: string; layer_index?: number }) {
+  // 层高亮已改为前端按拓扑顺序、可感知节奏地推进（见 startLayerSweep）。
+  // Agent 的 forward 每个 batch 都会为每一层发一次 layer_pulse（微秒级、量大），
+  // 若据此直接切换会变成杂乱快速的循环闪烁；这里忽略它，只保留「训练进行中」这一语义，
+  // 由前端节奏化的扫描来表现「数据正逐层流动」。
 }
 
 

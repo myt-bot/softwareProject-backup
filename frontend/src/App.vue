@@ -19,6 +19,7 @@ import SaveProjectModal from "./components/SaveProjectModal.vue";
 import StorageSettings from "./components/StorageSettings.vue";
 import TemplateGallery from "./components/TemplateGallery.vue";
 import ToastContainer from "./components/ToastContainer.vue";
+import TrainSettingsModal from "./components/TrainSettingsModal.vue";
 import TopBar from "./components/TopBar.vue";
 import TrainingMonitor from "./components/TrainingMonitor.vue";
 
@@ -41,6 +42,7 @@ function handleKeydown(event: KeyboardEvent) {
     ui.agentModalOpen = false;
     ui.saveModalOpen = false;
     ui.projectsModalOpen = false;
+    ui.trainSettingsOpen = false;
     return;
   }
 
@@ -125,6 +127,7 @@ onBeforeUnmount(() => {
     <AgentModal />
     <SaveProjectModal />
     <MyProjectsModal />
+    <TrainSettingsModal />
     <TrainingMonitor />
   </template>
 

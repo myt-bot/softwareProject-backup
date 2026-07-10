@@ -215,6 +215,11 @@ export const store = reactive({
   // 训练设备（cpu / cuda），由顶栏设备选择器切换；GPU 可用性来自后端 /devices
   device: "cpu",
   cudaAvailable: false,
+  // 训练超参数（在「训练超参数」弹窗中修改；epochs 仍按画布单独保存）
+  batchSize: 64,
+  learningRate: 0.001,
+  optimizer: "sgd",
+  lossFn: "cross_entropy",
   // 多画布：标签页切换，至少保留一个。初始进入为空白画布（不预置示例模型，
   // 需要示例可用顶部「快速开始模板」加载）
   canvases: [createCanvas(1, "画布 1")] as WorkCanvas[],
@@ -327,6 +332,8 @@ export const ui = reactive({
   saveModalOpen: false,
   // 我的项目（加载已保存模型）弹窗
   projectsModalOpen: false,
+  // 训练超参数弹窗（批大小 / 学习率 / 优化器 / 损失函数）
+  trainSettingsOpen: false,
   // 左侧组件库收起
   sidebarCollapsed: false,
   // 右侧参数面板被用户手动收起（点击节点卡片时自动重新展开）
@@ -907,12 +914,13 @@ export function getTrainConfig(canvas: WorkCanvas = activeCanvas()): TrainConfig
     dataset_name: store.dataset,
     // 训练轮次由用户在底部操作栏按画布设置
     epochs: canvas.epochs,
-    batch_size: 64,
-    rate: 0.001,
+    // 以下超参数由「训练超参数」弹窗设置
+    batch_size: store.batchSize,
+    rate: store.learningRate,
     // 训练设备由顶栏设备选择器决定
     device: store.device,
-    loss_fn: "cross_entropy",
-    optimizer: "sgd",
+    loss_fn: store.lossFn,
+    optimizer: store.optimizer,
     // 存储位置设置（留空使用后端默认位置）
     data_dir: storagePaths.dataDir,
     artifacts_dir: storagePaths.artifactsDir,

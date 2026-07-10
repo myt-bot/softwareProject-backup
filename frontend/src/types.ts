@@ -159,6 +159,8 @@ export interface TrainingResult extends TrainingStatus {
   accuracy?: number;
   loss?: number;
   device?: string;
+  // 训练产物保存路径（本机 Agent 回传）
+  artifacts?: { model_path?: string; metrics_path?: string };
 }
 
 export interface TrainStartResponse extends TrainingStatus {
