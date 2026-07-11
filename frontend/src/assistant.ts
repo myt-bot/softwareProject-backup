@@ -3,11 +3,13 @@
 
 import {
   activeCanvas,
+  agent,
   datasetChoices,
   datasetInputShape,
   getCurrentModelGraph,
   getTrainConfig,
   setDataset,
+  storagePaths,
   templateLibrary,
   updateNodeParam,
   store,
@@ -231,6 +233,37 @@ export async function executeAssistantCommand(
             dataset: choice.value,
             input_shape: datasetInputShape(choice.value),
             input_synced: inputSynced, // Input 维度是否被自动改动（改动后需重新校验）
+          },
+        };
+      }
+
+      case "get_system_status": {
+        const dev = agent.deviceSummary;
+        return {
+          ok: true,
+          result: {
+            local_agent: {
+              online: agent.online, // false 时训练/导出无法进行，需用户启动本机训练应用
+              runtime_version: agent.runtimeVersion || null,
+              platform: agent.platform || null,
+            },
+            device: {
+              current: store.device, // cpu / cuda
+              cuda_available: store.cudaAvailable,
+              cuda_device_count: dev?.cuda_device_count ?? 0,
+              cuda_devices: dev?.cuda_devices ?? [],
+              available: dev?.available_devices ?? [],
+            },
+            dataset: store.dataset,
+            storage: {
+              data_dir: storagePaths.dataDir || "（后端默认位置）",
+              artifacts_dir: storagePaths.artifactsDir || "（后端默认位置）",
+            },
+            canvas: {
+              name: activeCanvas().name,
+              canvas_count: store.canvases.length,
+              node_count: activeCanvas().nodes.length,
+            },
           },
         };
       }

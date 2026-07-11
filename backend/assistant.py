@@ -282,6 +282,7 @@ def command_specs() -> list[dict[str, Any]]:
         {"name": "list_templates", "category": "read", "summary": "列出可用的内置模型模板。", "params": [], "usage": "list_templates", "runs_on": "browser"},
         {"name": "get_train_config", "category": "read", "summary": "获取当前训练配置（数据集/轮次/批大小/学习率/优化器/损失/设备）。", "params": [], "usage": "get_train_config", "runs_on": "browser"},
         {"name": "get_training_result", "category": "read", "summary": "获取当前/最近一次训练的结果与逐轮指标（准确率、损失、进度、报错等），用于就训练结果答疑。", "params": [], "usage": "get_training_result", "runs_on": "browser"},
+        {"name": "get_system_status", "category": "read", "summary": "查看系统实时状态：本机 Agent 是否连接、设备(CPU/GPU)与 CUDA、存储目录、当前画布等。", "params": [], "usage": "get_system_status", "runs_on": "browser"},
         {"name": "load_template", "category": "write", "summary": "将内置模板载入当前画布（会替换当前模型）。", "params": [p("key", "string", "模板键，如 lenet")], "usage": "load_template --key lenet", "runs_on": "browser"},
         {"name": "add_node", "category": "write", "summary": "新增一个层节点。", "params": [p("type", "string", "层类型，如 Conv2D"), p("params", "object", "层参数", False, {})], "usage": "add_node --type Conv2D --params '{\"out_channels\":16}'", "runs_on": "browser"},
         {"name": "connect_nodes", "category": "write", "summary": "连接两个节点。", "params": [p("source", "string", "源节点 id"), p("target", "string", "目标节点 id")], "usage": "connect_nodes --source node_1 --target node_2", "runs_on": "browser"},
@@ -420,6 +421,15 @@ Input、Output、Add、Conv2D、MaxPooling、ReLU、Flatten、Linear、Dropout�
 - 改数据集用 set_dataset，改超参数用 set_train_config（epochs、batch_size、rate 学习率、optimizer、loss_fn、device），二者都会即时生效、无需手动改 Input。
 - 发起训练用 start_training，停止用 stop_training；二者都依赖用户的“本机训练 Agent”，若未在线就提示用户启动，**不要反复重试**。
 - 用户问“训练得怎么样 / 准确率多少 / 为什么没提升 / 为什么报错”等，**必须先调 get_training_result** 拿到真实的逐轮指标（loss/准确率）、最终准确率、进度与报错，再据此回答；若结果里 started=false（还没训练）就如实说明，**绝不编造准确率或损失数字**。
+
+# 系统使用 FAQ（用户问“怎么用 / 怎么配置”时照实回答；凡涉及“现在连上没 / 用的什么设备 / 存到哪”，先调 get_system_status 拿真实状态，不要凭空说“你已连接”之类）
+- 本机训练 Agent（训练、导出代码都依赖它，在**用户自己的电脑**上运行）：点顶栏「本机训练未连接」按钮打开说明弹窗 → 点下载（下载链接已绑定当前账号、按系统选 Windows/macOS/Linux）→ 解压 → 双击运行（Windows 是 .exe、macOS 是 .app）→ 在应用界面点「准备训练环境」（首次会自动下载安装 PyTorch 等依赖，较大较慢，请耐心等）→ 连上后顶栏会变成「本机训练已连接」，全程自动绑定账号、**无需手动填写任何配置**。
+- Agent 连不上 / 提示令牌失效：**不必重新下载**。在同一个弹窗里复制“长期有效令牌”，替换应用目录下 config.json 文件里的 "token" 字段，保存后重新运行应用即可。
+- 切换训练设备（CPU / GPU）：用顶栏的设备选择器切换；GPU 需要本机有 NVIDIA 显卡且 Agent 装了 CUDA 版依赖，检测不到 CUDA 时会锁定为 CPU。你也可以用 set_train_config 的 device 参数改。
+- 存储位置：点顶栏的文件夹图标「存储位置设置」，可分别设“数据集下载目录”和“训练结果保存目录”；留空则用后端默认位置。
+- 数据集：首次使用某个数据集时，训练启动会自动下载并缓存到本地，下载进度显示在训练监控页。
+- 保存 / 打开项目：底部操作栏「更多」里有「保存项目」和「我的项目」（打开此前保存的模型）。
+- 导出代码：export_code 会把当前模型生成 PyTorch 代码（需 Agent 在线），在导出弹窗里可查看、复制、下载。
 
 # 交互与安全
 - 执行写操作前简述你要做什么，做完后简要汇报结果（成功与否、关键 id 或维度）。

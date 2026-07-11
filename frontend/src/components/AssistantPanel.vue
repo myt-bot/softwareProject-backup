@@ -56,6 +56,7 @@ const HELP_GROUPS = [
       { cmd: "list_templates", desc: "列出内置模板（拿到 key 供 load_template 用）" },
       { cmd: "get_train_config", desc: "查看当前训练配置" },
       { cmd: "get_training_result", desc: "查看训练结果与逐轮指标" },
+      { cmd: "get_system_status", desc: "查看本机 Agent/设备/存储等系统状态" },
     ],
   },
   {
