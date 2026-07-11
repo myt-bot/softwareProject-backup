@@ -16,6 +16,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 import backend.assistant as assistant
 
 
+NEW_BROWSER_COMMANDS = {
+    "get_train_config",
+    "get_training_result",
+    "get_system_status",
+    "set_dataset",
+    "set_train_config",
+    "stop_training",
+}
+
+
 class FakeWebSocket:
     def __init__(self):
         self.sent = []
@@ -37,6 +47,32 @@ class TestCommandDefinitions(unittest.TestCase):
             self.assertIn(spec["category"], {"read", "write", "meta"})
             self.assertIn(spec["runs_on"], {"browser", "backend"})
             self.assertIsInstance(spec["params"], list)
+
+    def test_all_new_commands_are_exposed_as_browser_tools(self):
+        specs = {item["name"]: item for item in assistant.command_specs()}
+
+        self.assertTrue(NEW_BROWSER_COMMANDS.issubset(specs))
+        for name in NEW_BROWSER_COMMANDS:
+            self.assertEqual(specs[name]["runs_on"], "browser")
+
+    def test_new_command_parameter_schemas(self):
+        tools = {
+            tool["function"]["name"]: tool["function"]["parameters"]
+            for tool in assistant.build_command_tools()
+        }
+
+        self.assertEqual(tools["set_dataset"]["required"], ["name"])
+        self.assertEqual(tools["set_dataset"]["properties"]["name"]["type"], "string")
+        train = tools["set_train_config"]
+        self.assertEqual(train["required"], [])
+        self.assertEqual(set(train["properties"]), {
+            "epochs", "batch_size", "rate", "optimizer", "loss_fn", "device",
+        })
+        self.assertEqual(train["properties"]["epochs"]["type"], "integer")
+        self.assertEqual(train["properties"]["rate"]["type"], "number")
+        for name in ("get_train_config", "get_training_result", "get_system_status", "stop_training"):
+            self.assertEqual(tools[name]["properties"], {})
+            self.assertEqual(tools[name]["required"], [])
 
     def test_tools_use_openai_function_call_format(self):
         tools = assistant.build_command_tools()
@@ -161,6 +197,28 @@ class TestToolHandling(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, expected)
         execute.assert_awaited_once_with("user_1", "list_nodes", {})
 
+    async def test_each_new_browser_tool_is_forwarded_without_renaming(self):
+        arguments = {
+            "get_train_config": {},
+            "get_training_result": {},
+            "get_system_status": {},
+            "set_dataset": {"name": "CIFAR10"},
+            "set_train_config": {"epochs": 10, "rate": 0.001, "device": "cpu"},
+            "stop_training": {},
+        }
+        with patch.object(
+            assistant.hub,
+            "execute_command_in_browser",
+            new=AsyncMock(return_value={"ok": True, "result": None}),
+        ) as execute:
+            for name, args in arguments.items():
+                result = await assistant.handle_tool_use("user_1", name, args)
+                self.assertTrue(result["ok"])
+
+        self.assertEqual(execute.await_count, len(arguments))
+        for name, args in arguments.items():
+            self.assertIn(unittest.mock.call("user_1", name, args), execute.await_args_list)
+
     async def test_unknown_tool_is_rejected(self):
         result = await assistant.handle_tool_use("user_1", "does_not_exist", {})
         self.assertFalse(result["ok"])
@@ -192,6 +250,7 @@ class TestAssistantTurn(unittest.IsolatedAsyncioTestCase):
         with patch.object(assistant, "create_openai_client", return_value=client):
             result = await assistant.run_assistant_turn(
                 connection, "什么是卷积？", history, "当前项目为空。",
+                model="test-model", api_key="test-key", base_url="https://example.test/v1",
             )
 
         self.assertEqual(result, "这是最终答案。")
@@ -201,6 +260,7 @@ class TestAssistantTurn(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request["messages"][0]["role"], "system")
         self.assertIn("当前项目为空。", request["messages"][0]["content"])
         self.assertEqual(request["tools"][0]["type"], "function")
+        self.assertEqual(request["model"], "test-model")
 
     async def test_tool_call_result_is_returned_to_openai(self):
         tool_call = openai_tool_call("call_1", "list_nodes", "{}")
@@ -212,13 +272,16 @@ class TestAssistantTurn(unittest.IsolatedAsyncioTestCase):
         connection = assistant.AssistantConnection("user_1", FakeWebSocket())
 
         with (
-            patch.object(assistant, "create_openai_client", return_value=client),
+            patch.object(assistant, "create_openai_client", return_value=client) as create_client,
             patch.object(
                 assistant, "handle_tool_use",
                 new=AsyncMock(return_value={"ok": True, "result": [{"id": "input_1"}], "error": None}),
             ) as execute,
         ):
-            result = await assistant.run_assistant_turn(connection, "看看画布", [])
+            result = await assistant.run_assistant_turn(
+                connection, "看看画布", [],
+                model="test-model", api_key="test-key", base_url="https://example.test/v1",
+            )
 
         self.assertEqual(result, "画布中有一个输入节点。")
         execute.assert_awaited_once_with("user_1", "list_nodes", {})
@@ -226,6 +289,7 @@ class TestAssistantTurn(unittest.IsolatedAsyncioTestCase):
         tool_message = next(message for message in second_messages if message["role"] == "tool")
         self.assertEqual(tool_message["tool_call_id"], "call_1")
         self.assertTrue(json.loads(tool_message["content"])["ok"])
+        create_client.assert_called_once_with("test-key", "https://example.test/v1")
 
     async def test_invalid_tool_arguments_are_reported_to_model(self):
         tool_call = openai_tool_call("bad_call", "list_nodes", "not-json")
@@ -240,7 +304,10 @@ class TestAssistantTurn(unittest.IsolatedAsyncioTestCase):
             patch.object(assistant, "create_openai_client", return_value=client),
             patch.object(assistant, "handle_tool_use", new=AsyncMock()) as execute,
         ):
-            await assistant.run_assistant_turn(connection, "测试", [])
+            await assistant.run_assistant_turn(
+                connection, "测试", [],
+                model="test-model", api_key="test-key", base_url="https://example.test/v1",
+            )
 
         execute.assert_not_awaited()
         messages = client.chat.completions.create.call_args_list[1].kwargs["messages"]
@@ -255,6 +322,44 @@ class TestAssistantTurn(unittest.IsolatedAsyncioTestCase):
                     assistant.AssistantConnection("user_1", FakeWebSocket()), "  ", [],
                 )
         create_client.assert_not_called()
+
+    async def test_missing_model_configuration_does_not_call_openai(self):
+        connection = assistant.AssistantConnection("user_1", FakeWebSocket())
+        with patch.object(assistant, "create_openai_client") as create_client:
+            result = await assistant.run_assistant_turn(
+                connection, "查看系统状态", [], model="", api_key="", base_url="",
+            )
+
+        create_client.assert_not_called()
+        self.assertIn("配置模型", result)
+        self.assertTrue(connection.websocket.sent[-1]["final"])
+
+
+class TestFrontendCommandContract(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        root = Path(__file__).resolve().parent.parent.parent.parent
+        cls.dispatcher = (root / "frontend" / "src" / "assistant.ts").read_text(encoding="utf-8")
+        cls.panel = (root / "frontend" / "src" / "components" / "AssistantPanel.vue").read_text(encoding="utf-8")
+
+    def test_every_backend_browser_command_has_frontend_switch_case(self):
+        browser_commands = {
+            spec["name"] for spec in assistant.command_specs()
+            if spec["runs_on"] == "browser"
+        }
+        missing = {
+            name for name in browser_commands
+            if f'case "{name}"' not in self.dispatcher
+        }
+        self.assertEqual(missing, set(), f"前端缺少命令分发：{sorted(missing)}")
+
+    def test_new_commands_are_listed_in_command_help(self):
+        missing = {name for name in NEW_BROWSER_COMMANDS if name not in self.panel}
+        self.assertEqual(missing, set(), f"命令面板帮助缺少：{sorted(missing)}")
+
+    def test_command_and_ai_paths_share_the_same_dispatcher(self):
+        self.assertIn("executeAssistantCommand(parsed.command, parsed.args)", self.panel)
+        self.assertIn("executeAssistantCommand(command, args)", self.panel)
 
 
 class TestAuthentication(unittest.TestCase):
