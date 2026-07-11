@@ -4609,3 +4609,798 @@ body.is-connecting .node-port {
   .tm-topbar { grid-template-columns: 1fr; height: auto; padding: 12px 16px; }
   .tm-topbar-center, .tm-topbar-right { justify-content: flex-start; }
 }
+
+/* ============================================================
+   AI 助手（顶栏按钮 + 右侧聊天抽屉）
+   ============================================================ */
+.assistant-button.active {
+  border-color: var(--indigo);
+  color: var(--indigo-strong);
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.assistant-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: 390px;
+  max-width: 92vw;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  z-index: 240;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.assistant-drawer.open {
+  transform: translateX(0);
+}
+
+.assistant-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.assistant-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.assistant-title iconify-icon {
+  font-size: 20px;
+  color: var(--indigo-strong);
+}
+
+.assistant-status {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--faint);
+  margin-left: 4px;
+}
+
+.assistant-head-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.assistant-settings {
+  flex: 0 0 auto;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.assistant-settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.assistant-settings input {
+  padding: 7px 10px;
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--panel);
+}
+
+.assistant-settings input:focus {
+  outline: none;
+  border-color: var(--indigo);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+}
+
+.assistant-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.assistant-settings-actions small {
+  font-size: 11px;
+  color: var(--faint);
+  line-height: 1.4;
+}
+
+.assistant-messages {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.assistant-empty {
+  margin: auto;
+  text-align: center;
+  color: var(--faint);
+  font-size: 13px;
+}
+
+.assistant-empty iconify-icon {
+  font-size: 34px;
+  color: var(--border-2);
+}
+
+.assistant-empty ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.assistant-msg {
+  max-width: 88%;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.assistant-msg.role-user {
+  align-self: flex-end;
+  background: var(--indigo);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.assistant-msg.role-assistant {
+  align-self: flex-start;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-bottom-left-radius: 4px;
+}
+
+.assistant-msg.role-tool {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 11.5px;
+  padding: 2px 8px;
+}
+
+.assistant-msg.role-tool iconify-icon {
+  font-size: 13px;
+}
+
+.assistant-typing {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.assistant-typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+  animation: assistantBlink 1.2s infinite ease-in-out both;
+}
+
+.assistant-typing span:nth-child(2) { animation-delay: 0.16s; }
+.assistant-typing span:nth-child(3) { animation-delay: 0.32s; }
+
+@keyframes assistantBlink {
+  0%, 80%, 100% { opacity: 0.25; }
+  40% { opacity: 1; }
+}
+
+.assistant-input {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.assistant-input textarea {
+  flex: 1 1 auto;
+  resize: none;
+  padding: 8px 10px;
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--panel);
+  font-family: inherit;
+}
+
+.assistant-input textarea:focus {
+  outline: none;
+  border-color: var(--indigo);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+}
+
+.assistant-input .primary-button {
+  flex: 0 0 auto;
+  padding: 9px 12px;
+}
+
+/* AI 助手 · 命令台模式条 / 退出按钮 / 提示行 */
+.assistant-mode-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px 7px 14px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--panel-2);
+}
+.assistant-mode-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assistant-mode-bar b { color: var(--indigo-strong); }
+.assistant-mode-bar.ai {
+  color: #075985;
+  background: linear-gradient(90deg, #e0f2fe, #eff6ff);
+  font-weight: 600;
+}
+.assistant-mode-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #0ea5e9;
+  margin-right: 5px;
+  vertical-align: middle;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.18);
+  animation: assistantBlink 1.4s infinite ease-in-out;
+}
+/* 退出 AI：模式条右侧的精致小胶囊 */
+.assistant-exit-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(3, 105, 161, 0.22);
+  background: rgba(255, 255, 255, 0.75);
+  color: #0369a1;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.assistant-exit-chip iconify-icon { font-size: 14px; }
+.assistant-exit-chip:hover {
+  background: #fff;
+  border-color: #0284c7;
+  color: #075985;
+}
+.assistant-exit-chip:active { transform: scale(0.96); }
+
+.assistant-msg.role-note {
+  align-self: center;
+  max-width: 100%;
+  background: transparent;
+  color: var(--faint);
+  font-size: 12px;
+  text-align: center;
+  padding: 2px 6px;
+}
+.assistant-empty code {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* AI 助手 · help 命令的结构化命令卡 */
+.assistant-msg.role-help {
+  align-self: stretch;
+  max-width: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+.assistant-help {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.assistant-help-tip {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+}
+.assistant-help-tip b { color: var(--indigo-strong); }
+.assistant-help-group {
+  padding: 8px 12px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.assistant-help-group:last-child { border-bottom: none; }
+.assistant-help-group h5 {
+  margin: 2px 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+.assistant-help-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 0;
+  border-top: 1px dashed var(--border);
+}
+.assistant-help-row:first-of-type { border-top: none; }
+.assistant-help-row code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  color: var(--indigo-strong);
+  background: rgba(14, 165, 233, 0.08);
+  border: 1px solid rgba(14, 165, 233, 0.18);
+  border-radius: 6px;
+  padding: 3px 7px;
+  align-self: flex-start;
+  max-width: 100%;
+  word-break: break-word;
+}
+.assistant-help-row span {
+  font-size: 12px;
+  color: var(--muted);
+  padding-left: 2px;
+}
+
+/* AI 助手 · 模型设置展开/收起过渡 */
+.assistant-settings-enter-active,
+.assistant-settings-leave-active {
+  transition: max-height 0.28s ease, opacity 0.24s ease, padding 0.28s ease;
+  overflow: hidden;
+}
+.assistant-settings-enter-from,
+.assistant-settings-leave-to {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.assistant-settings-enter-to,
+.assistant-settings-leave-from {
+  max-height: 360px;
+}
+
+/* AI 助手 · 头部随模式变色（切换更明显）+ 模式条入场动画 */
+.assistant-head {
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+.assistant-head.ai {
+  background: linear-gradient(90deg, #2563eb, #0ea5e9);
+  border-bottom-color: transparent;
+}
+.assistant-head.ai .assistant-title,
+.assistant-head.ai .assistant-title iconify-icon {
+  color: #ffffff;
+}
+.assistant-head.ai .assistant-status {
+  color: rgba(255, 255, 255, 0.85);
+}
+.assistant-head.ai .icon-button {
+  color: rgba(255, 255, 255, 0.92);
+}
+.assistant-head.ai .icon-button:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* 每次切换模式，模式条重放一次入场动画（配合模板里的 :key） */
+.assistant-mode-bar {
+  animation: assistantModeIn 0.34s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes assistantModeIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* AI 助手 · AI 模式中央大号 agent 图标水印 */
+.assistant-messages { position: relative; }
+.assistant-messages > *:not(.assistant-watermark) { position: relative; z-index: 1; }
+.assistant-watermark {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 0;
+  animation: assistantWatermarkIn 0.45s ease both;
+}
+.assistant-watermark iconify-icon {
+  font-size: 190px;
+  color: var(--indigo);
+  opacity: 0.07;
+}
+@keyframes assistantWatermarkIn {
+  from { opacity: 0; transform: translate(-50%, -46%) scale(0.9); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* ============================================================
+   AI 助手 · 视觉精修（统一命令台与 AI 模式的观感）
+   ============================================================ */
+.assistant-drawer {
+  width: 404px;
+  box-shadow: -20px 0 50px -26px rgba(35, 48, 74, 0.38);
+}
+
+/* —— 头部：头像徽章 + 更清爽的标题 —— */
+.assistant-head { padding: 13px 14px 13px 16px; align-items: center; }
+.assistant-title { gap: 10px; }
+.assistant-avatar {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #38bdf8, #6366f1);
+  box-shadow: 0 5px 12px -4px rgba(79, 70, 229, 0.5);
+}
+.assistant-avatar iconify-icon { font-size: 19px; color: #fff; }
+.assistant-title-name { font-weight: 700; font-size: 15px; color: var(--text); }
+.assistant-status { font-weight: 500; color: var(--faint); }
+
+/* AI 模式头部：淡雅浅色，而非饱和大蓝块 */
+.assistant-head.ai {
+  background: linear-gradient(135deg, #eef2ff 0%, #e0f2fe 100%);
+  border-bottom-color: #cfe4f7;
+}
+.assistant-head.ai .assistant-title-name { color: #1e3a8a; }
+.assistant-head.ai .assistant-status { color: #2563eb; }
+.assistant-head.ai .assistant-avatar {
+  background: linear-gradient(135deg, #2563eb, #0ea5e9);
+  box-shadow: 0 6px 14px -4px rgba(37, 99, 235, 0.55);
+}
+.assistant-head.ai .icon-button { color: #2563eb; }
+.assistant-head.ai .icon-button:hover { background: rgba(37, 99, 235, 0.1); }
+
+/* —— 模式条：更克制 —— */
+.assistant-mode-bar { padding: 8px 12px 8px 16px; font-size: 11.5px; }
+.assistant-mode-bar:not(.ai) { color: var(--faint); }
+.assistant-mode-bar.ai {
+  background: linear-gradient(90deg, #e0f2fe, #eef2ff);
+  color: #1e40af;
+}
+
+/* —— 消息区：柔和背景 —— */
+.assistant-messages {
+  padding: 16px 14px;
+  gap: 12px;
+  background: linear-gradient(180deg, #f8fafd, #f3f6fc);
+}
+
+/* —— 气泡：渐变用户气泡 + 干净助手卡 —— */
+.assistant-msg {
+  font-size: 13.5px;
+  line-height: 1.65;
+  padding: 10px 13px;
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(35, 48, 74, 0.05);
+}
+.assistant-msg.role-user {
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  color: #fff;
+  border-bottom-right-radius: 5px;
+  box-shadow: 0 4px 12px -5px rgba(37, 99, 235, 0.5);
+}
+.assistant-msg.role-assistant {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 5px;
+}
+
+/* —— 输入区：圆角输入 + 圆形发送键 —— */
+.assistant-input { padding: 12px; gap: 10px; background: var(--panel); }
+.assistant-input textarea {
+  border-radius: 12px;
+  border: 1px solid var(--border-2);
+  background: var(--panel-2);
+  padding: 10px 12px;
+}
+.assistant-input .primary-button {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  padding: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  box-shadow: 0 6px 14px -5px rgba(37, 99, 235, 0.55);
+}
+.assistant-input .primary-button:disabled { opacity: 0.45; box-shadow: none; }
+.assistant-input .primary-button iconify-icon { font-size: 18px; }
+
+/* —— 水印：偏蓝、更淡 —— */
+.assistant-watermark iconify-icon { color: #2563eb; opacity: 0.06; }
+
+/* AI 助手 · 命令执行结果卡 */
+.assistant-msg.role-result {
+  align-self: flex-start;
+  max-width: 94%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+.assistant-result {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--panel);
+  box-shadow: 0 1px 2px rgba(35, 48, 74, 0.05);
+}
+.assistant-result-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.assistant-result-head iconify-icon { font-size: 16px; flex: 0 0 auto; }
+.assistant-result-head code {
+  font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(35, 48, 74, 0.06);
+  color: var(--text);
+}
+.assistant-result-head span { color: var(--muted); }
+.assistant-result.ok .assistant-result-head { background: #f0fdf4; }
+.assistant-result.ok .assistant-result-head iconify-icon { color: #16a34a; }
+.assistant-result.err .assistant-result-head { background: #fef2f2; }
+.assistant-result.err .assistant-result-head iconify-icon { color: #dc2626; }
+.assistant-result.err .assistant-result-head span { color: #dc2626; }
+
+.assistant-result-code {
+  margin: 0;
+  padding: 10px 12px;
+  font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #334155;
+  background: var(--panel-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 280px;
+  overflow: auto;
+}
+.assistant-result-text {
+  margin: 0;
+  padding: 9px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+/* AI 助手 · help 提示里的内联代码 */
+.assistant-help-tip { line-height: 1.7; }
+.assistant-help-tip code {
+  font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 11px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--indigo-strong);
+  white-space: nowrap;
+}
+
+/* AI 助手 · 每条消息出现时的入场动画（新插入节点各自播放一次） */
+.assistant-messages .assistant-msg {
+  animation: assistantMsgIn 0.26s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes assistantMsgIn {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ————————————————————————————————————————————————
+   AI 助手 · 一个回合合并成一张卡（头像 + 正文；正文内穿插工具调用）
+   ———————————————————————————————————————————————— */
+/* 外层 wrapper 让位：卡片外观交给 .assistant-turn 自己 */
+.assistant-msg.role-assistant {
+  align-self: stretch;
+  max-width: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  white-space: normal;
+}
+.assistant-turn {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+}
+.assistant-turn-avatar {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  margin-top: 1px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(135deg, #6366f1, #2563eb);
+  box-shadow: 0 3px 8px -3px rgba(37, 99, 235, 0.55);
+}
+.assistant-turn-avatar iconify-icon { font-size: 16px; }
+.assistant-turn-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  border-top-left-radius: 5px;
+  padding: 4px 12px;
+  box-shadow: 0 1px 2px rgba(35, 48, 74, 0.05);
+}
+/* 回合内的工具调用：细行 + 图标，弱化为“过程” */
+.assistant-turn-tool {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.assistant-turn-tool iconify-icon { font-size: 13px; color: #6366f1; }
+
+/* ————————————————————————————————————————————————
+   AI 助手 · Markdown 正文渲染（marked + DOMPurify 后的 HTML）
+   ———————————————————————————————————————————————— */
+.assistant-md {
+  white-space: normal;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text);
+}
+.assistant-md > *:first-child { margin-top: 4px; }
+.assistant-md > *:last-child { margin-bottom: 4px; }
+.assistant-md p { margin: 6px 0; }
+.assistant-md h1, .assistant-md h2, .assistant-md h3,
+.assistant-md h4, .assistant-md h5 {
+  margin: 10px 0 5px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.assistant-md h1 { font-size: 16px; }
+.assistant-md h2 { font-size: 15px; }
+.assistant-md h3 { font-size: 14px; }
+.assistant-md h4, .assistant-md h5 { font-size: 13.5px; }
+.assistant-md ul, .assistant-md ol { margin: 6px 0; padding-left: 20px; }
+.assistant-md li { margin: 3px 0; }
+.assistant-md strong { font-weight: 700; color: #1e293b; }
+.assistant-md a { color: var(--indigo-strong); text-decoration: underline; }
+.assistant-md hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+.assistant-md blockquote {
+  margin: 6px 0;
+  padding: 2px 10px;
+  border-left: 3px solid var(--border-2);
+  color: var(--muted);
+}
+.assistant-md code {
+  font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--indigo-strong);
+}
+.assistant-md pre {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.assistant-md pre code {
+  border: none;
+  background: none;
+  padding: 0;
+  color: #334155;
+  white-space: pre;
+}
+/* 表格：窄面板里可横向滚动，不撑破布局 */
+.assistant-md table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12.5px;
+}
+.assistant-md th, .assistant-md td {
+  border: 1px solid var(--border);
+  padding: 5px 9px;
+  text-align: left;
+  vertical-align: top;
+}
+.assistant-md thead th { background: var(--panel-2); font-weight: 700; }
+.assistant-md tbody tr:nth-child(even) { background: rgba(35, 48, 74, 0.02); }
+
+/* AI 助手 · 思考过程（中间叙述 + 工具调用）可折叠 */
+.assistant-think {
+  margin: 2px 0 6px;
+}
+.assistant-think-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.assistant-think-toggle:hover { background: var(--panel); color: var(--text); }
+.assistant-think-toggle iconify-icon { font-size: 15px; }
+.assistant-think-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 2px 4px;
+}
+.assistant-think-live iconify-icon { font-size: 14px; color: #6366f1; }
+/* 展开后的过程正文：左侧竖线 + 整体弱化，和最终回答区分 */
+.assistant-think-body {
+  margin-top: 5px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+.assistant-think-text { color: var(--muted); font-size: 12.5px; }
+.assistant-think-text :is(h1, h2, h3, h4, h5) { font-size: 13px; }

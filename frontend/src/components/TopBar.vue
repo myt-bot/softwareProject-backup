@@ -25,6 +25,18 @@ import { agent, openHelpModal, ui } from "../store";
         {{ agent.online ? "本机训练已连接" : "本机训练未连接" }}
       </button>
 
+      <!-- AI 助手：用自然语言让大模型帮你建模 / 答疑 -->
+      <button
+        class="guide-button assistant-button"
+        :class="{ active: ui.assistantOpen }"
+        id="btn-assistant"
+        title="打开 AI 助手"
+        @click="ui.assistantOpen = !ui.assistantOpen"
+      >
+        <iconify-icon icon="mdi:robot-happy-outline"></iconify-icon>
+        AI 助手
+      </button>
+
       <button class="guide-button" id="btn-help" title="打开新手指南" @click="openHelpModal">
         <iconify-icon icon="mdi:school-outline"></iconify-icon>
         新手指南

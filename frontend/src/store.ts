@@ -306,6 +306,14 @@ export function applyDatasetInputShapes(): boolean {
   return changedAny;
 }
 
+// 切换训练数据集：更新选择并把各画布 Input 形状同步为该数据集维度。
+// 返回 Input 是否被改动（供 UI / AI 助手据此提示需重新校验）。DatasetSelector 与
+// AI 助手的 set_dataset 命令共用此逻辑，保证行为一致。
+export function setDataset(value: string): boolean {
+  store.dataset = value;
+  return applyDatasetInputShapes();
+}
+
 // 模板库（从后端 /projects/templates 拉取，失败时用兜底列表）
 export const templateLibrary = reactive<{ items: TemplateMeta[] }>({ items: [...fallbackTemplates] });
 
@@ -396,6 +404,8 @@ export const ui = reactive({
   projectsModalOpen: false,
   // 训练超参数弹窗（批大小 / 学习率 / 优化器 / 损失函数）
   trainSettingsOpen: false,
+  // AI 助手聊天面板
+  assistantOpen: false,
   // 左侧组件库收起
   sidebarCollapsed: false,
   // 右侧参数面板被用户手动收起（点击节点卡片时自动重新展开）

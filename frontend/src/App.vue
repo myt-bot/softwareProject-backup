@@ -6,6 +6,7 @@ import { cancelPendingConnection, hideConnectionMenu, hideNodeMenu, redoGraphCha
 import { closeHelpModal, initializeBeginnerGuide, ui } from "./store";
 import ActionBar from "./components/ActionBar.vue";
 import AgentModal from "./components/AgentModal.vue";
+import AssistantPanel from "./components/AssistantPanel.vue";
 import AuthPage from "./components/AuthPage.vue";
 import CanvasBoard from "./components/CanvasBoard.vue";
 import ContextMenus from "./components/ContextMenus.vue";
@@ -128,6 +129,7 @@ onBeforeUnmount(() => {
     <SaveProjectModal />
     <MyProjectsModal />
     <TrainSettingsModal />
+    <AssistantPanel />
     <TrainingMonitor />
   </template>
 
