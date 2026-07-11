@@ -517,6 +517,95 @@ async def handle_tool_use(
     return await hub.execute_command_in_browser(user_id, tool_name, dict(tool_input or {}))
 
 
+async def _stream_model_round(
+    connection: "AssistantConnection",
+    client: Any,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+) -> tuple[str, list[dict[str, Any]]]:
+    """跑一轮大模型（流式），边收边把正文增量经 WebSocket 推给浏览器。
+
+    返回 (完整正文, 工具调用列表)；工具调用形如 {"id","name","arguments"}。正文通过
+    多条 {"type":"assistant_delta","text": 片段} 实时下发，前端逐段追加显示。
+    若流式在**尚未产出任何内容前**就失败，则自动退回非流式调用，保证可用。
+    """
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+
+    def produce() -> None:
+        try:
+            stream = client.chat.completions.create(
+                model=model, messages=messages, tools=tools,
+                tool_choice="auto", stream=True,
+            )
+            for chunk in stream:
+                loop.call_soon_threadsafe(queue.put_nowait, ("chunk", chunk))
+        except Exception as exc:  # 交由主协程决定：退回非流式或抛出
+            loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, ("done", None))
+
+    loop.run_in_executor(None, produce)
+
+    content_parts: list[str] = []
+    tool_slots: dict[int, dict[str, Any]] = {}
+    streamed_any = False
+    error: Optional[BaseException] = None
+
+    while True:
+        kind, payload = await queue.get()
+        if kind == "done":
+            break
+        if kind == "error":
+            error = payload
+            continue
+        choices = getattr(payload, "choices", None) or []
+        if not choices:
+            continue
+        delta = choices[0].delta
+        piece = getattr(delta, "content", None)
+        if piece:
+            content_parts.append(piece)
+            streamed_any = True
+            await connection.send_json({"type": "assistant_delta", "text": piece})
+        for tc in (getattr(delta, "tool_calls", None) or []):
+            slot = tool_slots.setdefault(tc.index, {"id": None, "name": None, "arguments": ""})
+            if tc.id:
+                slot["id"] = tc.id
+            fn = getattr(tc, "function", None)
+            if fn is not None:
+                if fn.name:
+                    slot["name"] = fn.name
+                if fn.arguments:
+                    slot["arguments"] += fn.arguments
+
+    if error is not None and not streamed_any and not tool_slots:
+        # 流式在产出任何内容前失败：退回一次非流式调用（兼容不支持 stream 的接口）
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=model, messages=messages, tools=tools, tool_choice="auto",
+        )
+        msg = response.choices[0].message
+        content = msg.content or ""
+        if content:
+            await connection.send_json({"type": "assistant_delta", "text": content})
+        calls = [
+            {"id": c.id, "name": c.function.name, "arguments": c.function.arguments or "{}"}
+            for c in (msg.tool_calls or [])
+        ]
+        return content, calls
+
+    if error is not None:
+        raise error
+
+    calls = []
+    for idx in sorted(tool_slots):
+        slot = tool_slots[idx]
+        calls.append({"id": slot["id"], "name": slot["name"], "arguments": slot["arguments"] or "{}"})
+    return "".join(content_parts), calls
+
+
 async def run_assistant_turn(
     connection: AssistantConnection,
     user_message: str,
@@ -562,38 +651,28 @@ async def run_assistant_turn(
     messages.append({"role": "user", "content": user_message.strip()})
     final_text = ""
 
+    tools = build_command_tools()
     for _ in range(MAX_TOOL_ITERATIONS + 1):
-        response = await asyncio.to_thread(
-            client.chat.completions.create,
-            model=model,
-            messages=messages,
-            tools=build_command_tools(),
-            tool_choice="auto",
-        )
-        choice = response.choices[0]
-        assistant_message = choice.message
-        tool_calls = list(assistant_message.tool_calls or [])
-        content = assistant_message.content or ""
+        content, tool_calls = await _stream_model_round(connection, client, model, messages, tools)
 
-        serialized_calls = []
-        for call in tool_calls:
-            serialized_calls.append({
-                "id": call.id,
-                "type": "function",
-                "function": {"name": call.function.name, "arguments": call.function.arguments or "{}"},
-            })
+        serialized_calls = [
+            {"id": c["id"], "type": "function",
+             "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}}
+            for c in tool_calls
+        ]
         assistant_entry: dict[str, Any] = {"role": "assistant", "content": content}
         if serialized_calls:
             assistant_entry["tool_calls"] = serialized_calls
         messages.append(assistant_entry)
 
-        if content:
-            await connection.send_json({"type": "assistant_message", "text": content, "final": not tool_calls})
-
         if not tool_calls:
             final_text = content or "抱歉，我没有生成有效回复。"
-            if not content:
-                await connection.send_json({"type": "assistant_message", "text": final_text, "final": True})
+            # 正文已通过 assistant_delta 流式送达；这里只发结束信号（无正文时补发兜底文本）
+            await connection.send_json({
+                "type": "assistant_message",
+                "text": "" if content else final_text,
+                "final": True,
+            })
             break
 
         if _ >= MAX_TOOL_ITERATIONS:
@@ -603,17 +682,17 @@ async def run_assistant_turn(
 
         for call in tool_calls:
             try:
-                parsed = json.loads(call.function.arguments or "{}")
+                parsed = json.loads(call["arguments"] or "{}")
                 if not isinstance(parsed, dict):
                     raise ValueError("工具参数必须是 JSON 对象")
-                result = await handle_tool_use(connection.user_id, call.function.name, parsed)
+                result = await handle_tool_use(connection.user_id, call["name"], parsed)
             except (json.JSONDecodeError, ValueError) as exc:
                 result = {"ok": False, "result": None, "error": f"工具参数无效：{exc}"}
             except Exception as exc:
                 result = {"ok": False, "result": None, "error": f"工具执行异常：{exc}"}
             messages.append({
                 "role": "tool",
-                "tool_call_id": call.id,
+                "tool_call_id": call["id"],
                 "content": json.dumps(result, ensure_ascii=False, default=str),
             })
 

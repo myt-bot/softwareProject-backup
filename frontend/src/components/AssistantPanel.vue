@@ -111,6 +111,9 @@ let ws: WebSocket | null = null;
 // 当前 AI 回合在 messages 中的下标；-1 表示本回合尚未落卡（下一段文本/工具会新建一张卡）。
 // 同一回合内的所有助手文本与工具调用都并入这张卡，避免每步各成一张卡片。
 let aiTurnIndex = -1;
+// 是否有“正在流式追加”的文本段：为 true 时 assistant_delta 继续追加到最后一段文本，
+// 否则新起一段。工具调用到来 / 本回合结束时置 false，让后续文本另起一段。
+let streamOpen = false;
 function currentAiTurn(): ChatMessage {
   const existing = messages.value[aiTurnIndex];
   if (aiTurnIndex >= 0 && existing && existing.role === "assistant") return existing;
@@ -230,10 +233,25 @@ async function onMessage(event: MessageEvent) {
   } catch {
     return;
   }
-  if (msg.type === "assistant_message") {
+  if (msg.type === "assistant_delta") {
+    // 流式增量：追加到当前文本段（没有则新起一段）
+    const piece = String(msg.text ?? "");
+    if (!piece) return;
+    const steps = currentAiTurn().steps!;
+    const last = steps[steps.length - 1];
+    if (streamOpen && last && last.kind === "text") {
+      last.text += piece;
+    } else {
+      steps.push({ kind: "text", text: piece });
+      streamOpen = true;
+    }
+    scrollToBottom();
+  } else if (msg.type === "assistant_message") {
     const text = String(msg.text ?? "");
     const turn = currentAiTurn();
+    // 正文一般已由 assistant_delta 送达；仅当带非空 text（兜底/报错等）时另起一段
     if (text) turn.steps!.push({ kind: "text", text });
+    streamOpen = false;
     scrollToBottom();
     if (msg.final) {
       turn.done = true; // 收到最终回答：思考过程折叠起来
@@ -243,6 +261,7 @@ async function onMessage(event: MessageEvent) {
   } else if (msg.type === "tool_request") {
     const command = String(msg.command ?? "");
     const args = (msg.args as Record<string, unknown>) || {};
+    streamOpen = false; // 关闭当前流式文本段，工具后另起新段
     currentAiTurn().steps!.push({ kind: "tool", command });
     scrollToBottom();
     const res = await executeAssistantCommand(command, args);
@@ -288,6 +307,7 @@ function enterAi() {
   mode.value = "ai";
   messages.value = []; // 切换模式时清空命令台内容
   aiTurnIndex = -1;
+  streamOpen = false;
   push("note", "已进入 AI 对话：直接说你想做什么，例如“帮我建一个 LeNet 并解释”。点上方「退出 AI」可回到命令模式。");
   void connect().catch(() => {});
 }
@@ -297,6 +317,7 @@ function exitAi() {
   busy.value = false;
   messages.value = []; // 切换模式时清空命令台内容
   aiTurnIndex = -1;
+  streamOpen = false;
   push("note", "已退出 AI 对话，回到命令模式。输入 help 查看命令，或再次输入 agent 呼出 AI。");
 }
 
@@ -309,6 +330,7 @@ async function sendToAi(text: string) {
   }
   busy.value = true;
   aiTurnIndex = -1; // 新一轮提问：下一段助手输出另起新卡
+  streamOpen = false;
   try {
     await connect();
   } catch {
