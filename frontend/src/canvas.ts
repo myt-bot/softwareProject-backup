@@ -11,6 +11,7 @@ import {
   CONTAINER_TYPE,
   createCanvas,
   createEmptyContainerNode,
+  datasetInputShape,
   deriveNodeCounters,
   endpointBaseId,
   endpointPortId,
@@ -1610,6 +1611,15 @@ function createNodeConfig(layerType: string, x: number, y: number): GraphNode {
   const canvasX = x;
   const canvasY = y;
 
+  // 新建的 Input 默认形状跟随当前数据集（如 MNIST→[1,28,28]、CIFAR→[3,32,32]）
+  const params = { ...config.params };
+  if (type === "Input") {
+    params.shape = datasetInputShape();
+  }
+  const hint = type === "Input" && Array.isArray(params.shape)
+    ? (params.shape as number[]).join("x")
+    : (config.hint || "?");
+
   return {
     id,
     type,
@@ -1618,10 +1628,10 @@ function createNodeConfig(layerType: string, x: number, y: number): GraphNode {
     color: config.color,
     // 配置未提供说明时，用参数摘要生成（序列与高级层）
     note: config.note ?? (Object.keys(config.params).length ? formatLayerNote({ params: config.params }) : undefined),
-    hint: config.hint || "?",
+    hint,
     x: canvasX,
     y: canvasY,
-    params: { ...config.params },
+    params,
   };
 }
 

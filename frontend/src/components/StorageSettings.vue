@@ -93,14 +93,14 @@ function resetDefaults() {
               id="storage-artifacts-dir"
               type="text"
               v-model="form.artifactsDir"
-              placeholder="默认：项目目录下的 training_artifacts"
+              placeholder="默认：用户主目录下的 VisualDL/training_artifacts"
             >
             <button class="secondary-button path-browse" id="browse-artifacts-dir" @click="openPicker('artifactsDir')">
               <iconify-icon icon="mdi:folder-search-outline"></iconify-icon>
               浏览
             </button>
           </div>
-          <small>每次训练得到的模型权重和训练指标文件将保存到该目录，可自定义为任意本地路径。</small>
+          <small>每次训练得到的模型权重（model.pt）和指标（metrics.json）将保存到该目录，可自定义为任意本地路径；训练结束后详情页会显示完整保存路径。</small>
         </label>
       </div>
 

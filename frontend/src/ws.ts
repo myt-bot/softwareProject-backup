@@ -228,7 +228,7 @@ function routeTrainingMessage(message: WsMessage, isFinal: boolean) {
       const acc = typeof message.accuracy === "number" ? `${(message.accuracy * 100).toFixed(1)}%` : "未知";
       showToast("success", `${name} 训练完成，accuracy=${acc}`);
     } else if (message.status === "failed") {
-      showToast("error", `${name} 训练失败：${message.error || "未知错误"}`);
+      showToast("error", `${name} 训练失败：模型与所选数据集可能不匹配，请点「检查结构」排查或换用适配的模板。`);
     } else if (message.status === "cancelled") {
       showToast("warning", `${name} 训练已取消。`);
     } else {

@@ -204,6 +204,8 @@ button:disabled {
   padding: 6px;
   box-shadow: var(--shadow-lg);
   z-index: 1000;
+  max-height: 260px;      /* 数据集较多时限高 */
+  overflow-y: auto;       /* 超出部分滚动，菜单不会太长 */
 
   opacity: 0;
   visibility: hidden;
@@ -778,6 +780,122 @@ button:disabled {
   padding: 30px;
   color: var(--faint);
   font-size: 13px;
+}
+
+/* 地址栏：此电脑 + 可点面包屑（Windows 资源管理器风格，套用系统配色） */
+.dir-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 4px 24px 0;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.dir-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  border-radius: 7px;
+  padding: 4px 9px;
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  white-space: nowrap;
+}
+
+.dir-crumb:hover {
+  background: var(--panel);
+  color: var(--indigo);
+}
+
+.dir-crumb.pc {
+  font-weight: 700;
+  color: var(--indigo);
+}
+
+.dir-crumb.pc.active {
+  background: var(--indigo);
+  color: #fff;
+}
+
+.dir-crumb.pc iconify-icon {
+  font-size: 16px;
+}
+
+.dir-crumb-sep {
+  color: var(--faint);
+  font-size: 15px;
+  flex: 0 0 auto;
+}
+
+/* 目录 / 磁盘条目：右侧箭头指示可进入 */
+.dir-entry {
+  width: 100%;
+  cursor: pointer;
+}
+
+.dir-entry span {
+  flex: 1 1 auto;
+}
+
+.dir-entry .dir-entry-go {
+  font-size: 16px;
+  color: var(--faint);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.dir-entry:hover .dir-entry-go {
+  opacity: 1;
+}
+
+.dir-entry.drive iconify-icon {
+  color: var(--indigo);
+}
+
+.dir-entry.drive span {
+  font-weight: 600;
+}
+
+/* 底部：选定位置提示 + 操作按钮分列两端 */
+.dir-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dir-selected {
+  margin-right: auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+}
+
+.dir-selected code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 340px;
+}
+
+.dir-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
 }
 
 /* 我的项目弹窗 */
@@ -1690,14 +1808,14 @@ button:disabled {
   /* 自由画布：不使用滚动条，平移通过 transform 实现，无边界限制 */
   overflow: hidden;
   background-color: var(--canvas);
-  cursor: grab;
+  cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%2720%27%20height%3D%2720%27%20viewBox%3D%270%200%2020%2020%27%3E%3Cpath%20fill%3D%27black%27%20d%3D%27M7.1%208.6V3.9c0-.64.5-1.14%201.14-1.14s1.14.5%201.14%201.14v4.3h.58V2.85c0-.64.5-1.14%201.14-1.14s1.14.5%201.14%201.14V8.2h.58V3.8c0-.64.5-1.14%201.14-1.14s1.14.5%201.14%201.14v5.25h.5V6.9c0-.64.5-1.14%201.14-1.14s1.14.5%201.14%201.14v4.55c0%203.45-2.4%206.05-6.05%206.05H9.65c-1.9%200-3.24-.73-4.35-2.2l-2.48-3.26a1.18%201.18%200%200%201%20.22-1.67%201.3%201.3%200%200%201%201.78.18l1.68%201.9c.18.2.6.07.6-.23V8.6Z%27%2F%3E%3C%2Fsvg%3E") 10 10, grab;
   /* 禁止画布内文本选择：避免在连线上拖动时误划选文字，
      进而触发浏览器划词菜单 / 拖拽选中文本落入画布 */
   user-select: none;
 }
 
 .canvas:active {
-  cursor: grabbing;
+  cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%2720%27%20height%3D%2720%27%20viewBox%3D%270%200%2020%2020%27%3E%3Cpath%20fill%3D%27black%27%20d%3D%27M5.8%208.3V4.5c0-.63.49-1.12%201.12-1.12.6%200%201.08.46%201.12%201.05V8h.54V3.4c0-.63.49-1.12%201.12-1.12.63%200%201.12.49%201.12%201.12V8h.54V3.9c0-.63.49-1.12%201.12-1.12.63%200%201.12.49%201.12%201.12V8h.5V5.2c0-.63.49-1.12%201.12-1.12.63%200%201.12.49%201.12%201.12v5.55c0%203.75-2.3%206.35-6%206.35H8.55c-1.8%200-3.12-.7-4.18-2.12L2.6%2012.6a1.15%201.15%200%200%201%20.22-1.62%201.24%201.24%200%200%201%201.7.16l.96%201.04c.14.15.32.07.32-.12V8.3Z%27%2F%3E%3C%2Fsvg%3E") 10 10, grabbing;
 }
 
 /* 微点阵网格 */
@@ -1735,7 +1853,7 @@ button:disabled {
   padding: 16px;
   position: absolute;
   z-index: 10;
-  cursor: grab;
+  cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%2720%27%20height%3D%2720%27%20viewBox%3D%270%200%2020%2020%27%3E%3Cpath%20fill%3D%27black%27%20d%3D%27M7.1%208.6V3.9c0-.64.5-1.14%201.14-1.14s1.14.5%201.14%201.14v4.3h.58V2.85c0-.64.5-1.14%201.14-1.14s1.14.5%201.14%201.14V8.2h.58V3.8c0-.64.5-1.14%201.14-1.14s1.14.5%201.14%201.14v5.25h.5V6.9c0-.64.5-1.14%201.14-1.14s1.14.5%201.14%201.14v4.55c0%203.45-2.4%206.05-6.05%206.05H9.65c-1.9%200-3.24-.73-4.35-2.2l-2.48-3.26a1.18%201.18%200%200%201%20.22-1.67%201.3%201.3%200%200%201%201.78.18l1.68%201.9c.18.2.6.07.6-.23V8.6Z%27%2F%3E%3C%2Fsvg%3E") 10 10, grab;
   user-select: none;
   pointer-events: auto;
   box-shadow: var(--shadow-md);
@@ -1750,7 +1868,7 @@ button:disabled {
 }
 
 .node-card:active {
-  cursor: grabbing;
+  cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%2720%27%20height%3D%2720%27%20viewBox%3D%270%200%2020%2020%27%3E%3Cpath%20fill%3D%27black%27%20d%3D%27M5.8%208.3V4.5c0-.63.49-1.12%201.12-1.12.6%200%201.08.46%201.12%201.05V8h.54V3.4c0-.63.49-1.12%201.12-1.12.63%200%201.12.49%201.12%201.12V8h.54V3.9c0-.63.49-1.12%201.12-1.12.63%200%201.12.49%201.12%201.12V8h.5V5.2c0-.63.49-1.12%201.12-1.12.63%200%201.12.49%201.12%201.12v5.55c0%203.75-2.3%206.35-6%206.35H8.55c-1.8%200-3.12-.7-4.18-2.12L2.6%2012.6a1.15%201.15%200%200%201%20.22-1.62%201.24%201.24%200%200%201%201.7.16l.96%201.04c.14.15.32.07.32-.12V8.3Z%27%2F%3E%3C%2Fsvg%3E") 10 10, grabbing;
 }
 
 .node-dragging {
@@ -2046,11 +2164,10 @@ button:disabled {
   outline: none;
 }
 
+/* Teleport 到 body 的说明气泡：fixed 定位，居中于 left、置于 top 之上，不被面板裁切 */
 .info-tip-bubble {
-  position: absolute;
-  bottom: calc(100% + 9px);
-  left: 50%;
-  transform: translateX(-50%) translateY(4px);
+  position: fixed;
+  transform: translate(-50%, -100%);
   width: max-content;
   max-width: 250px;
   background: #1f2a44;
@@ -2061,20 +2178,16 @@ button:disabled {
   padding: 8px 11px;
   border-radius: 9px;
   box-shadow: var(--shadow-lg);
-  opacity: 0;
-  visibility: hidden;
   pointer-events: none;
-  transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 2000;
+  z-index: 5000;
   white-space: normal;
   text-align: left;
+  animation: info-tip-in 0.14s ease;
 }
 
-.info-tip:hover .info-tip-bubble,
-.info-tip:focus .info-tip-bubble {
-  opacity: 1;
-  visibility: visible;
-  transform: translateX(-50%) translateY(0);
+@keyframes info-tip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .info-tip-bubble::after {
@@ -2383,7 +2496,7 @@ body.is-connecting .node-port {
 }
 
 .is-node-dragging .canvas {
-  cursor: grabbing;
+  cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%2720%27%20height%3D%2720%27%20viewBox%3D%270%200%2020%2020%27%3E%3Cpath%20fill%3D%27black%27%20d%3D%27M5.8%208.3V4.5c0-.63.49-1.12%201.12-1.12.6%200%201.08.46%201.12%201.05V8h.54V3.4c0-.63.49-1.12%201.12-1.12.63%200%201.12.49%201.12%201.12V8h.54V3.9c0-.63.49-1.12%201.12-1.12.63%200%201.12.49%201.12%201.12V8h.5V5.2c0-.63.49-1.12%201.12-1.12.63%200%201.12.49%201.12%201.12v5.55c0%203.75-2.3%206.35-6%206.35H8.55c-1.8%200-3.12-.7-4.18-2.12L2.6%2012.6a1.15%201.15%200%200%201%20.22-1.62%201.24%201.24%200%200%201%201.7.16l.96%201.04c.14.15.32.07.32-.12V8.3Z%27%2F%3E%3C%2Fsvg%3E") 10 10, grabbing;
 }
 
 /* 画布浮动控件 */
@@ -2512,6 +2625,7 @@ body.is-connecting .node-port {
 .inspector-scroll {
   height: 100%;
   overflow-y: auto;
+  overflow-x: hidden;   /* 说明气泡已 Teleport 到 body，这里不再需要横向滚动 */
   padding: 24px 20px;
 }
 
@@ -2597,6 +2711,169 @@ body.is-connecting .node-port {
   margin-top: 6px;
   color: var(--faint);
   font-size: 11px;
+}
+
+/* 下拉选择：与输入框统一样式（优化器 / 损失函数等） */
+.form-field select {
+  width: 100%;
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  outline: none;
+  padding: 10px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-field select:focus {
+  border-color: var(--indigo);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
+}
+
+/* 训练超参数弹窗：两列网格，损失函数占整行 */
+/* 用 .modal-card.train-settings-card 提高优先级，覆盖 .modal-card 的 overflow:hidden，
+   否则自定义下拉会被弹窗底边裁切（内容不长，无需卡片内滚动）。 */
+.modal-card.train-settings-card {
+  width: min(680px, 100%);
+  overflow: visible;
+}
+
+.train-settings-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 20px;
+  padding: 6px 24px 4px;
+}
+
+.train-settings-loss {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 620px) {
+  .train-settings-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 弹出动画：遮罩淡入 + 卡片轻微上浮放大 */
+#train-settings:not(.hidden) {
+  animation: hp-overlay-in 0.16s ease;
+}
+
+#train-settings .modal-card {
+  animation: hp-card-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes hp-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes hp-card-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #train-settings:not(.hidden),
+  #train-settings .modal-card {
+    animation: none;
+  }
+}
+
+/* 自定义下拉（SelectField）：触发器像输入框，选项面板贴合系统风格 */
+.field-select {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.field-select.open {
+  border-color: var(--indigo);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
+}
+
+.field-select-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field-select-arrow {
+  flex: 0 0 auto;
+  color: var(--faint);
+  transition: transform 0.25s ease;
+}
+
+.field-select.open .field-select-arrow {
+  transform: rotate(180deg);
+}
+
+.field-select-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: var(--shadow-lg);
+  z-index: 1200;
+  max-height: 320px;      /* 容纳当前全部选项；更多时才滚动 */
+  overflow-y: auto;       /* 超出部分滚动，避免被弹窗裁切 */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.14s ease, transform 0.14s ease, visibility 0.14s;
+}
+
+.field-select.open .field-select-menu {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.field-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+  transition: background 0.12s ease;
+}
+
+.field-select-option:hover {
+  background: var(--panel-2);
+}
+
+.field-select-option.active {
+  color: var(--indigo);
+  font-weight: 600;
+}
+
+.field-select-check {
+  flex: 0 0 auto;
+  color: var(--indigo);
+  font-size: 16px;
 }
 
 .muted-field input {
@@ -4279,6 +4556,28 @@ body.is-connecting .node-port {
 .tm-teaching-tip { gap: 12px; padding: 16px; border-color: #fde9c8; background: #fffaf0; }
 .tm-teaching-tip iconify-icon { color: #d97706; font-size: 28px; }
 .tm-teaching-tip strong { font-size: 14px; }
+
+/* 训练结果保存位置面板：绿色成功感，含完整路径与复制按钮 */
+.tm-saved {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  border-radius: 12px;
+}
+.tm-saved > iconify-icon { color: #16a34a; font-size: 26px; flex: 0 0 auto; }
+.tm-saved-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 auto; }
+.tm-saved-body strong { font-size: 13.5px; color: #166534; }
+.tm-saved-body code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--text);
+  word-break: break-all;
+}
+.tm-saved-body span { font-size: 11.5px; color: var(--muted); }
+.tm-saved-copy { flex: 0 0 auto; }
 .tm-teaching-tip p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
 
 .tm-logs { overflow: hidden; }

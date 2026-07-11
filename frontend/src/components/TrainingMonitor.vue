@@ -17,10 +17,30 @@ import {
   ticksFor,
   visibleCount,
 } from "../monitor";
+import { showToast } from "../store";
 import TmChart from "./TmChart.vue";
 
 const isRunning = computed(() => monitor.state === "running");
 const isCancelled = computed(() => monitor.result?.status === "cancelled");
+
+// 训练产物保存位置：从回传的 artifacts.model_path 取出所在文件夹，方便用户直接找到
+const savedPath = computed(() => {
+  const artifacts = monitor.result?.artifacts as { model_path?: string } | undefined;
+  const modelPath = artifacts?.model_path;
+  if (!modelPath) return null;
+  const cut = Math.max(modelPath.lastIndexOf("\\"), modelPath.lastIndexOf("/"));
+  return cut > 0 ? modelPath.slice(0, cut) : modelPath;
+});
+
+async function copySavedPath() {
+  if (!savedPath.value) return;
+  try {
+    await navigator.clipboard.writeText(savedPath.value);
+    showToast("success", "保存路径已复制到剪贴板。");
+  } catch {
+    showToast("info", savedPath.value);
+  }
+}
 
 const series = computed(() => activeSeries());
 const visible = computed(() => visibleCount());
@@ -331,6 +351,19 @@ function formatBytes(value: number) {
               <span class="tm-result-hint">{{ card.value == null ? "实时更新中..." : card.hint }}</span>
             </div>
           </div>
+
+          <section v-if="!isRunning && savedPath" class="tm-saved">
+            <iconify-icon icon="mdi:folder-check-outline"></iconify-icon>
+            <div class="tm-saved-body">
+              <strong>训练结果已保存到本机</strong>
+              <code>{{ savedPath }}</code>
+              <span>该文件夹内含 model.pt（模型权重）与 metrics.json（训练指标）</span>
+            </div>
+            <button class="secondary-button tm-saved-copy" @click="copySavedPath">
+              <iconify-icon icon="mdi:content-copy"></iconify-icon>
+              复制路径
+            </button>
+          </section>
 
           <section v-if="!isRunning" class="tm-teaching-tip">
             <iconify-icon icon="mdi:lightbulb-on-outline"></iconify-icon>

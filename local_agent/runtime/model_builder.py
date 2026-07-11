@@ -299,7 +299,8 @@ def extract_model_summary(model):
     for layer_config in getattr(model, "ordered_layers", []):
         layer_id = layer_config["id"]
         layer_type = layer_config.get("type")
-        module = model.modules_by_id.get(layer_id) if hasattr(model, "modules_by_id") else None
+        modules_by_id = getattr(model, "modules_by_id", None)
+        module = modules_by_id[layer_id] if modules_by_id is not None and layer_id in modules_by_id else None
 
         layer_param_count = 0
         if module is not None:

@@ -185,6 +185,15 @@ const needsCheck = computed(
           >
         </label>
         <button
+          class="secondary-button"
+          id="btn-hyperparams"
+          title="训练超参数：批大小 / 学习率 / 优化器 / 损失函数"
+          @click="ui.trainSettingsOpen = true"
+        >
+          <iconify-icon icon="mdi:tune-variant"></iconify-icon>
+          超参数
+        </button>
+        <button
           class="success-button"
           id="btn-train"
           :disabled="trainDisabled"
