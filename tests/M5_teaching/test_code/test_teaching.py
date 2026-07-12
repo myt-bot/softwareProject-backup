@@ -316,6 +316,33 @@ def test_get_layer_teaching_maps_pooling_aliases(alias):
     assert_layer_payload(teaching.get_layer_teaching(alias), "Pooling")
 
 
+@pytest.mark.parametrize(
+    ("alias", "parameter", "canonical_layer"),
+    [
+        ("MaxPooling", "kernel_size", "Pooling"),
+        ("MAX-POOLING", "stride", "Pooling"),
+        ("dense", "out_features", "Linear"),
+        ("gcn", "out_features", "GraphConv"),
+    ],
+)
+def test_layer_and_parameter_queries_share_layer_normalization(alias, parameter, canonical_layer):
+    layer_payload = teaching.get_layer_teaching(alias)
+    parameter_payload = teaching.get_parameter_teaching(alias, parameter)
+
+    assert layer_payload["known"] is True
+    assert parameter_payload["known"] is True
+    assert layer_payload["layer_type"] == canonical_layer
+    assert parameter_payload["layer_type"] == canonical_layer
+
+
+def test_registry_records_system_compatibility_without_listing_non_teaching_layer():
+    assert teaching._LAYER_REGISTRY["Add"]["has_teaching"] is True
+    assert "merge" in teaching._LAYER_REGISTRY["Add"]["compatibility_note"]
+    assert teaching._LAYER_REGISTRY["Identity"]["has_teaching"] is False
+    assert "Identity" not in teaching.list_supported_layers()
+    assert_unknown_layer_payload(teaching.get_layer_teaching("Identity"))
+
+
 @pytest.mark.parametrize("unknown_layer", [None, "", "   ", 123, object(), "UnknownLayer"])
 def test_get_layer_teaching_returns_unknown_payload_for_invalid_or_unknown_layers(unknown_layer):
     assert_unknown_layer_payload(teaching.get_layer_teaching(unknown_layer))
@@ -529,6 +556,15 @@ def test_teaching_catalog_returns_deep_copies():
     fresh = teaching.get_teaching_catalog()
     assert fresh["layers"]["Conv2D"]["purpose"] == original_layer_purpose
     assert fresh["parameters"]["Conv2D"]["kernel_size"]["explanation"] == original_param_explanation
+
+
+def test_catalog_mutation_does_not_pollute_registry_or_queries():
+    catalog = teaching.get_teaching_catalog()
+    catalog["supported_layers"].append("Identity")
+    catalog["layers"]["Pooling"]["layer_type"] = "changed"
+
+    assert "Identity" not in teaching.list_supported_layers()
+    assert teaching.get_layer_teaching("MaxPooling")["layer_type"] == "Pooling"
 
 
 def test_supported_layers_list_returns_independent_lists():

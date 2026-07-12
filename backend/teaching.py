@@ -15,47 +15,49 @@ ParameterTeaching = dict[str, Any]
 ErrorSuggestion = dict[str, Any]
 
 
-_SUPPORTED_LAYERS: tuple[str, ...] = (
-    "Input",
-    "Output",
-    "Add",
-    "Conv2D",
-    "Pooling",
-    "ReLU",
-    "Flatten",
-    "Linear",
-    "Dropout",
-    "LSTM",
-    "Seq2Seq",
-    "TransformerEncoder",
-    "SelfAttention",
-    "VAE",
-    "GraphConv",
-)
+_LAYER_REGISTRY: dict[str, dict[str, Any]] = {
+    "Input": {"canonical_name": "Input", "aliases": (), "has_teaching": True},
+    "Output": {"canonical_name": "Output", "aliases": (), "has_teaching": True},
+    "Add": {
+        "canonical_name": "Add",
+        "aliases": (),
+        "has_teaching": True,
+        "compatibility_note": "前端教学节点；提交给 M3 时折叠为目标节点的 params.merge=add。",
+    },
+    "Conv2D": {"canonical_name": "Conv2D", "aliases": ("Convolution2D",), "has_teaching": True},
+    "Pooling": {
+        "canonical_name": "Pooling",
+        "aliases": ("Pool", "MaxPooling", "MaxPool"),
+        "has_teaching": True,
+        "compatibility_note": "前端显示 MaxPooling，序列化后的规范类型为 Pooling。",
+    },
+    "ReLU": {"canonical_name": "ReLU", "aliases": (), "has_teaching": True},
+    "Flatten": {"canonical_name": "Flatten", "aliases": (), "has_teaching": True},
+    "Linear": {"canonical_name": "Linear", "aliases": ("Dense",), "has_teaching": True},
+    "Dropout": {"canonical_name": "Dropout", "aliases": (), "has_teaching": True},
+    "LSTM": {"canonical_name": "LSTM", "aliases": (), "has_teaching": True},
+    "Seq2Seq": {"canonical_name": "Seq2Seq", "aliases": (), "has_teaching": True},
+    "TransformerEncoder": {
+        "canonical_name": "TransformerEncoder",
+        "aliases": (),
+        "has_teaching": True,
+    },
+    "SelfAttention": {"canonical_name": "SelfAttention", "aliases": (), "has_teaching": True},
+    "VAE": {"canonical_name": "VAE", "aliases": (), "has_teaching": True},
+    "GraphConv": {"canonical_name": "GraphConv", "aliases": ("GCN",), "has_teaching": True},
+    "Identity": {
+        "canonical_name": "Identity",
+        "aliases": (),
+        "has_teaching": False,
+        "compatibility_note": "M3 用于自定义容器展开后的直通端口，M5 暂无独立教学内容。",
+    },
+}
 
 
-_LAYER_ALIASES: dict[str, str] = {
-    "input": "Input",
-    "output": "Output",
-    "add": "Add",
-    "conv2d": "Conv2D",
-    "convolution2d": "Conv2D",
-    "pooling": "Pooling",
-    "pool": "Pooling",
-    "maxpooling": "Pooling",
-    "maxpool": "Pooling",
-    "relu": "ReLU",
-    "flatten": "Flatten",
-    "linear": "Linear",
-    "dense": "Linear",
-    "dropout": "Dropout",
-    "lstm": "LSTM",
-    "seq2seq": "Seq2Seq",
-    "transformerencoder": "TransformerEncoder",
-    "selfattention": "SelfAttention",
-    "vae": "VAE",
-    "graphconv": "GraphConv",
-    "gcn": "GraphConv",
+_LAYER_NAME_INDEX: dict[str, str] = {
+    alias.strip().lower().replace(" ", "").replace("_", "").replace("-", ""): canonical_name
+    for canonical_name, metadata in _LAYER_REGISTRY.items()
+    for alias in (canonical_name, *metadata["aliases"])
 }
 
 
@@ -1102,7 +1104,11 @@ _ERROR_SUGGESTION_RULES: tuple[dict[str, Any], ...] = (
 
 def list_supported_layers() -> list[str]:
     """返回当前知识库支持的规范层名，不包含别名。"""
-    return list(_SUPPORTED_LAYERS)
+    return [
+        canonical_name
+        for canonical_name, metadata in _LAYER_REGISTRY.items()
+        if metadata["has_teaching"]
+    ]
 
 
 def get_layer_teaching(layer_type: str) -> dict[str, Any]:
@@ -1111,7 +1117,7 @@ def get_layer_teaching(layer_type: str) -> dict[str, Any]:
     层名支持大小写和常见别名兼容。未知层、空值或非字符串输入不会抛异常，
     而是返回 known=False 的统一兜底结构。
     """
-    canonical_layer = _canonical_layer_type(layer_type)
+    canonical_layer = _normalize_layer_type(layer_type, require_teaching=True)
     if canonical_layer is None:
         return copy.deepcopy(_unknown_layer_teaching(layer_type))
     return copy.deepcopy(_LAYER_TEACHING[canonical_layer])
@@ -1123,7 +1129,7 @@ def get_parameter_teaching(layer_type: str, param_name: str) -> dict[str, Any]:
     层名支持常见别名和大小写兼容，参数名支持合理的大小写兼容。
     未知层或未知参数不会抛异常，而是返回 known=False 的统一兜底结构。
     """
-    canonical_layer = _canonical_layer_type(layer_type)
+    canonical_layer = _normalize_layer_type(layer_type, require_teaching=True)
     canonical_param = _canonical_parameter_name(param_name, canonical_layer)
     if canonical_layer is None or canonical_param is None:
         return copy.deepcopy(_unknown_parameter_teaching(layer_type, param_name, canonical_layer))
@@ -1137,9 +1143,16 @@ def get_parameter_teaching(layer_type: str, param_name: str) -> dict[str, Any]:
 def get_teaching_catalog() -> dict[str, Any]:
     """返回当前全部层说明和参数说明的结构化目录。"""
     return copy.deepcopy({
-        "layers": _LAYER_TEACHING,
-        "parameters": _PARAMETER_TEACHING,
-        "supported_layers": list(_SUPPORTED_LAYERS),
+        "layers": {
+            layer_type: _LAYER_TEACHING[layer_type]
+            for layer_type in list_supported_layers()
+        },
+        "parameters": {
+            layer_type: parameters
+            for layer_type, parameters in _PARAMETER_TEACHING.items()
+            if _normalize_layer_type(layer_type, require_teaching=True) is not None
+        },
+        "supported_layers": list_supported_layers(),
     })
 
 
@@ -1213,13 +1226,18 @@ def explain_model_graph(model_graph: dict) -> dict[str, Any]:
     return copy.deepcopy(result)
 
 
-def _canonical_layer_type(layer_type: Any) -> str | None:
+def _normalize_layer_type(layer_type: Any, require_teaching: bool = False) -> str | None:
     if not isinstance(layer_type, str):
         return None
     key = _compact_key(layer_type)
     if not key:
         return None
-    return _LAYER_ALIASES.get(key)
+    canonical_layer = _LAYER_NAME_INDEX.get(key)
+    if canonical_layer is None:
+        return None
+    if require_teaching and not _LAYER_REGISTRY[canonical_layer]["has_teaching"]:
+        return None
+    return canonical_layer
 
 
 def _canonical_parameter_name(param_name: Any, canonical_layer: str | None = None) -> str | None:
