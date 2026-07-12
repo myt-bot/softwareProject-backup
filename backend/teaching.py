@@ -938,6 +938,7 @@ _ERROR_SUGGESTION_RULES: tuple[dict[str, Any], ...] = (
     {
         "category": "missing_merge",
         "title": "多输入节点没有声明合并方式",
+        "primary_parameter": "merge",
         "match_any": (
             ("多个输入", "没有声明合并方式"),
             ("多输入节点", "params.merge"),
@@ -986,6 +987,7 @@ _ERROR_SUGGESTION_RULES: tuple[dict[str, Any], ...] = (
     {
         "category": "linear_in_features_mismatch",
         "title": "Linear 输入特征数不匹配",
+        "primary_parameter": "in_features",
         "match_any": (
             ("Linear 输入维度与 in_features 不匹配",),
             ("全连接层输入维度对不上",),
@@ -1037,6 +1039,7 @@ _ERROR_SUGGESTION_RULES: tuple[dict[str, Any], ...] = (
     {
         "category": "dropout_p_invalid",
         "title": "Dropout p 取值非法",
+        "primary_parameter": "p",
         "match_any": (
             ("p 必须是 0 到 1 之间的数值",),
             ("Dropout", "0 到 1"),
@@ -1053,6 +1056,7 @@ _ERROR_SUGGESTION_RULES: tuple[dict[str, Any], ...] = (
     {
         "category": "attention_heads_mismatch",
         "title": "注意力维度不能被 num_heads 整除",
+        "primary_parameter": "num_heads",
         "match_any": (
             ("注意力维度必须能被 num_heads 整除",),
             ("d_model", "num_heads", "整除"),
@@ -1156,22 +1160,29 @@ def get_teaching_catalog() -> dict[str, Any]:
     })
 
 
-def get_error_suggestion(error_message: str, context: dict | None = None) -> dict[str, Any]:
+def get_error_suggestion(
+    error_message: str,
+    context: dict | None = None,
+) -> dict[str, Any]:
     """根据真实校验错误文本返回独立的教学排查建议。
 
-    本函数不调用 validator，也不修改原始错误文本。context 仅作为未来扩展预留；
-    当前实现即使没有 context，也会仅根据错误文本给出建议。
+    错误文本仍负责匹配错误类别；context 只用于补充节点、层类型、
+    参数和具体数值，不改变正式校验结论，也不会修改模型。
     """
-    _ = context
+    normalized_context = _normalize_error_context(context)
     normalized_message = _normalize_error_message(error_message)
-    if not normalized_message:
-        return copy.deepcopy(_unknown_error_suggestion(error_message))
 
-    for rule in _ERROR_SUGGESTION_RULES:
-        if _error_rule_matches(normalized_message, rule):
-            return copy.deepcopy(_build_error_suggestion(rule, error_message))
+    suggestion: ErrorSuggestion | None = None
+    if normalized_message:
+        for rule in _ERROR_SUGGESTION_RULES:
+            if _error_rule_matches(normalized_message, rule):
+                suggestion = _build_error_suggestion(rule, error_message)
+                break
 
-    return copy.deepcopy(_unknown_error_suggestion(error_message))
+    if suggestion is None:
+        suggestion = _unknown_error_suggestion(error_message)
+
+    return _enrich_error_suggestion(suggestion, normalized_context)
 
 
 def explain_model_graph(model_graph: dict) -> dict[str, Any]:
@@ -1281,6 +1292,164 @@ def _normalize_error_message(error_message: Any) -> str:
     return error_message.strip()
 
 
+def _non_empty_context_text(value: Any) -> str | None:
+    """只接受非空字符串，避免错误类型进入教学结果。"""
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _normalize_context_layer_type(value: Any) -> str | None:
+    """规范化 context 中的层类型。
+
+    已知别名转为规范层名；未知但有效的字符串原样保留，
+    方便 M5 对尚未收录的真实层进行定位。
+    """
+    raw_layer_type = _non_empty_context_text(value)
+    if raw_layer_type is None:
+        return None
+
+    canonical_layer = _normalize_layer_type(raw_layer_type, require_teaching=False)
+    return canonical_layer or raw_layer_type
+
+
+def _normalize_context_parameter(
+    value: Any,
+    layer_type: str | None,
+) -> str | None:
+    """规范化错误上下文中的参数名称。
+
+    普通教学参数优先使用现有别名规则；merge、dim 等图结构参数
+    即使没有独立参数教学内容，也允许保留。
+    """
+    raw_parameter = _non_empty_context_text(value)
+    if raw_parameter is None:
+        return None
+
+    canonical_parameter = _canonical_parameter_name(raw_parameter, layer_type)
+    if canonical_parameter is not None:
+        return canonical_parameter
+
+    normalized = raw_parameter.lower().replace("-", "_").replace(" ", "_")
+    while "__" in normalized:
+        normalized = normalized.replace("__", "_")
+    return normalized.strip("_") or None
+
+
+def _normalize_error_context(context: Any) -> dict[str, Any]:
+    """读取单条错误的结构化上下文。
+
+    支持直接字段和仓库现有的 shape_info 结构；不识别的字段不会
+    影响错误建议。所有可变值都会深拷贝，避免污染调用方数据。
+    """
+    if not isinstance(context, dict):
+        return {}
+
+    shape_info = context.get("shape_info")
+    if not isinstance(shape_info, dict):
+        shape_info = {}
+
+    normalized: dict[str, Any] = {}
+
+    layer_id = _non_empty_context_text(context.get("layer_id"))
+    if layer_id is not None:
+        normalized["layer_id"] = layer_id
+
+    raw_layer_type = context.get("layer_type")
+    if raw_layer_type is None:
+        raw_layer_type = shape_info.get("layer_type")
+
+    layer_type = _normalize_context_layer_type(raw_layer_type)
+    if layer_type is not None:
+        normalized["layer_type"] = layer_type
+
+    parameter = _normalize_context_parameter(context.get("parameter"), layer_type)
+    if parameter is not None:
+        normalized["parameter"] = parameter
+
+    # 调用方显式提供的通用值优先保留。
+    for field in ("current_value", "expected_value", "suggested_value"):
+        if field in context:
+            normalized[field] = copy.deepcopy(context[field])
+
+    # 兼容 M3 当前逐层 shape 信息中的真实字段。
+    for field in (
+        "actual_in_features",
+        "expected_in_features",
+        "input_shape",
+        "output_shape",
+        "status",
+        "error",
+    ):
+        if field in context:
+            normalized[field] = copy.deepcopy(context[field])
+        elif field in shape_info:
+            normalized[field] = copy.deepcopy(shape_info[field])
+
+    return normalized
+
+
+def _is_positive_context_integer(value: Any) -> bool:
+    """判断是否为可用于维度修改指导的正整数。"""
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _enrich_error_suggestion(
+    suggestion: ErrorSuggestion,
+    context: dict[str, Any],
+) -> ErrorSuggestion:
+    """使用结构化 context 补充教学建议，不改变错误分类。"""
+    result = copy.deepcopy(suggestion)
+
+    layer_id = context.get("layer_id")
+    if layer_id is not None:
+        result["layer_id"] = layer_id
+        result["can_locate"] = True
+
+    if "layer_type" in context:
+        result["layer_type"] = context["layer_type"]
+
+    # 调用方明确指定的参数优先于规则中的 primary_parameter。
+    if "parameter" in context:
+        result["parameter"] = context["parameter"]
+
+    for field in ("current_value", "expected_value", "suggested_value"):
+        if field in context:
+            result[field] = copy.deepcopy(context[field])
+
+    # M3 的字段语义：expected_in_features 是当前 Linear 配置值，
+    # actual_in_features 是上一层实际输出、Linear 应接收的特征数。
+    if result.get("category") == "linear_in_features_mismatch":
+        configured_value = context.get("expected_in_features")
+        actual_value = context.get("actual_in_features")
+
+        if (
+            "current_value" not in context
+            and _is_positive_context_integer(configured_value)
+        ):
+            result["current_value"] = configured_value
+
+        if (
+            "expected_value" not in context
+            and _is_positive_context_integer(actual_value)
+        ):
+            result["expected_value"] = actual_value
+
+        if (
+            "suggested_value" not in context
+            and _is_positive_context_integer(actual_value)
+        ):
+            result["suggested_value"] = actual_value
+
+        if "parameter" not in context:
+            result["parameter"] = "in_features"
+
+    # 本阶段只提供修改指导，不执行自动修改。
+    result["can_auto_fix"] = False
+    return result
+
+
 def _error_rule_matches(error_text: str, rule: dict[str, Any]) -> bool:
     lowered_text = error_text.lower()
     return any(
@@ -1293,12 +1462,21 @@ def _build_error_suggestion(rule: dict[str, Any], original_error: Any) -> ErrorS
     return {
         "matched": True,
         "category": rule["category"],
+        "severity": "error",
         "title": rule["title"],
         "original_error": original_error,
         "reason": rule["reason"],
         "suggestions": list(rule["suggestions"]),
         "related_layers": list(rule["related_layers"]),
         "related_parameters": list(rule["related_parameters"]),
+        "layer_id": None,
+        "layer_type": None,
+        "parameter": rule.get("primary_parameter"),
+        "current_value": None,
+        "expected_value": None,
+        "suggested_value": None,
+        "can_locate": False,
+        "can_auto_fix": False,
     }
 
 
@@ -1306,6 +1484,7 @@ def _unknown_error_suggestion(original_error: Any) -> ErrorSuggestion:
     return {
         "matched": False,
         "category": "unknown_error",
+        "severity": "error",
         "title": "暂未识别的错误",
         "original_error": original_error,
         "reason": "当前教学知识库还没有匹配到明确的错误类型。",
@@ -1316,6 +1495,14 @@ def _unknown_error_suggestion(original_error: Any) -> ErrorSuggestion:
         ],
         "related_layers": [],
         "related_parameters": [],
+        "layer_id": None,
+        "layer_type": None,
+        "parameter": None,
+        "current_value": None,
+        "expected_value": None,
+        "suggested_value": None,
+        "can_locate": False,
+        "can_auto_fix": False,
     }
 
 

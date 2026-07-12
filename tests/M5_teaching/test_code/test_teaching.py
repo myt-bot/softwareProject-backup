@@ -120,12 +120,21 @@ BOOLEAN_PARAMETERS = [
 ERROR_REQUIRED_FIELDS = [
     "matched",
     "category",
+    "severity",
     "title",
     "original_error",
     "reason",
     "suggestions",
     "related_layers",
     "related_parameters",
+    "layer_id",
+    "layer_type",
+    "parameter",
+    "current_value",
+    "expected_value",
+    "suggested_value",
+    "can_locate",
+    "can_auto_fix",
 ]
 
 ERROR_TEXT_FIELDS = [
@@ -229,9 +238,10 @@ def assert_unknown_parameter_payload(payload):
 
 
 def assert_error_payload(payload, expected_category, expected_original_error):
-    assert set(ERROR_REQUIRED_FIELDS).issubset(payload)
+    assert set(payload) == set(ERROR_REQUIRED_FIELDS)
     assert payload["matched"] is True
     assert payload["category"] == expected_category
+    assert payload["severity"] == "error"
     assert payload["original_error"] == expected_original_error
     for field in ERROR_TEXT_FIELDS:
         assert isinstance(payload[field], str)
@@ -241,18 +251,34 @@ def assert_error_payload(payload, expected_category, expected_original_error):
     assert all(isinstance(item, str) and item.strip() for item in payload["suggestions"])
     assert isinstance(payload["related_layers"], list)
     assert isinstance(payload["related_parameters"], list)
+    assert payload["layer_id"] is None
+    assert payload["layer_type"] is None
+    assert payload["current_value"] is None
+    assert payload["expected_value"] is None
+    assert payload["suggested_value"] is None
+    assert payload["can_locate"] is False
+    assert payload["can_auto_fix"] is False
 
 
 def assert_unknown_error_payload(payload, expected_original_error):
-    assert set(ERROR_REQUIRED_FIELDS).issubset(payload)
+    assert set(payload) == set(ERROR_REQUIRED_FIELDS)
     assert payload["matched"] is False
     assert payload["category"] == "unknown_error"
+    assert payload["severity"] == "error"
     assert payload["original_error"] == expected_original_error
     assert isinstance(payload["suggestions"], list)
     assert payload["suggestions"]
     assert all(isinstance(item, str) and item.strip() for item in payload["suggestions"])
     assert isinstance(payload["related_layers"], list)
     assert isinstance(payload["related_parameters"], list)
+    assert payload["layer_id"] is None
+    assert payload["layer_type"] is None
+    assert payload["parameter"] is None
+    assert payload["current_value"] is None
+    assert payload["expected_value"] is None
+    assert payload["suggested_value"] is None
+    assert payload["can_locate"] is False
+    assert payload["can_auto_fix"] is False
 
 
 def assert_model_graph_payload(payload):
@@ -433,6 +459,196 @@ def test_error_suggestion_includes_related_parameters_for_key_errors(error_messa
 
     assert payload["matched"] is True
     assert expected_parameters.issubset(set(payload["related_parameters"]))
+
+
+@pytest.mark.parametrize(
+    ("error_message", "expected_parameter"),
+    [
+        ("层 merge_1 收到了多个输入，但没有声明合并方式，请设置 merge 参数", "merge"),
+        ("层 fc_5(Linear): Linear 输入维度与 in_features 不匹配", "in_features"),
+        ("层 dropout_1(Dropout): p 必须是 0 到 1 之间的数值", "p"),
+        ("层 encoder_1(TransformerEncoder): 注意力维度必须能被 num_heads 整除", "num_heads"),
+    ],
+)
+def test_error_suggestion_returns_explicit_primary_parameter(error_message, expected_parameter):
+    assert teaching.get_error_suggestion(error_message)["parameter"] == expected_parameter
+
+
+@pytest.mark.parametrize(
+    "error_message",
+    [
+        "Conv2D 输出尺寸无效，请检查 kernel_size、stride、padding 与输入 shape",
+        "Pooling 输出尺寸无效，请检查 kernel_size、stride、padding 与输入 shape",
+        "层 merge_2: add 合并要求所有输入 shape 完全一致",
+        "层 merge_3: concat 合并要求除拼接维度外其它维度一致",
+        "层 conv_6(Conv2D): out_channels 必须是正整数",
+    ],
+)
+def test_error_suggestion_does_not_guess_primary_parameter_for_multi_cause_rules(error_message):
+    payload = teaching.get_error_suggestion(error_message)
+
+    assert payload["matched"] is True
+    assert payload["parameter"] is None
+
+
+def test_error_suggestion_context_adds_location_without_changing_rule_content():
+    error_message = "层 fc_5(Linear): Linear 输入维度与 in_features 不匹配"
+    base = teaching.get_error_suggestion(error_message)
+
+    payload = teaching.get_error_suggestion(
+        error_message,
+        {
+            "layer_id": "fc_5",
+            "layer_type": "Linear",
+        },
+    )
+
+    for field in (
+        "matched",
+        "category",
+        "severity",
+        "title",
+        "original_error",
+        "reason",
+        "suggestions",
+        "related_layers",
+        "related_parameters",
+    ):
+        assert payload[field] == base[field]
+
+    assert payload["layer_id"] == "fc_5"
+    assert payload["layer_type"] == "Linear"
+    assert payload["can_locate"] is True
+    assert payload["can_auto_fix"] is False
+
+
+@pytest.mark.parametrize(
+    ("raw_layer_type", "expected_layer_type"),
+    [
+        ("MaxPooling", "Pooling"),
+        ("MAX-POOLING", "Pooling"),
+        ("Dense", "Linear"),
+        ("gcn", "GraphConv"),
+        ("CustomLayer", "CustomLayer"),
+    ],
+)
+def test_error_context_normalizes_layer_type(raw_layer_type, expected_layer_type):
+    payload = teaching.get_error_suggestion(
+        "这是一个陌生错误",
+        {
+            "layer_id": "node_1",
+            "layer_type": raw_layer_type,
+        },
+    )
+
+    assert payload["category"] == "unknown_error"
+    assert payload["layer_type"] == expected_layer_type
+    assert payload["layer_id"] == "node_1"
+    assert payload["can_locate"] is True
+
+
+def test_linear_error_context_uses_validator_shape_fields():
+    error_message = "层 fc_5(Linear): Linear 输入维度与 in_features 不匹配"
+
+    payload = teaching.get_error_suggestion(
+        error_message,
+        {
+            "layer_id": "fc_5",
+            "shape_info": {
+                "status": "unknown",
+                "layer_type": "Linear",
+                "input_shape": [16, 13, 13],
+                "output_shape": None,
+                "actual_in_features": 2704,
+                "expected_in_features": 1024,
+            },
+        },
+    )
+
+    assert payload["category"] == "linear_in_features_mismatch"
+    assert payload["layer_id"] == "fc_5"
+    assert payload["layer_type"] == "Linear"
+    assert payload["parameter"] == "in_features"
+    assert payload["current_value"] == 1024
+    assert payload["expected_value"] == 2704
+    assert payload["suggested_value"] == 2704
+    assert payload["can_locate"] is True
+    assert payload["can_auto_fix"] is False
+
+
+def test_context_parameter_overrides_rule_primary_parameter():
+    payload = teaching.get_error_suggestion(
+        "层 merge_1 收到了多个输入，但没有声明合并方式，请设置 merge 参数",
+        {
+            "layer_id": "merge_1",
+            "parameter": "dim",
+        },
+    )
+
+    assert payload["category"] == "missing_merge"
+    assert payload["parameter"] == "dim"
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        None,
+        "",
+        123,
+        [],
+        (),
+        {"shape_info": None},
+        {"layer_id": "   "},
+        {"layer_id": 123},
+    ],
+)
+def test_invalid_error_context_keeps_original_result(context):
+    error_message = "层 dropout_1(Dropout): p 必须是 0 到 1 之间的数值"
+
+    assert teaching.get_error_suggestion(
+        error_message,
+        context,
+    ) == teaching.get_error_suggestion(error_message)
+
+
+def test_error_context_values_are_deep_copied():
+    context = {
+        "layer_id": "node_1",
+        "current_value": [1, 2, 3],
+        "expected_value": {"shape": [3]},
+    }
+
+    payload = teaching.get_error_suggestion(
+        "这是一个陌生错误",
+        context,
+    )
+
+    payload["current_value"].append(4)
+    payload["expected_value"]["shape"].append(4)
+
+    assert context["current_value"] == [1, 2, 3]
+    assert context["expected_value"] == {"shape": [3]}
+
+
+def test_explicit_context_values_override_linear_shape_inference():
+    payload = teaching.get_error_suggestion(
+        "层 fc_5(Linear): Linear 输入维度与 in_features 不匹配",
+        {
+            "shape_info": {
+                "layer_type": "Linear",
+                "actual_in_features": 2704,
+                "expected_in_features": 1024,
+            },
+            "current_value": 100,
+            "expected_value": 200,
+            "suggested_value": 300,
+        },
+    )
+
+    assert payload["current_value"] == 100
+    assert payload["expected_value"] == 200
+    assert payload["suggested_value"] == 300
+    assert payload["can_auto_fix"] is False
 
 
 def test_error_suggestion_recognizes_errors_with_node_ids_and_prefixes():
