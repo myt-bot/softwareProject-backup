@@ -17,6 +17,9 @@ import type {
   TrainingStatus,
   TrainStartResponse,
   AuthUser,
+  LayerTeaching,
+  ParameterTeaching,
+  ModelTeachingOverview,
 } from "../types";
 
 // 后端地址：生产构建时由 VITE_API_BASE_URL 注入（见 frontend/.env.production），
@@ -45,6 +48,30 @@ export async function validateModelStructure(model: ModelGraph): Promise<Validat
   return request("/validate", {
     method: "POST",
     body: JSON.stringify({ model }),
+  });
+}
+
+export async function fetchTeachingLayers(): Promise<{ layers: string[] }> {
+  return request("/teaching/layers");
+}
+
+export async function fetchLayerTeaching(layerType: string): Promise<LayerTeaching> {
+  return request(`/teaching/layers/${encodeURIComponent(layerType)}`);
+}
+
+export async function fetchParameterTeaching(
+  layerType: string,
+  parameter: string,
+): Promise<ParameterTeaching> {
+  return request(
+    `/teaching/layers/${encodeURIComponent(layerType)}/parameters/${encodeURIComponent(parameter)}`,
+  );
+}
+
+export async function fetchModelTeaching(modelGraph: ModelGraph): Promise<ModelTeachingOverview> {
+  return request("/teaching/models/explain", {
+    method: "POST",
+    body: JSON.stringify({ model_graph: modelGraph }),
   });
 }
 

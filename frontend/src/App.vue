@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { loadProjectTemplates } from "./actions";
 import { auth, initializeAuth, isLoggedIn } from "./auth";
 import { cancelPendingConnection, hideConnectionMenu, hideNodeMenu, redoGraphChange, undoGraphChange } from "./canvas";
-import { closeHelpModal, initializeBeginnerGuide, ui } from "./store";
+import { activeCanvas, closeHelpModal, getCurrentModelGraph, initializeBeginnerGuide, ui } from "./store";
 import ActionBar from "./components/ActionBar.vue";
 import AgentModal from "./components/AgentModal.vue";
 import AssistantPanel from "./components/AssistantPanel.vue";
@@ -19,6 +19,7 @@ import MyProjectsModal from "./components/MyProjectsModal.vue";
 import SaveProjectModal from "./components/SaveProjectModal.vue";
 import StorageSettings from "./components/StorageSettings.vue";
 import TemplateGallery from "./components/TemplateGallery.vue";
+import TeachingPanel from "./components/TeachingPanel.vue";
 import ToastContainer from "./components/ToastContainer.vue";
 import TrainSettingsModal from "./components/TrainSettingsModal.vue";
 import TopBar from "./components/TopBar.vue";
@@ -26,6 +27,12 @@ import TrainingMonitor from "./components/TrainingMonitor.vue";
 
 // 登录门槛：未登录只显示登录/注册页，登录成功后才挂载主界面
 const loggedIn = computed(() => isLoggedIn());
+const teachingPanelOpen = ref(false);
+const canvas = computed(() => activeCanvas());
+const selectedTeachingNode = computed(() =>
+  canvas.value.nodes.find(node => node.id === canvas.value.selectedNodeId) ?? null
+);
+const teachingModelGraph = computed(() => getCurrentModelGraph(canvas.value));
 
 function handleDocumentClick() {
   hideConnectionMenu();
@@ -44,6 +51,7 @@ function handleKeydown(event: KeyboardEvent) {
     ui.saveModalOpen = false;
     ui.projectsModalOpen = false;
     ui.trainSettingsOpen = false;
+    teachingPanelOpen.value = false;
     return;
   }
 
@@ -74,6 +82,10 @@ watch(loggedIn, entered => {
     void loadProjectTemplates();
   }
 }, { immediate: true });
+
+watch(() => ui.assistantOpen, open => {
+  if (open) teachingPanelOpen.value = false;
+});
 
 onMounted(() => {
   document.addEventListener("click", handleDocumentClick);
@@ -107,6 +119,14 @@ onBeforeUnmount(() => {
         <LayerSidebar />
         <CanvasBoard />
         <InspectorPanel />
+        <TeachingPanel
+          :open="teachingPanelOpen"
+          :available="!ui.assistantOpen"
+          :selected-layer="selectedTeachingNode"
+          :model-graph="teachingModelGraph"
+          @open="teachingPanelOpen = true"
+          @close="teachingPanelOpen = false"
+        />
         <!-- 左侧组件库收起/展开把手（贴在侧栏右缘，跟随收拢动画） -->
         <button
           class="sidebar-toggle"
