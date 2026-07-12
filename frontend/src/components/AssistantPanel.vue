@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { ui } from "../store";
 import { buildAssistantSnapshot, executeAssistantCommand } from "../assistant";
 import { renderMarkdown } from "../markdown";
+import PetMascot from "./PetMascot.vue";
 
 // 后端地址（与 api/client 一致）：生产由 VITE_API_BASE_URL 注入
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || "http://127.0.0.1:8000";
@@ -43,46 +44,38 @@ interface ChatMessage {
   expanded?: boolean; // 「思考过程」是否展开（完成后默认折叠）
 }
 
-// 命令帮助（结构化，供 help 命令渲染成美观卡片）。
-// 带 JSON / 数组 / 空格的参数值一律用单引号整体包住。
-const HELP_GROUPS = [
-  {
-    title: "只读 · 了解现状",
-    items: [
-      { cmd: "get_model_graph", desc: "获取当前模型图" },
-      { cmd: "list_nodes", desc: "列出全部节点及 id" },
-      { cmd: "get_shapes", desc: "查看各层输出维度" },
-      { cmd: "validate_model", desc: "校验结构，返回错误/警告" },
-      { cmd: "list_templates", desc: "列出内置模板（拿到 key 供 load_template 用）" },
-      { cmd: "get_train_config", desc: "查看当前训练配置" },
-      { cmd: "get_training_result", desc: "查看训练结果与逐轮指标" },
-      { cmd: "get_system_status", desc: "查看本机 Agent/设备/存储等系统状态" },
-    ],
-  },
-  {
-    title: "画布操作",
-    items: [
-      { cmd: "load_template --key lenet", desc: "载入内置模板；key 见 list_templates" },
-      { cmd: "add_node --type Conv2D --params '{\"out_channels\":16}'", desc: "新增层；参数用单引号包 JSON（层与参数见下方表）" },
-      { cmd: "connect_nodes --source conv2d_1 --target relu_1", desc: "连接两个节点（id 见 list_nodes）" },
-      { cmd: "set_param --node_id linear_1 --name out_features --value 10", desc: "改参数；数组/对象用单引号，如 --value '[1,16,16]'" },
-      { cmd: "delete_node --node_id dropout_1", desc: "删除节点及其连线" },
-      { cmd: "set_dataset --name FashionMNIST", desc: "切换数据集，自动同步 Input 维度" },
-      { cmd: "set_train_config --epochs 10 --optimizer adam", desc: "改训练超参数（epochs/batch_size/rate/optimizer/loss_fn/device）" },
-      { cmd: "auto_layout", desc: "自动整理布局" },
-      { cmd: "export_code", desc: "导出 PyTorch 代码（需本机 Agent）" },
-      { cmd: "start_training", desc: "发起训练（需本机 Agent）；可选 --config '<JSON>'" },
-      { cmd: "stop_training", desc: "停止当前训练（需本机 Agent）" },
-    ],
-  },
-  {
-    title: "AI · 帮助",
-    items: [
-      { cmd: "agent", desc: "进入 AI 对话，用自然语言让 AI 帮你操作" },
-      { cmd: "clear", desc: "清空命令台内容" },
-      { cmd: "help", desc: "显示本帮助" },
-    ],
-  },
+// 命令表（单一事实来源）：help 总览只列命令名；help <命令> 展示单条用法与参数。
+interface CmdParam { name: string; type: string; required: boolean; desc: string }
+interface CmdSpec { name: string; group: string; summary: string; usage: string; params: CmdParam[] }
+const G_READ = "只读 · 了解现状";
+const G_WRITE = "画布 / 训练操作";
+const G_META = "AI · 帮助";
+const COMMAND_GROUPS = [G_READ, G_WRITE, G_META];
+const req = (name: string, type: string, desc: string): CmdParam => ({ name, type, required: true, desc });
+const opt = (name: string, type: string, desc: string): CmdParam => ({ name, type, required: false, desc });
+const COMMANDS: CmdSpec[] = [
+  { name: "get_model_graph", group: G_READ, summary: "获取当前模型图", usage: "get_model_graph", params: [] },
+  { name: "list_nodes", group: G_READ, summary: "列出全部节点及 id", usage: "list_nodes", params: [] },
+  { name: "get_shapes", group: G_READ, summary: "查看各层输出维度", usage: "get_shapes", params: [] },
+  { name: "validate_model", group: G_READ, summary: "校验结构，返回错误/警告", usage: "validate_model", params: [] },
+  { name: "list_templates", group: G_READ, summary: "列出内置模板（拿 key 供 load_template）", usage: "list_templates", params: [] },
+  { name: "get_train_config", group: G_READ, summary: "查看当前训练配置", usage: "get_train_config", params: [] },
+  { name: "get_training_result", group: G_READ, summary: "查看训练结果与逐轮指标", usage: "get_training_result", params: [] },
+  { name: "get_system_status", group: G_READ, summary: "查看本机 Agent/设备/存储等状态", usage: "get_system_status", params: [] },
+  { name: "load_template", group: G_WRITE, summary: "载入内置模板（替换当前模型）", usage: "load_template --key lenet", params: [req("key", "string", "模板键，见 list_templates")] },
+  { name: "add_node", group: G_WRITE, summary: "新增一个层节点", usage: "add_node --type Conv2D --params '{\"out_channels\":16}'", params: [req("type", "string", "层类型，见 help layers"), opt("params", "JSON", "层参数，用单引号整体包住，见 help layers")] },
+  { name: "connect_nodes", group: G_WRITE, summary: "连接两个节点", usage: "connect_nodes --source conv2d_1 --target relu_1", params: [req("source", "string", "源节点 id，见 list_nodes"), req("target", "string", "目标节点 id")] },
+  { name: "set_param", group: G_WRITE, summary: "修改节点的一个参数", usage: "set_param --node_id linear_1 --name out_features --value 10", params: [req("node_id", "string", "节点 id"), req("name", "string", "参数名"), req("value", "any", "参数值；数组/对象用单引号，如 --value '[1,16,16]'")] },
+  { name: "delete_node", group: G_WRITE, summary: "删除节点及其连线", usage: "delete_node --node_id dropout_1", params: [req("node_id", "string", "节点 id")] },
+  { name: "set_dataset", group: G_WRITE, summary: "切换数据集（自动同步 Input 维度）", usage: "set_dataset --name FashionMNIST", params: [req("name", "string", "数据集名，如 MNIST / FashionMNIST / CIFAR10")] },
+  { name: "set_train_config", group: G_WRITE, summary: "改训练超参数（任意项）", usage: "set_train_config --epochs 10 --optimizer adam", params: [opt("epochs", "int", "训练轮次 1~100"), opt("batch_size", "int", "批大小，正整数"), opt("rate", "number", "学习率，正数"), opt("optimizer", "string", "sgd/adam/adamw/rmsprop/adagrad/adadelta"), opt("loss_fn", "string", "cross_entropy/nll/mse/l1/smooth_l1"), opt("device", "string", "cpu 或 cuda")] },
+  { name: "auto_layout", group: G_WRITE, summary: "自动整理画布布局", usage: "auto_layout", params: [] },
+  { name: "export_code", group: G_WRITE, summary: "导出 PyTorch 代码（需本机 Agent）", usage: "export_code", params: [] },
+  { name: "start_training", group: G_WRITE, summary: "发起训练（需本机 Agent）", usage: "start_training", params: [opt("config", "JSON", "训练配置覆盖，如 '{\"epochs\":10}'")] },
+  { name: "stop_training", group: G_WRITE, summary: "停止当前训练（需本机 Agent）", usage: "stop_training", params: [] },
+  { name: "agent", group: G_META, summary: "进入 AI 对话，用自然语言让 AI 帮你", usage: "agent", params: [] },
+  { name: "clear", group: G_META, summary: "清空命令台内容", usage: "clear", params: [] },
+  { name: "help", group: G_META, summary: "help <命令> 看用法参数；help layers 看层参数", usage: "help", params: [opt("topic", "string", "命令名 / layers / 层类型")] },
 ];
 
 // 各层类型可设置的参数（用于 add_node 的 --params 与 set_param 的 --name/--value）
@@ -105,6 +98,25 @@ const input = ref("");
 const busy = ref(false); // AI 本轮是否正在处理
 const status = ref<"idle" | "connecting" | "open" | "closed" | "error">("idle");
 const listRef = ref<HTMLElement | null>(null);
+const inputRef = ref<HTMLTextAreaElement | null>(null);
+
+// —— help 卡片辅助 ——（topic 存于 help 消息的 text 字段）
+function helpCommand(topic: string): CmdSpec | undefined {
+  const t = topic.trim().toLowerCase();
+  return COMMANDS.find(c => c.name.toLowerCase() === t);
+}
+function helpLayer(topic: string): (typeof LAYER_PARAMS)[number] | undefined {
+  const t = topic.trim().toLowerCase();
+  return LAYER_PARAMS.find(lp => lp.type.split(/\s*\/\s*/).some(name => name.toLowerCase() === t));
+}
+function commandsIn(group: string): CmdSpec[] {
+  return COMMANDS.filter(c => c.group === group);
+}
+// 点击命令 → 把它的用法填进输入框并聚焦，少手敲
+function insertCmd(usage: string) {
+  input.value = usage;
+  void nextTick(() => inputRef.value?.focus());
+}
 
 let ws: WebSocket | null = null;
 
@@ -200,7 +212,9 @@ async function runCommand(line: string) {
   const parsed = parseCommandLine(line);
   if (!parsed) return;
   if (parsed.command === "help") {
-    push("help", "");
+    // help [topic]：topic 可为命令名 / layers / 层类型；空则总览
+    const topic = line.trim().split(/\s+/)[1] || "";
+    push("help", topic);
     return;
   }
   if (parsed.command === "clear") {
@@ -403,9 +417,51 @@ const statusText = computed(() => {
 
 const placeholder = computed(() =>
   mode.value === "ai"
-    ? "和 AI 说你想做什么，Enter 发送、Shift+Enter 换行"
-    : "输入命令（如 help、load_template --key lenet）；输入 agent 呼出 AI"
+    ? "说你想做什么，Enter 发送"
+    : "输入命令；help 看全部，agent 呼出 AI"
 );
+
+// 小宠物：AI 模式下、尚未开始对话（没有用户/助手消息）时露面卖萌，一开口就消失
+const showPet = computed(
+  () => mode.value === "ai" && !messages.value.some(m => m.role === "user" || m.role === "assistant")
+);
+
+// 长时间不开口时，宠物头顶轮换冒气泡，提示用户可以做什么
+const petBubble = ref<string | null>(null);
+const PET_NUDGES = [
+  "试试说：帮我搭一个 LeNet 🧱",
+  "问我：我这个模型有什么问题？",
+  "想换数据集？跟我说一声就行～",
+  "让我帮你把模型跑起来吧！",
+  "不知道从哪下手？让我推荐个模型 ✨",
+];
+const PET_FIRST_MS = 3500; // 进入后先安静一会
+const PET_SHOW_MS = 4500; // 一句气泡停留时长
+const PET_HIDE_MS = 3800; // 两句之间的空档
+let petTimer: ReturnType<typeof setTimeout> | undefined;
+let petIdx = 0;
+function stopPetNudges() {
+  if (petTimer) clearTimeout(petTimer);
+  petTimer = undefined;
+  petBubble.value = null;
+  petIdx = 0;
+}
+// 出现一句 → 停留 → 消失 → 空档 → 再出现下一句，如此循环
+function petShow() {
+  petBubble.value = PET_NUDGES[petIdx % PET_NUDGES.length];
+  petIdx++;
+  petTimer = setTimeout(petHide, PET_SHOW_MS);
+}
+function petHide() {
+  petBubble.value = null;
+  petTimer = setTimeout(petShow, PET_HIDE_MS);
+}
+function startPetNudges() {
+  stopPetNudges();
+  petTimer = setTimeout(petShow, PET_FIRST_MS);
+}
+watch(showPet, visible => (visible ? startPetNudges() : stopPetNudges()), { immediate: true });
+onBeforeUnmount(stopPetNudges);
 
 // 打开面板不自动连 WS；进入 AI 模式时才连（对话历史保留在后端会话里）
 watch(
@@ -421,8 +477,9 @@ watch(
     <!-- 头部（随模式变色，切换更明显） -->
     <header class="assistant-head" :class="mode">
       <div class="assistant-title">
-        <span class="assistant-avatar">
-          <iconify-icon :icon="mode === 'ai' ? 'mdi:robot-happy-outline' : 'mdi:console-line'"></iconify-icon>
+        <span class="assistant-avatar" :class="{ pet: mode === 'ai' }">
+          <PetMascot v-if="mode === 'ai'" :size="30" />
+          <iconify-icon v-else icon="mdi:console-line"></iconify-icon>
         </span>
         <span class="assistant-title-name">{{ mode === "ai" ? "AI 助手" : "命令台" }}</span>
         <em v-if="statusText" class="assistant-status">{{ statusText }}</em>
@@ -483,15 +540,22 @@ watch(
 
     <!-- 消息区 -->
     <div ref="listRef" class="assistant-messages">
-      <!-- AI 模式：中央大号 agent 图标水印（置于消息下层，不挡文字） -->
-      <div v-if="mode === 'ai'" class="assistant-watermark" aria-hidden="true">
-        <iconify-icon icon="mdi:robot-happy-outline"></iconify-icon>
-      </div>
+      <!-- AI 模式且未开始对话：会动的小宠物；用户一开口就消失 -->
+      <Transition name="assistant-pet">
+        <div v-if="showPet" class="assistant-pet" aria-hidden="true">
+          <!-- 长时间不开口时，头顶冒气泡催一下 -->
+          <Transition name="assistant-bubble" mode="out-in">
+            <div v-if="petBubble" :key="petBubble" class="assistant-pet-bubble">{{ petBubble }}</div>
+          </Transition>
+          <!-- 常驻原地踏步；气泡出现时额外挥翅打招呼 -->
+          <PetMascot :size="150" :live="true" :greet="!!petBubble" />
+        </div>
+      </Transition>
       <div v-if="!messages.length" class="assistant-empty">
         <iconify-icon icon="mdi:console-line"></iconify-icon>
         <p>命令模式。直接敲命令，例如：</p>
         <ul>
-          <li><code>help</code>（查看全部命令）</li>
+          <li><code>help</code>（命令总览；<code>help &lt;命令&gt;</code> 看详情）</li>
           <li><code>load_template --key lenet</code></li>
           <li><code>validate_model</code></li>
         </ul>
@@ -512,32 +576,80 @@ watch(
           <pre v-if="m.body && looksJson(m.body)" class="assistant-result-code">{{ m.body }}</pre>
           <p v-else-if="m.body" class="assistant-result-text">{{ m.body }}</p>
         </div>
-        <!-- help：结构化命令卡片 -->
+        <!-- help：分层帮助（总览 / 单条命令 / 层参数） -->
         <div v-else-if="m.role === 'help'" class="assistant-help">
-          <div class="assistant-help-tip">
-            语法 <code>命令 --参数 值</code>。值含 <b>JSON / 数组 / 空格</b> 时用<b>单引号整体包住</b>，
-            例如 <code>--params '{"out_channels":16}'</code>、<code>--value '[1,16,16]'</code>。
-            想让 AI 帮你，输入 <b>agent</b>。
-          </div>
-          <div v-for="g in HELP_GROUPS" :key="g.title" class="assistant-help-group">
-            <h5>{{ g.title }}</h5>
-            <div v-for="it in g.items" :key="it.cmd" class="assistant-help-row">
-              <code>{{ it.cmd }}</code>
-              <span>{{ it.desc }}</span>
+          <!-- 单条命令详情：help <命令> -->
+          <template v-if="helpCommand(m.text)">
+            <div class="assistant-help-detail-head">
+              <code>{{ helpCommand(m.text)!.name }}</code>
+              <span>{{ helpCommand(m.text)!.summary }}</span>
             </div>
-          </div>
-          <div class="assistant-help-group">
-            <h5>层类型 · 可设参数（add_node 的 --params / set_param）</h5>
-            <div v-for="lp in LAYER_PARAMS" :key="lp.type" class="assistant-help-row">
-              <code>{{ lp.type }}</code>
-              <span>{{ lp.params }}</span>
+            <button class="assistant-help-usage" :title="'点击填入输入框'" @click="insertCmd(helpCommand(m.text)!.usage)">
+              <iconify-icon icon="mdi:arrow-down-left"></iconify-icon>
+              <code>{{ helpCommand(m.text)!.usage }}</code>
+            </button>
+            <div v-if="helpCommand(m.text)!.params.length" class="assistant-help-params">
+              <div v-for="p in helpCommand(m.text)!.params" :key="p.name" class="assistant-help-row">
+                <code>{{ p.name }}</code>
+                <span><em>{{ p.type }} · {{ p.required ? "必填" : "可选" }}</em>{{ p.desc }}</span>
+              </div>
             </div>
-          </div>
+            <div v-else class="assistant-help-empty">无参数，直接执行。</div>
+            <div class="assistant-help-foot">回 <code>help</code> 看命令总览</div>
+          </template>
+          <!-- 全部层参数：help layers -->
+          <template v-else-if="m.text === 'layers' || m.text === 'layer'">
+            <div class="assistant-help-tip">
+              <b>层类型 · 可设参数</b>（用于 <code>add_node --params</code> 与 <code>set_param</code>）。
+              值含 JSON/数组时用<b>单引号整体包住</b>，如 <code>--params '{"out_channels":16}'</code>。
+            </div>
+            <div class="assistant-help-params">
+              <div v-for="lp in LAYER_PARAMS" :key="lp.type" class="assistant-help-row">
+                <code>{{ lp.type }}</code>
+                <span>{{ lp.params }}</span>
+              </div>
+            </div>
+            <div class="assistant-help-foot">回 <code>help</code> 看命令总览</div>
+          </template>
+          <!-- 单个层参数：help Conv2D -->
+          <template v-else-if="helpLayer(m.text)">
+            <div class="assistant-help-detail-head">
+              <code>{{ helpLayer(m.text)!.type }}</code>
+              <span>可设参数</span>
+            </div>
+            <div class="assistant-help-empty">{{ helpLayer(m.text)!.params }}</div>
+            <div class="assistant-help-foot">全部层见 <code>help layers</code></div>
+          </template>
+          <!-- 未知 topic -->
+          <template v-else-if="m.text">
+            <div class="assistant-help-empty">未找到 “{{ m.text }}”。输入 <code>help</code> 看命令总览。</div>
+          </template>
+          <!-- 总览：语法一行 + 分组命令名（可点击填入） -->
+          <template v-else>
+            <div class="assistant-help-tip">
+              语法 <code>命令 --参数 值</code>；值含空格/JSON 用单引号包住。点命令名即可填入输入框。
+            </div>
+            <div v-for="g in COMMAND_GROUPS" :key="g" class="assistant-help-group">
+              <h5>{{ g }}</h5>
+              <div class="assistant-help-chips">
+                <button
+                  v-for="c in commandsIn(g)"
+                  :key="c.name"
+                  class="assistant-cmd-chip"
+                  :title="c.summary + '（点击填入）'"
+                  @click="insertCmd(c.usage)"
+                >{{ c.name }}</button>
+              </div>
+            </div>
+            <div class="assistant-help-foot">
+              看某条用法参数：<code>help &lt;命令&gt;</code>（如 <code>help add_node</code>）· 层参数：<code>help layers</code>
+            </div>
+          </template>
         </div>
         <!-- AI 回合：思考过程（中间叙述 + 工具调用）折叠，最终回答常显 -->
         <div v-else-if="m.role === 'assistant'" class="assistant-turn">
           <span class="assistant-turn-avatar">
-            <iconify-icon icon="mdi:robot-happy-outline"></iconify-icon>
+            <PetMascot :size="28" />
           </span>
           <div class="assistant-turn-body">
             <!-- 思考过程：完成后默认折叠，点击展开；运行中实时展开显示进度 -->
@@ -576,6 +688,7 @@ watch(
     <!-- 输入区 -->
     <footer class="assistant-input">
       <textarea
+        ref="inputRef"
         v-model="input"
         rows="2"
         :placeholder="placeholder"

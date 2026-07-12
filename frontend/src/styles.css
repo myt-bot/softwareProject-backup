@@ -5038,25 +5038,60 @@ body.is-connecting .node-port {
 
 /* AI 助手 · AI 模式中央大号 agent 图标水印 */
 .assistant-messages { position: relative; }
-.assistant-messages > *:not(.assistant-watermark) { position: relative; z-index: 1; }
-.assistant-watermark {
+.assistant-messages > *:not(.assistant-pet) { position: relative; z-index: 1; }
+/* 空对话卖萌的小宠物：居中偏下，置于消息下层，不挡文字 */
+.assistant-pet {
   position: absolute;
-  top: 46%;
+  top: 52%;
   left: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 0;
-  animation: assistantWatermarkIn 0.45s ease both;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
 }
-.assistant-watermark iconify-icon {
-  font-size: 190px;
-  color: var(--indigo);
-  opacity: 0.07;
+/* 头顶气泡：绝对定位悬在宠物上方，多行时向上生长、不挤动宠物；带向下小尖角 */
+.assistant-pet-bubble {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 12px;
+  width: max-content;
+  max-width: 240px;
+  padding: 8px 13px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 8px 20px -10px rgba(35, 48, 74, 0.35);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  text-align: center;
 }
-@keyframes assistantWatermarkIn {
-  from { opacity: 0; transform: translate(-50%, -46%) scale(0.9); }
-  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.assistant-pet-bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 11px;
+  height: 11px;
+  background: #fff;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  transform: translateX(-50%) rotate(45deg);
 }
+.assistant-bubble-enter-active,
+.assistant-bubble-leave-active { transition: opacity 0.28s ease, transform 0.28s ease; }
+.assistant-bubble-enter-from,
+.assistant-bubble-leave-to { opacity: 0; transform: translateX(-50%) translateY(8px) scale(0.9); }
+/* 露面 / 消失过渡 */
+.assistant-pet-enter-active,
+.assistant-pet-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.assistant-pet-enter-from,
+.assistant-pet-leave-to { opacity: 0; transform: translate(-50%, -50%) scale(0.85); }
 
 /* ============================================================
    AI 助手 · 视觉精修（统一命令台与 AI 模式的观感）
@@ -5093,6 +5128,11 @@ body.is-connecting .node-port {
 .assistant-head.ai .assistant-avatar {
   background: linear-gradient(135deg, #2563eb, #0ea5e9);
   box-shadow: 0 6px 14px -4px rgba(37, 99, 235, 0.55);
+}
+/* AI 模式头像换成小宠物：去掉渐变底，让彩色宠物直接露出 */
+.assistant-head.ai .assistant-avatar.pet {
+  background: none;
+  box-shadow: none;
 }
 .assistant-head.ai .icon-button { color: #2563eb; }
 .assistant-head.ai .icon-button:hover { background: rgba(37, 99, 235, 0.1); }
@@ -5261,15 +5301,10 @@ body.is-connecting .node-port {
 }
 .assistant-turn-avatar {
   flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
-  margin-top: 1px;
-  border-radius: 50%;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
-  color: #fff;
-  background: linear-gradient(135deg, #6366f1, #2563eb);
-  box-shadow: 0 3px 8px -3px rgba(37, 99, 235, 0.55);
 }
 .assistant-turn-avatar iconify-icon { font-size: 16px; }
 .assistant-turn-body {
@@ -5404,3 +5439,90 @@ body.is-connecting .node-port {
 }
 .assistant-think-text { color: var(--muted); font-size: 12.5px; }
 .assistant-think-text :is(h1, h2, h3, h4, h5) { font-size: 13px; }
+
+/* ————————————————————————————————————————————————
+   AI 助手 · 分层 help（总览命令名胶囊 / 单条详情）
+   ———————————————————————————————————————————————— */
+/* 总览：分组下的命令名胶囊，点击填入输入框 */
+.assistant-help-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+.assistant-cmd-chip {
+  font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 12px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--indigo-strong);
+  cursor: pointer;
+  transition: background 0.14s, border-color 0.14s, transform 0.05s;
+}
+.assistant-cmd-chip:hover { background: var(--panel); border-color: var(--indigo); }
+.assistant-cmd-chip:active { transform: translateY(1px); }
+
+/* 单条命令详情（这些元素是 .assistant-help 直接子级，需自带左右内边距，
+   否则会贴边、边框被卡片的 overflow:hidden 裁掉） */
+.assistant-help-detail-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px 0;
+  margin-bottom: 8px;
+}
+.assistant-help-detail-head code {
+  font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+.assistant-help-detail-head span { font-size: 12.5px; color: var(--muted); }
+/* 用法行：可点击填入（左右留 12px，避免边框贴到卡片边） */
+.assistant-help-usage {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  text-align: left;
+  padding: 8px 10px;
+  margin: 0 12px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  cursor: pointer;
+  transition: border-color 0.14s, background 0.14s;
+}
+.assistant-help-usage:hover { border-color: var(--indigo); background: var(--panel); }
+.assistant-help-usage iconify-icon { font-size: 15px; color: #6366f1; flex: 0 0 auto; }
+.assistant-help-usage code {
+  font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 12px;
+  color: var(--text);
+  word-break: break-all;
+}
+.assistant-help-params { display: flex; flex-direction: column; gap: 4px; padding: 0 12px; }
+.assistant-help-params .assistant-help-row span em {
+  font-style: normal;
+  color: var(--indigo-strong);
+  margin-right: 6px;
+}
+.assistant-help-empty { font-size: 12.5px; color: var(--muted); padding: 2px 12px; }
+.assistant-help-foot {
+  margin: 9px 12px 0;
+  padding: 7px 0 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.assistant-help-foot code {
+  font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  color: var(--indigo-strong);
+}

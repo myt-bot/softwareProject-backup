@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { auth, handleLogout } from "../auth";
 import { agent, openHelpModal, ui } from "../store";
+import PetMascot from "./PetMascot.vue";
 </script>
 
 <template>
@@ -33,7 +34,7 @@ import { agent, openHelpModal, ui } from "../store";
         title="打开 AI 助手"
         @click="ui.assistantOpen = !ui.assistantOpen"
       >
-        <iconify-icon icon="mdi:robot-happy-outline"></iconify-icon>
+        <PetMascot :size="20" />
         AI 助手
       </button>
 
