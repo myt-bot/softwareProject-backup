@@ -4,7 +4,7 @@ import { ui } from "../store";
 import { buildAssistantSnapshot, executeAssistantCommand } from "../assistant";
 import { renderMarkdown } from "../markdown";
 import PetMascot from "./PetMascot.vue";
-import assistantHelp from "../data/assistantHelp.json";
+import assistantHelp from "../assistantHelp.json";
 
 // 后端地址（与 api/client 一致）：生产由 VITE_API_BASE_URL 注入
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || "http://127.0.0.1:8000";

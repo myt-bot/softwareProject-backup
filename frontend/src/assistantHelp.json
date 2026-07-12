@@ -1,0 +1,81 @@
+{
+  "commandGroups": ["只读 · 了解现状", "画布 / 训练操作", "AI · 帮助"],
+  "commands": [
+    { "name": "get_model_graph", "group": "只读 · 了解现状", "summary": "获取当前模型图", "usage": "get_model_graph", "params": [] },
+    { "name": "list_nodes", "group": "只读 · 了解现状", "summary": "列出全部节点及 id", "usage": "list_nodes", "params": [] },
+    { "name": "list_canvases", "group": "只读 · 了解现状", "summary": "列出全部画布（第几个/名称/节点数）", "usage": "list_canvases", "params": [] },
+    { "name": "get_canvas_graph", "group": "只读 · 了解现状", "summary": "看指定画布的结构与维度（不切换焦点）", "usage": "get_canvas_graph --index 2", "params": [
+      { "name": "index", "type": "int", "required": false, "desc": "第几个画布（从 1 开始）" },
+      { "name": "name", "type": "string", "required": false, "desc": "画布名称" },
+      { "name": "id", "type": "int", "required": false, "desc": "画布 id" }
+    ] },
+    { "name": "get_shapes", "group": "只读 · 了解现状", "summary": "查看各层输出维度", "usage": "get_shapes", "params": [] },
+    { "name": "validate_model", "group": "只读 · 了解现状", "summary": "校验结构，返回错误/警告", "usage": "validate_model", "params": [] },
+    { "name": "list_templates", "group": "只读 · 了解现状", "summary": "列出内置模板（拿 key 供 load_template）", "usage": "list_templates", "params": [] },
+    { "name": "get_train_config", "group": "只读 · 了解现状", "summary": "查看当前训练配置", "usage": "get_train_config", "params": [] },
+    { "name": "get_training_result", "group": "只读 · 了解现状", "summary": "查看训练结果与逐轮指标", "usage": "get_training_result", "params": [] },
+    { "name": "get_system_status", "group": "只读 · 了解现状", "summary": "查看本机 Agent/设备/存储等状态", "usage": "get_system_status", "params": [] },
+    { "name": "load_template", "group": "画布 / 训练操作", "summary": "载入内置模板（替换当前模型）", "usage": "load_template --key lenet", "params": [
+      { "name": "key", "type": "string", "required": true, "desc": "模板键，见 list_templates" }
+    ] },
+    { "name": "add_node", "group": "画布 / 训练操作", "summary": "新增一个层节点", "usage": "add_node --type Conv2D --params '{\"out_channels\":16}'", "params": [
+      { "name": "type", "type": "string", "required": true, "desc": "层类型，见 help layers" },
+      { "name": "params", "type": "JSON", "required": false, "desc": "层参数，用单引号整体包住，见 help layers" }
+    ] },
+    { "name": "connect_nodes", "group": "画布 / 训练操作", "summary": "连接两个节点", "usage": "connect_nodes --source conv2d_1 --target relu_1", "params": [
+      { "name": "source", "type": "string", "required": true, "desc": "源节点 id，见 list_nodes" },
+      { "name": "target", "type": "string", "required": true, "desc": "目标节点 id" }
+    ] },
+    { "name": "set_param", "group": "画布 / 训练操作", "summary": "修改节点的一个参数", "usage": "set_param --node_id linear_1 --name out_features --value 10", "params": [
+      { "name": "node_id", "type": "string", "required": true, "desc": "节点 id" },
+      { "name": "name", "type": "string", "required": true, "desc": "参数名" },
+      { "name": "value", "type": "any", "required": true, "desc": "参数值；数组/对象用单引号，如 --value '[1,16,16]'" }
+    ] },
+    { "name": "delete_node", "group": "画布 / 训练操作", "summary": "删除节点及其连线", "usage": "delete_node --node_id dropout_1", "params": [
+      { "name": "node_id", "type": "string", "required": true, "desc": "节点 id" }
+    ] },
+    { "name": "set_dataset", "group": "画布 / 训练操作", "summary": "切换数据集（自动同步 Input 维度）", "usage": "set_dataset --name FashionMNIST", "params": [
+      { "name": "name", "type": "string", "required": true, "desc": "数据集名，如 MNIST / FashionMNIST / CIFAR10" }
+    ] },
+    { "name": "set_train_config", "group": "画布 / 训练操作", "summary": "改训练超参数（任意项）", "usage": "set_train_config --epochs 10 --optimizer adam", "params": [
+      { "name": "epochs", "type": "int", "required": false, "desc": "训练轮次 1~100" },
+      { "name": "batch_size", "type": "int", "required": false, "desc": "批大小，正整数" },
+      { "name": "rate", "type": "number", "required": false, "desc": "学习率，正数" },
+      { "name": "optimizer", "type": "string", "required": false, "desc": "sgd/adam/adamw/rmsprop/adagrad/adadelta" },
+      { "name": "loss_fn", "type": "string", "required": false, "desc": "cross_entropy/nll/mse/l1/smooth_l1" },
+      { "name": "device", "type": "string", "required": false, "desc": "cpu 或 cuda" }
+    ] },
+    { "name": "auto_layout", "group": "画布 / 训练操作", "summary": "自动整理画布布局", "usage": "auto_layout", "params": [] },
+    { "name": "export_code", "group": "画布 / 训练操作", "summary": "导出 PyTorch 代码（需本机 Agent）", "usage": "export_code", "params": [] },
+    { "name": "start_training", "group": "画布 / 训练操作", "summary": "发起训练（需本机 Agent）", "usage": "start_training", "params": [
+      { "name": "config", "type": "JSON", "required": false, "desc": "训练配置覆盖，如 '{\"epochs\":10}'" }
+    ] },
+    { "name": "stop_training", "group": "画布 / 训练操作", "summary": "停止当前训练（需本机 Agent）", "usage": "stop_training", "params": [] },
+    { "name": "agent", "group": "AI · 帮助", "summary": "进入 AI 对话，用自然语言让 AI 帮你", "usage": "agent", "params": [] },
+    { "name": "clear", "group": "AI · 帮助", "summary": "清空命令台内容", "usage": "clear", "params": [] },
+    { "name": "help", "group": "AI · 帮助", "summary": "help <命令> 看用法参数；help layers 看层参数", "usage": "help", "params": [
+      { "name": "topic", "type": "string", "required": false, "desc": "命令名 / layers / 层类型" }
+    ] }
+  ],
+  "layerParams": [
+    { "type": "Input", "params": "shape：数组 [通道,高,宽]，如 [1,28,28]" },
+    { "type": "Conv2D", "params": "out_channels / kernel_size / stride / padding：整数" },
+    { "type": "MaxPooling", "params": "kernel_size / stride / padding：整数" },
+    { "type": "Linear", "params": "out_features：整数（末层设为类别数）" },
+    { "type": "Dropout", "params": "p：0~1 小数" },
+    { "type": "LSTM", "params": "hidden_size / num_layers：整数；return_sequences / bidirectional：true|false" },
+    { "type": "TransformerEncoder", "params": "d_model / num_heads / num_layers / dim_feedforward：整数；dropout：小数" },
+    { "type": "SelfAttention", "params": "embed_dim / num_heads：整数；dropout：小数" },
+    { "type": "Seq2Seq", "params": "hidden_size / output_size / target_length / num_layers：整数" },
+    { "type": "VAE", "params": "latent_dim / output_features：整数" },
+    { "type": "GraphConv", "params": "out_features：整数" },
+    { "type": "ReLU / Flatten / Add / Output", "params": "无可设参数" }
+  ],
+  "petNudges": [
+    "试试说：帮我搭一个 LeNet 🧱",
+    "问我：我这个模型有什么问题？",
+    "想换数据集？跟我说一声就行～",
+    "让我帮你把模型跑起来吧！",
+    "不知道从哪下手？让我推荐个模型 ✨"
+  ]
+}
