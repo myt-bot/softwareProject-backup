@@ -48,13 +48,22 @@ const gridLines = computed(() =>
   }))
 );
 
-// X 轴刻度（epoch）
-const xLabels = computed(() =>
-  Array.from({ length: totalEpochs.value }, (_, i) => ({
-    x: xOf(i),
-    label: String(i + 1),
-  }))
-);
+// X 轴刻度（epoch）：轮数多时按间隔抽稀，最多约 12 个，避免全挤成一团；始终含首轮与末轮
+const xLabels = computed(() => {
+  const n = totalEpochs.value;
+  if (n <= 1) return [{ x: xOf(0), label: "1" }];
+  const maxTicks = 12;
+  const step = Math.max(1, Math.ceil(n / maxTicks));
+  const idxs: number[] = [];
+  for (let i = 0; i < n; i += step) idxs.push(i);
+  const last = n - 1;
+  // 保证末轮有标签；若与上一个刻度太近就替换掉它，避免末尾两个数字重叠
+  if (idxs[idxs.length - 1] !== last) {
+    if (last - idxs[idxs.length - 1] < step / 2) idxs[idxs.length - 1] = last;
+    else idxs.push(last);
+  }
+  return idxs.map(i => ({ x: xOf(i), label: String(i + 1) }));
+});
 
 // 灰色占位区（尚未训练到的部分）
 const placeholder = computed(() => {

@@ -24,7 +24,16 @@ from pathlib import Path
 # 依赖清单（Windows/Linux 一律装 CUDA 版 PyTorch；macOS 装默认版）
 BASE_REQUIREMENTS = ["websockets", "numpy", "fastapi", "pydantic"]
 TORCH_REQUIREMENTS = ["torch", "torchvision"]
-CUDA_INDEX_URL = "https://download.pytorch.org/whl/cu121"
+# CUDA 版 PyTorch 轮子源：优先国内镜像（上海交大，含 cu121 torch/torchvision 及全部依赖，国内快），
+# 镜像不可用时回退官方源。二者都是 PEP503 索引，自带 nvidia-*/sympy 等依赖，无需 PyPI。
+CUDA_INDEX_URL = "https://mirror.sjtu.edu.cn/pytorch-wheels/cu121"
+CUDA_INDEX_HOST = "mirror.sjtu.edu.cn"
+CUDA_INDEX_URL_FALLBACK = "https://download.pytorch.org/whl/cu121"
+# pip 国内镜像源（基础依赖走此源，国内下载更快）。http 源需配 --trusted-host；
+# torch 仍走 CUDA 专用源，不用此镜像，以免误装成 CPU 版。
+PIP_INDEX_URL = "http://mirrors.aliyun.com/pypi/simple/"
+PIP_TRUSTED_HOST = "mirrors.aliyun.com"
+PIP_MIRROR_ARGS = ["-i", PIP_INDEX_URL, "--trusted-host", PIP_TRUSTED_HOST]
 # 线上服务器（共用包删掉 config.json 后的默认值，务必是生产域名，否则连不上）
 DEFAULT_SERVER = "https://fk.kanzakiyui.com"
 
@@ -224,6 +233,18 @@ def save_config(server_url: str, token: str) -> None:
 # 环境准备（点击后才执行）与 Agent 子进程
 # —————————————————————————————————————————————
 
+def _pip_install(py: str, pkgs: list, log, label: str) -> None:
+    """pip install：优先国内镜像源，失败则回退官方 PyPI 重试一次。
+
+    pkgs 为传给 pip install 的参数列表（如 ["--upgrade", "pip"] 或依赖名）。
+    """
+    try:
+        subprocess.run([py, "-m", "pip", "install", *pkgs, *PIP_MIRROR_ARGS], check=True, **_subprocess_flags())
+    except subprocess.CalledProcessError:
+        log(f"[启动器] 镜像源安装「{label}」失败，改用官方 PyPI 重试 ...")
+        subprocess.run([py, "-m", "pip", "install", *pkgs], check=True, **_subprocess_flags())
+
+
 def create_environment(log=print) -> None:
     """创建虚拟环境并安装依赖（含 CUDA 版 PyTorch）。仅在用户触发时调用。"""
     APP_DIR.mkdir(parents=True, exist_ok=True)
@@ -240,14 +261,22 @@ def create_environment(log=print) -> None:
         subprocess.run([base_python, "-m", "venv", str(VENV_DIR)], check=True, **_subprocess_flags())
     py = str(venv_python())
     log("[启动器] 正在升级 pip ...")
-    subprocess.run([py, "-m", "pip", "install", "--upgrade", "pip"], check=True, **_subprocess_flags())
-    log("[启动器] 正在安装基础依赖 ...")
-    subprocess.run([py, "-m", "pip", "install", *BASE_REQUIREMENTS], check=True, **_subprocess_flags())
+    _pip_install(py, ["--upgrade", "pip"], log, "pip")
+    log(f"[启动器] 正在安装基础依赖（优先镜像源 {PIP_TRUSTED_HOST}）...")
+    _pip_install(py, list(BASE_REQUIREMENTS), log, "基础依赖")
     log(f"[启动器] 即将下载并安装 PyTorch（{_deps_size_text()}），首次较慢，请保持网络畅通 ...")
-    torch_cmd = [py, "-m", "pip", "install", *TORCH_REQUIREMENTS]
-    if not _is_macos():
-        torch_cmd += ["--index-url", CUDA_INDEX_URL]
-    subprocess.run(torch_cmd, check=True, **_subprocess_flags())
+    if _is_macos():
+        # macOS 装默认版（CPU/MPS），走 PyPI（镜像优先、官方兜底）
+        _pip_install(py, list(TORCH_REQUIREMENTS), log, "PyTorch")
+    else:
+        # Windows/Linux 装 CUDA 版：优先国内镜像，失败回退官方源（都是自带依赖的专用轮子源）
+        torch_base = [py, "-m", "pip", "install", *TORCH_REQUIREMENTS, "--index-url"]
+        try:
+            log(f"[启动器] 通过镜像源 {CUDA_INDEX_HOST} 下载 CUDA 版 PyTorch ...")
+            subprocess.run(torch_base + [CUDA_INDEX_URL], check=True, **_subprocess_flags())
+        except subprocess.CalledProcessError:
+            log("[启动器] 镜像源不可用，改用 PyTorch 官方源重试 ...")
+            subprocess.run(torch_base + [CUDA_INDEX_URL_FALLBACK], check=True, **_subprocess_flags())
     READY_MARKER.write_text("ok", encoding="utf-8")
     log("[启动器] 训练环境准备完成。")
 
