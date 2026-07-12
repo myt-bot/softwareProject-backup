@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Mapping
 from typing import Any, Optional
 from uuid import uuid4
@@ -50,8 +51,9 @@ router = APIRouter(tags=["assistant"])
 # 单次工具调用等待浏览器回传结果的超时秒数（超时视为该命令执行失败）
 TOOL_CALL_TIMEOUT_SECONDS = 30
 
-# 一轮对话内允许的最大工具调用次数（防止模型陷入死循环，超出即中止并给出提示）
-MAX_TOOL_ITERATIONS = 24
+# 一轮对话内允许的最大工具调用轮数（防止模型陷入死循环，超出即中止并给出提示）。
+# 复杂建模/多画布/反复校验修正会消耗不少轮次，故给得宽松些，适配更“深”的模型。
+MAX_TOOL_ITERATIONS = 80
 
 
 # —————————————————————————————————————————————
@@ -277,6 +279,8 @@ def command_specs() -> list[dict[str, Any]]:
     return [
         {"name": "get_model_graph", "category": "read", "summary": "获取当前画布的完整模型图。", "params": [], "usage": "get_model_graph", "runs_on": "browser"},
         {"name": "list_nodes", "category": "read", "summary": "列出画布中的全部节点。", "params": [], "usage": "list_nodes", "runs_on": "browser"},
+        {"name": "list_canvases", "category": "read", "summary": "列出全部画布（第几个 index / 名称 name / 节点数 / 是否当前焦点），用于定位某个画布。", "params": [], "usage": "list_canvases", "runs_on": "browser"},
+        {"name": "get_canvas_graph", "category": "read", "summary": "读取指定画布的模型图与各层维度（不改变用户当前焦点）。用 index / name / id 之一定位。", "params": [p("index", "integer", "第几个画布（从 1 开始）", False), p("name", "string", "画布名称", False), p("id", "integer", "画布 id", False)], "usage": "get_canvas_graph --index 2", "runs_on": "browser"},
         {"name": "get_shapes", "category": "read", "summary": "获取各层推导出的输入和输出维度。", "params": [], "usage": "get_shapes", "runs_on": "browser"},
         {"name": "validate_model", "category": "read", "summary": "校验当前模型结构并返回错误和警告。", "params": [], "usage": "validate_model", "runs_on": "browser"},
         {"name": "list_templates", "category": "read", "summary": "列出可用的内置模型模板。", "params": [], "usage": "list_templates", "runs_on": "browser"},
@@ -407,6 +411,14 @@ def build_system_prompt(project_summary: Optional[str] = None) -> str:
 - 需要看某层输出尺寸时用 get_shapes。
 - 用户要“换数据集 / 用某某数据集训练”时，用 **set_dataset** 真正切换（可选：MNIST、FashionMNIST、KMNIST、QMNIST、USPS、CIFAR10、CIFAR100、SVHN）。它会**自动把 Input 层维度同步**为该数据集的形状（如 MNIST 系列 [1,28,28]、CIFAR 系列 [3,32,32]），所以切完数据集**不用再手动改 Input**；若返回 input_synced=true，说明维度变了，记得重新 validate_model。只在嘴上说“已切换”而不调用 set_dataset 是错误的。
 
+# 多画布（用户提到“画布2 / 第二个画布 / 某某画布”时）
+- 系统可能有多个画布。你的读写命令**默认只作用于当前焦点画布**；要了解/解释**其它**画布，先用 list_canvases 看清有几个画布、各自的“第几个(index)”和“名称(name)”，再用 get_canvas_graph 按 index 或 name 读那个画布（**不会改变用户的焦点**）。
+- **消歧**：用户说“画布2”可能指“第 2 个画布(index=2)”，也可能指“名字叫‘画布2’的那个画布”。务必先 list_canvases 再判断：
+  - 若某个画布名正好叫“画布2”、且它同时就是第 2 个 → 无歧义，直接用它；
+  - 若“第 2 个画布”和“名叫画布2的画布”是**不同的两个**，或叫这个名字的有多个、或都对不上 → **先反问用户**你指的是哪一个（把候选列清楚：第几个 + 名称 + 节点数），得到明确答复后再继续；
+  - 只有一个画布时，用户说的“画布2”多半是口误，指出实际只有一个画布即可。
+- **绝不**在没弄清是哪个画布时，就凭空解释或对某画布动手。
+
 # 可用的层类型（add_node 的 type 只能取这些，其它一律不认）
 Input、Output、Add、Conv2D、MaxPooling、ReLU、Flatten、Linear、Dropout、LSTM、Seq2Seq、TransformerEncoder、SelfAttention、VAE、GraphConv。
 常见层的关键参数（用 add_node 的 params 或 set_param 设置，参数名要写对）：
@@ -424,9 +436,9 @@ Input、Output、Add、Conv2D、MaxPooling、ReLU、Flatten、Linear、Dropout�
 
 # 系统使用 FAQ（用户问“怎么用 / 怎么配置”时照实回答；凡涉及“现在连上没 / 用的什么设备 / 存到哪”，先调 get_system_status 拿真实状态，不要凭空说“你已连接”之类）
 - 本机训练 Agent（训练、导出代码都依赖它，在**用户自己的电脑**上运行）：点顶栏「本机训练未连接」按钮打开说明弹窗 → 点下载（下载链接已绑定当前账号、按系统选 Windows/macOS/Linux）→ 解压 → 双击运行（Windows 是 .exe、macOS 是 .app）→ 在应用界面点「准备训练环境」（首次会自动下载安装 PyTorch 等依赖，较大较慢，请耐心等）→ 连上后顶栏会变成「本机训练已连接」，全程自动绑定账号、**无需手动填写任何配置**。
-- Agent 连不上 / 提示令牌失效：**不必重新下载**。在同一个弹窗里复制“长期有效令牌”，替换应用目录下 config.json 文件里的 "token" 字段，保存后重新运行应用即可。
-- 切换训练设备（CPU / GPU）：用顶栏的设备选择器切换；GPU 需要本机有 NVIDIA 显卡且 Agent 装了 CUDA 版依赖，检测不到 CUDA 时会锁定为 CPU。你也可以用 set_train_config 的 device 参数改。
-- 存储位置：点顶栏的文件夹图标「存储位置设置」，可分别设“数据集下载目录”和“训练结果保存目录”；留空则用后端默认位置。
+- Agent 连不上 / 提示令牌失效：**不必重新下载**。在同一个弹窗里复制“长期有效令牌”，直接粘贴到本机训练应用界面里的令牌输入框，然后重新连接即可（不需要改任何配置文件）。
+- 切换训练设备（CPU / GPU）：在**底部操作栏**（数据集选择旁边）的设备选择器切换；GPU 需要本机有 NVIDIA 显卡且 Agent 装了 CUDA 版依赖，检测不到 CUDA 时会锁定为 CPU。你也可以用 set_train_config 的 device 参数改。
+- 存储位置：点顶栏的文件夹图标「存储位置设置」，可分别设“数据集下载位置”和“结果文件存储位置”；这两个目录在**运行本机 Agent 的电脑（即用户自己电脑）**上，留空则用默认位置。
 - 数据集：首次使用某个数据集时，训练启动会自动下载并缓存到本地，下载进度显示在训练监控页。
 - 保存 / 打开项目：底部操作栏「更多」里有「保存项目」和「我的项目」（打开此前保存的模型）。
 - 导出代码：export_code 会把当前模型生成 PyTorch 代码（需 Agent 在线），在导出弹窗里可查看、复制、下载。
@@ -700,7 +712,99 @@ async def run_assistant_turn(
         {"role": "user", "content": user_message.strip()},
         {"role": "assistant", "content": final_text},
     ])
+
+    # 回答完毕后，再生成 3 个用户可能想继续问的问题，供前端点选。
+    # 始终下发一条 suggestions（哪怕为空），以便前端清掉「生成中…」占位。
+    suggestions: list[str] = []
+    try:
+        convo = [
+            {"role": m["role"], "content": m["content"]}
+            for m in messages
+            if m.get("role") in ("user", "assistant")
+            and isinstance(m.get("content"), str) and m["content"].strip()
+        ]
+        suggestions = await generate_followups(client, model, convo[-4:])
+    except Exception:
+        suggestions = []
+    try:
+        await connection.send_json({"type": "suggestions", "items": suggestions})
+    except Exception:
+        pass
+
     return final_text
+
+
+async def generate_followups(client: Any, model: str, convo: list[dict[str, Any]]) -> list[str]:
+    """根据对话，站在用户角度生成 3 个可能的后续追问（供前端展示为可点选项）。
+
+    参数：
+        client / model：与主对话相同的大模型客户端与模型名（前端 BYO-key）。
+        convo：最近若干轮 user/assistant 文本消息，用作生成上下文。
+
+    返回：至多 3 条简短中文追问；无法生成或解析失败时返回空列表（不影响主流程）。
+    """
+    if not convo:
+        return []
+    system = (
+        "你是“追问建议器”。根据下面的对话，站在用户角度，给出 3 个用户接下来最可能想问的问题。"
+        "要求：中文；每个不超过 20 字；具体、可直接发送；紧扣当前模型/训练场景；不要重复已经问过的。"
+        "只输出一个 JSON 字符串数组，例如 [\"问题一\",\"问题二\",\"问题三\"]，不要输出任何多余文字、解释或代码块以外的内容。"
+    )
+    chat_messages = [{"role": "system", "content": system}, *convo]
+    # 先带 temperature/max_tokens；若模型拒绝这些参数（常见于推理模型）或返回空，
+    # 再退回“极简调用”（只给 model+messages，与主回答一致）重试一遍。
+    variants = [{"temperature": 0.8, "max_tokens": 200}, {}]
+    for extra in variants:
+        try:
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                model=model,
+                messages=chat_messages,
+                **extra,
+            )
+            text = response.choices[0].message.content or ""
+            parsed = _parse_followups(text)
+            print(f"[followups] extra={extra} raw={text[:120]!r} parsed={parsed}", flush=True)
+            if parsed:
+                return parsed
+        except Exception as exc:
+            print(f"[followups] extra={extra} error={exc!r}", flush=True)
+            continue
+    return []
+
+
+def _parse_followups(text: str) -> list[str]:
+    """从模型回复中尽量稳健地解析出最多 3 条追问。
+
+    容忍多种非严格输出：代码块包裹、数组前后夹带说明文字、被截断的 JSON、
+    以及“1. …/ - …/ 、…”这类编号或项目符号列表（含中文标点）。解析不出则返回空列表。
+    """
+    if not text or not text.strip():
+        return []
+    cleaned = text.replace("```", " ").strip()
+
+    # 1) 优先抓取一个 JSON 字符串数组（允许前后有多余文字）
+    match = re.search(r"\[[^\[\]]*\]", cleaned, re.S)
+    if match:
+        try:
+            data = json.loads(match.group(0))
+            if isinstance(data, list):
+                items = [str(x).strip().strip("\"'“”‘’") for x in data]
+                items = [x for x in items if x]
+                if items:
+                    return items[:3]
+        except Exception:
+            pass
+
+    # 2) 退回按行拆：去掉编号/项目符号/引号，取非空行
+    lines: list[str] = []
+    for raw in cleaned.splitlines():
+        line = raw.strip()
+        line = re.sub(r'^[\s\-*·•\d\.\)、,，。："“”‘’\'\[\]]+', "", line).strip()
+        line = line.strip("\"'“”‘’，。").strip()
+        if len(line) >= 2:
+            lines.append(line)
+    return lines[:3]
 
 
 # —————————————————————————————————————————————

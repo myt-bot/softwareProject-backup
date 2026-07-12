@@ -142,8 +142,8 @@ function close() {
             <strong>应用连不上 / 提示令牌失效？无需重新下载</strong>
           </div>
           <p>
-            复制下面这串<b>长期有效令牌</b>（{{ tokenDays }} 天），替换你应用文件夹里
-            <code>config.json</code> 的 <code>"token"</code> 字段，保存后重新运行应用即可。
+            复制下面这串<b>长期有效令牌</b>（{{ tokenDays }} 天），直接粘贴到本机训练应用界面里的
+            <b>令牌输入框</b>，然后重新连接即可。
           </p>
           <div class="agent-token-value">
             <code>{{ agentToken || "加载中…" }}</code>

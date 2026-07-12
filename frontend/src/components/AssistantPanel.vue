@@ -42,6 +42,8 @@ interface ChatMessage {
   steps?: AssistantStep[];
   done?: boolean;     // 本回合是否已产出最终回答（收到 final）
   expanded?: boolean; // 「思考过程」是否展开（完成后默认折叠）
+  suggestions?: string[]; // 本回合回答后的「猜你想问」（挂在该气泡下方，下次提问即消失）
+  suggestLoading?: boolean; // 追问正在生成（回答刚结束、建议还没到，先占位）
 }
 
 // 命令表（单一事实来源）：help 总览只列命令名；help <命令> 展示单条用法与参数。
@@ -56,6 +58,8 @@ const opt = (name: string, type: string, desc: string): CmdParam => ({ name, typ
 const COMMANDS: CmdSpec[] = [
   { name: "get_model_graph", group: G_READ, summary: "获取当前模型图", usage: "get_model_graph", params: [] },
   { name: "list_nodes", group: G_READ, summary: "列出全部节点及 id", usage: "list_nodes", params: [] },
+  { name: "list_canvases", group: G_READ, summary: "列出全部画布（第几个/名称/节点数）", usage: "list_canvases", params: [] },
+  { name: "get_canvas_graph", group: G_READ, summary: "看指定画布的结构与维度（不切换焦点）", usage: "get_canvas_graph --index 2", params: [opt("index", "int", "第几个画布（从 1 开始）"), opt("name", "string", "画布名称"), opt("id", "int", "画布 id")] },
   { name: "get_shapes", group: G_READ, summary: "查看各层输出维度", usage: "get_shapes", params: [] },
   { name: "validate_model", group: G_READ, summary: "校验结构，返回错误/警告", usage: "validate_model", params: [] },
   { name: "list_templates", group: G_READ, summary: "列出内置模板（拿 key 供 load_template）", usage: "list_templates", params: [] },
@@ -99,6 +103,14 @@ const busy = ref(false); // AI 本轮是否正在处理
 const status = ref<"idle" | "connecting" | "open" | "closed" | "error">("idle");
 const listRef = ref<HTMLElement | null>(null);
 const inputRef = ref<HTMLTextAreaElement | null>(null);
+
+// 清掉所有已挂出的「猜你想问」及其占位（用户继续下一句时调用）
+function clearSuggestions() {
+  for (const m of messages.value) {
+    if (m.suggestions) m.suggestions = undefined;
+    if (m.suggestLoading) m.suggestLoading = false;
+  }
+}
 
 // —— help 卡片辅助 ——（topic 存于 help 消息的 text 字段）
 function helpCommand(topic: string): CmdSpec | undefined {
@@ -269,9 +281,23 @@ async function onMessage(event: MessageEvent) {
     scrollToBottom();
     if (msg.final) {
       turn.done = true; // 收到最终回答：思考过程折叠起来
+      turn.suggestLoading = true; // 先占位「猜你想问 · 生成中…」，建议到了再填
       busy.value = false;
       aiTurnIndex = -1; // 本回合结束，下条消息另起新卡
     }
+  } else if (msg.type === "suggestions") {
+    // 猜你想问：挂到最近一条 AI 回合气泡下方；用户已开始下一句则忽略
+    if (busy.value) return;
+    const items = Array.isArray(msg.items) ? (msg.items as unknown[]).slice(0, 3).map(String) : [];
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const m = messages.value[i];
+      if (m.role === "assistant") {
+        m.suggestions = items.length ? items : undefined;
+        m.suggestLoading = false;
+        break;
+      }
+    }
+    scrollToBottom();
   } else if (msg.type === "tool_request") {
     const command = String(msg.command ?? "");
     const args = (msg.args as Record<string, unknown>) || {};
@@ -322,6 +348,7 @@ function enterAi() {
   messages.value = []; // 切换模式时清空命令台内容
   aiTurnIndex = -1;
   streamOpen = false;
+  clearSuggestions();
   push("note", "已进入 AI 对话：直接说你想做什么，例如“帮我建一个 LeNet 并解释”。点上方「退出 AI」可回到命令模式。");
   void connect().catch(() => {});
 }
@@ -332,6 +359,7 @@ function exitAi() {
   messages.value = []; // 切换模式时清空命令台内容
   aiTurnIndex = -1;
   streamOpen = false;
+  clearSuggestions();
   push("note", "已退出 AI 对话，回到命令模式。输入 help 查看命令，或再次输入 agent 呼出 AI。");
 }
 
@@ -345,6 +373,7 @@ async function sendToAi(text: string) {
   busy.value = true;
   aiTurnIndex = -1; // 新一轮提问：下一段助手输出另起新卡
   streamOpen = false;
+  clearSuggestions(); // 发新问题时清掉上一轮的追问建议
   try {
     await connect();
   } catch {
@@ -362,6 +391,14 @@ async function sendToAi(text: string) {
       base_url: baseUrl.value.trim() || undefined,
     })
   );
+}
+
+// 点选一条「猜你想问」→ 作为下一条用户消息发送
+function applySuggestion(q: string) {
+  if (busy.value) return;
+  clearSuggestions();
+  push("user", q);
+  void sendToAi(q);
 }
 
 // —— 统一提交：按当前模式分流 ——
@@ -676,6 +713,25 @@ watch(
             <div v-if="finalText(m)" class="assistant-md" v-html="renderMarkdown(finalText(m))"></div>
             <!-- 无 steps 的简单消息（如错误提示） -->
             <div v-else-if="!turnSteps(m).length && m.text" class="assistant-md" v-html="renderMarkdown(m.text)"></div>
+            <!-- 猜你想问：挂在本回复下方；标签单独一行，胶囊从下一行起；点一下即发送 -->
+            <div v-if="m.suggestions && m.suggestions.length" class="assistant-turn-suggest">
+              <span class="assistant-suggest-label">
+                <iconify-icon icon="mdi:lightbulb-on-outline"></iconify-icon> 猜你想问
+              </span>
+              <div class="assistant-suggest-chips">
+                <button
+                  v-for="(s, si) in m.suggestions"
+                  :key="si"
+                  class="assistant-suggest-chip"
+                  :title="s"
+                  @click="applySuggestion(s)"
+                >{{ s }}</button>
+              </div>
+            </div>
+            <div v-else-if="m.suggestLoading" class="assistant-turn-suggest loading">
+              <iconify-icon icon="mdi:lightbulb-on-outline"></iconify-icon>
+              猜你想问 · 生成中…
+            </div>
           </div>
         </div>
         <template v-else>{{ m.text }}</template>

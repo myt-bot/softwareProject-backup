@@ -122,6 +122,61 @@ export async function executeAssistantCommand(
           result: activeCanvas().nodes.map(n => ({ id: n.id, type: n.type, title: n.title })),
         };
 
+      case "list_canvases": {
+        const activeId = activeCanvas().id;
+        return {
+          ok: true,
+          result: store.canvases.map((c, i) => ({
+            index: i + 1, // 第几个（从 1 开始）
+            id: c.id,
+            name: c.name,
+            node_count: c.nodes.length,
+            active: c.id === activeId, // 是否当前焦点画布
+          })),
+        };
+      }
+
+      case "get_canvas_graph": {
+        // 读取指定画布的结构与维度，不改变用户当前焦点。用 index / name / id 之一定位。
+        const canvases = store.canvases;
+        let target: (typeof canvases)[number] | undefined;
+        if (args.index != null) {
+          const i = Math.trunc(Number(args.index));
+          if (!Number.isFinite(i) || i < 1 || i > canvases.length) {
+            return { ok: false, error: `没有第 ${args.index} 个画布（当前共 ${canvases.length} 个）` };
+          }
+          target = canvases[i - 1];
+        } else if (args.name != null && String(args.name).trim()) {
+          const name = String(args.name).trim();
+          const matches = canvases.filter(c => c.name === name);
+          if (!matches.length) return { ok: false, error: `没有名为「${name}」的画布` };
+          if (matches.length > 1) {
+            return { ok: false, error: `有 ${matches.length} 个画布都叫「${name}」，请改用 index 指定第几个` };
+          }
+          target = matches[0];
+        } else if (args.id != null) {
+          target = canvases.find(c => c.id === Number(args.id));
+          if (!target) return { ok: false, error: `没有 id=${args.id} 的画布` };
+        } else {
+          return { ok: false, error: "需要提供 index（第几个）/ name（画布名）/ id 之一" };
+        }
+        const graph = getCurrentModelGraph(target);
+        const v = await validateModelStructure(graph);
+        return {
+          ok: true,
+          result: {
+            index: canvases.indexOf(target) + 1,
+            id: target.id,
+            name: target.name,
+            graph,
+            shapes: v.shapes || {},
+            valid: v.valid,
+            errors: v.errors,
+            warnings: v.warnings,
+          },
+        };
+      }
+
       case "get_shapes": {
         const r = await validateModelStructure(getCurrentModelGraph());
         return { ok: true, result: r.shapes || {} };
