@@ -13,8 +13,8 @@
       <div class="guide-step">
         <span class="guide-step-num">2</span>
         <div>
-          <strong>连接节点</strong>
-          <span>右键节点，选择“进行连线”</span>
+          <strong>连接与删除</strong>
+          <span>右键节点可连线或删除；右键连线可删除</span>
         </div>
       </div>
       <iconify-icon class="guide-arrow" icon="mdi:chevron-right"></iconify-icon>

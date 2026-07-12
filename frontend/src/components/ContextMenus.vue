@@ -22,7 +22,7 @@ const menuNodeIsContainer = computed(() => {
     id="connection-menu"
     :style="{ left: `${store.connectionMenu.x}px`, top: `${store.connectionMenu.y}px` }"
   >
-    <button id="btn-delete-connection" @click="deleteMenuConnection">
+    <button id="btn-delete-connection" class="text-rose" @click="deleteMenuConnection">
       <iconify-icon icon="mdi:link-variant-off"></iconify-icon>
       删除连线
     </button>
