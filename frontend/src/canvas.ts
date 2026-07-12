@@ -1268,6 +1268,8 @@ export function cancelPendingConnection() {
 // —————————————————————————————————————————————
 
 function showConnectionMenu(clientX: number, clientY: number, from: string, to: string) {
+  // 右键连线时只保留连线菜单，避免与节点菜单同时显示。
+  hideNodeMenu();
   store.menuConnection = [from, to];
   store.connectionMenu = { visible: true, x: clientX, y: clientY };
 }
