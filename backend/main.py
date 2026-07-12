@@ -18,6 +18,7 @@ from . import auth as auth_mgr
 from . import projects as project_mgr
 from .cloud_training import router as cloud_training_router
 from .assistant import router as assistant_router
+from .teaching_api import router as teaching_router
 from .schemas import (
     ProjectCreateRequest,
     ProjectTemplateCreateRequest,
@@ -71,6 +72,7 @@ def validate_structure(payload: Dict[str, Any] = Body(...)):
 
 app.include_router(cloud_training_router)
 app.include_router(assistant_router)
+app.include_router(teaching_router)
 
 
 # M1 认证路由（编写者：甘淞文）
