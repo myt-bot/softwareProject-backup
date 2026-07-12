@@ -4,6 +4,7 @@ import { ui } from "../store";
 import { buildAssistantSnapshot, executeAssistantCommand } from "../assistant";
 import { renderMarkdown } from "../markdown";
 import PetMascot from "./PetMascot.vue";
+import assistantHelp from "../data/assistantHelp.json";
 
 // 后端地址（与 api/client 一致）：生产由 VITE_API_BASE_URL 注入
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || "http://127.0.0.1:8000";
@@ -46,57 +47,12 @@ interface ChatMessage {
   suggestLoading?: boolean; // 追问正在生成（回答刚结束、建议还没到，先占位）
 }
 
-// 命令表（单一事实来源）：help 总览只列命令名；help <命令> 展示单条用法与参数。
+// 命令表 / 层参数 / 宠物气泡等文案已抽到 data/assistantHelp.json，改文案无需动组件代码。
 interface CmdParam { name: string; type: string; required: boolean; desc: string }
 interface CmdSpec { name: string; group: string; summary: string; usage: string; params: CmdParam[] }
-const G_READ = "只读 · 了解现状";
-const G_WRITE = "画布 / 训练操作";
-const G_META = "AI · 帮助";
-const COMMAND_GROUPS = [G_READ, G_WRITE, G_META];
-const req = (name: string, type: string, desc: string): CmdParam => ({ name, type, required: true, desc });
-const opt = (name: string, type: string, desc: string): CmdParam => ({ name, type, required: false, desc });
-const COMMANDS: CmdSpec[] = [
-  { name: "get_model_graph", group: G_READ, summary: "获取当前模型图", usage: "get_model_graph", params: [] },
-  { name: "list_nodes", group: G_READ, summary: "列出全部节点及 id", usage: "list_nodes", params: [] },
-  { name: "list_canvases", group: G_READ, summary: "列出全部画布（第几个/名称/节点数）", usage: "list_canvases", params: [] },
-  { name: "get_canvas_graph", group: G_READ, summary: "看指定画布的结构与维度（不切换焦点）", usage: "get_canvas_graph --index 2", params: [opt("index", "int", "第几个画布（从 1 开始）"), opt("name", "string", "画布名称"), opt("id", "int", "画布 id")] },
-  { name: "get_shapes", group: G_READ, summary: "查看各层输出维度", usage: "get_shapes", params: [] },
-  { name: "validate_model", group: G_READ, summary: "校验结构，返回错误/警告", usage: "validate_model", params: [] },
-  { name: "list_templates", group: G_READ, summary: "列出内置模板（拿 key 供 load_template）", usage: "list_templates", params: [] },
-  { name: "get_train_config", group: G_READ, summary: "查看当前训练配置", usage: "get_train_config", params: [] },
-  { name: "get_training_result", group: G_READ, summary: "查看训练结果与逐轮指标", usage: "get_training_result", params: [] },
-  { name: "get_system_status", group: G_READ, summary: "查看本机 Agent/设备/存储等状态", usage: "get_system_status", params: [] },
-  { name: "load_template", group: G_WRITE, summary: "载入内置模板（替换当前模型）", usage: "load_template --key lenet", params: [req("key", "string", "模板键，见 list_templates")] },
-  { name: "add_node", group: G_WRITE, summary: "新增一个层节点", usage: "add_node --type Conv2D --params '{\"out_channels\":16}'", params: [req("type", "string", "层类型，见 help layers"), opt("params", "JSON", "层参数，用单引号整体包住，见 help layers")] },
-  { name: "connect_nodes", group: G_WRITE, summary: "连接两个节点", usage: "connect_nodes --source conv2d_1 --target relu_1", params: [req("source", "string", "源节点 id，见 list_nodes"), req("target", "string", "目标节点 id")] },
-  { name: "set_param", group: G_WRITE, summary: "修改节点的一个参数", usage: "set_param --node_id linear_1 --name out_features --value 10", params: [req("node_id", "string", "节点 id"), req("name", "string", "参数名"), req("value", "any", "参数值；数组/对象用单引号，如 --value '[1,16,16]'")] },
-  { name: "delete_node", group: G_WRITE, summary: "删除节点及其连线", usage: "delete_node --node_id dropout_1", params: [req("node_id", "string", "节点 id")] },
-  { name: "set_dataset", group: G_WRITE, summary: "切换数据集（自动同步 Input 维度）", usage: "set_dataset --name FashionMNIST", params: [req("name", "string", "数据集名，如 MNIST / FashionMNIST / CIFAR10")] },
-  { name: "set_train_config", group: G_WRITE, summary: "改训练超参数（任意项）", usage: "set_train_config --epochs 10 --optimizer adam", params: [opt("epochs", "int", "训练轮次 1~100"), opt("batch_size", "int", "批大小，正整数"), opt("rate", "number", "学习率，正数"), opt("optimizer", "string", "sgd/adam/adamw/rmsprop/adagrad/adadelta"), opt("loss_fn", "string", "cross_entropy/nll/mse/l1/smooth_l1"), opt("device", "string", "cpu 或 cuda")] },
-  { name: "auto_layout", group: G_WRITE, summary: "自动整理画布布局", usage: "auto_layout", params: [] },
-  { name: "export_code", group: G_WRITE, summary: "导出 PyTorch 代码（需本机 Agent）", usage: "export_code", params: [] },
-  { name: "start_training", group: G_WRITE, summary: "发起训练（需本机 Agent）", usage: "start_training", params: [opt("config", "JSON", "训练配置覆盖，如 '{\"epochs\":10}'")] },
-  { name: "stop_training", group: G_WRITE, summary: "停止当前训练（需本机 Agent）", usage: "stop_training", params: [] },
-  { name: "agent", group: G_META, summary: "进入 AI 对话，用自然语言让 AI 帮你", usage: "agent", params: [] },
-  { name: "clear", group: G_META, summary: "清空命令台内容", usage: "clear", params: [] },
-  { name: "help", group: G_META, summary: "help <命令> 看用法参数；help layers 看层参数", usage: "help", params: [opt("topic", "string", "命令名 / layers / 层类型")] },
-];
-
-// 各层类型可设置的参数（用于 add_node 的 --params 与 set_param 的 --name/--value）
-const LAYER_PARAMS = [
-  { type: "Input", params: "shape：数组 [通道,高,宽]，如 [1,28,28]" },
-  { type: "Conv2D", params: "out_channels / kernel_size / stride / padding：整数" },
-  { type: "MaxPooling", params: "kernel_size / stride / padding：整数" },
-  { type: "Linear", params: "out_features：整数（末层设为类别数）" },
-  { type: "Dropout", params: "p：0~1 小数" },
-  { type: "LSTM", params: "hidden_size / num_layers：整数；return_sequences / bidirectional：true|false" },
-  { type: "TransformerEncoder", params: "d_model / num_heads / num_layers / dim_feedforward：整数；dropout：小数" },
-  { type: "SelfAttention", params: "embed_dim / num_heads：整数；dropout：小数" },
-  { type: "Seq2Seq", params: "hidden_size / output_size / target_length / num_layers：整数" },
-  { type: "VAE", params: "latent_dim / output_features：整数" },
-  { type: "GraphConv", params: "out_features：整数" },
-  { type: "ReLU / Flatten / Add / Output", params: "无可设参数" },
-];
+const COMMAND_GROUPS = assistantHelp.commandGroups;
+const COMMANDS = assistantHelp.commands as CmdSpec[];
+const LAYER_PARAMS = assistantHelp.layerParams;
 const messages = ref<ChatMessage[]>([]);
 const input = ref("");
 const busy = ref(false); // AI 本轮是否正在处理
@@ -465,13 +421,7 @@ const showPet = computed(
 
 // 长时间不开口时，宠物头顶轮换冒气泡，提示用户可以做什么
 const petBubble = ref<string | null>(null);
-const PET_NUDGES = [
-  "试试说：帮我搭一个 LeNet 🧱",
-  "问我：我这个模型有什么问题？",
-  "想换数据集？跟我说一声就行～",
-  "让我帮你把模型跑起来吧！",
-  "不知道从哪下手？让我推荐个模型 ✨",
-];
+const PET_NUDGES = assistantHelp.petNudges;
 const PET_FIRST_MS = 3500; // 进入后先安静一会
 const PET_SHOW_MS = 4500; // 一句气泡停留时长
 const PET_HIDE_MS = 3800; // 两句之间的空档

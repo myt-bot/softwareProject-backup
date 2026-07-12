@@ -22,7 +22,7 @@ function detectOs(): OsKey {
 
 const selectedOs = ref<OsKey>(detectOs());
 
-// 下载链接内含用户令牌与目标平台：下载的应用已绑定账号，双击即自动连接
+// 下载链接内含用户令牌与目标平台：下载的应用已绑定账号，启动后自动连接
 const downloadUrl = computed(() => agentDownloadUrl(auth.token ?? "", selectedOs.value));
 
 const gpuName = computed(() => {
@@ -33,7 +33,7 @@ const gpuName = computed(() => {
 // 首次准备环境需下载的依赖大小（CUDA 版 PyTorch 较大；macOS 默认版较小）
 const depsSize = computed(() => (selectedOs.value === "macos" ? "约 200 MB" : "约 2–3 GB"));
 
-// 长期有效的 Agent 令牌（用于手动更新 config.json）
+// 长期有效的 Agent 令牌（令牌失效时在应用界面里粘贴更新）
 const agentToken = ref("");
 const tokenDays = ref(365);
 
@@ -55,7 +55,7 @@ async function copyToken() {
   if (!agentToken.value) return;
   try {
     await navigator.clipboard.writeText(agentToken.value);
-    showToast("success", "令牌已复制，粘贴到应用 config.json 的 token 字段即可。");
+    showToast("success", "令牌已复制，粘贴到应用界面的令牌输入框即可。");
   } catch {
     showToast("warning", "当前浏览器不支持自动复制，请手动选中复制。");
   }
@@ -123,12 +123,13 @@ function close() {
         <!-- 使用步骤（无需手敲命令） -->
         <ol class="agent-steps">
           <li>
-            <strong>下载并解压</strong>上面的训练应用压缩包。
+            <strong>下载并解压</strong>上面的压缩包（首次请照包内 <code>README</code> 说明完成准备）。
           </li>
           <li>
-            <strong>双击运行</strong>应用（Windows 为 .exe、macOS 为 .app），在界面里点
-            <strong>「准备训练环境」</strong>。首次会下载并安装 PyTorch 等依赖
-            （<strong>{{ depsSize }}</strong>，较慢、只需一次），装好后自动连接；之后每次打开直接连接。
+            <strong>双击启动</strong>：Windows 双击 <strong>「启动.bat」</strong>、macOS / Linux 双击
+            <strong>「启动.command」</strong>。弹出界面后点 <strong>「准备训练环境」</strong> 下载依赖
+            （首次含 PyTorch，<strong>{{ depsSize }}</strong>，较慢、只需一次），再点
+            <strong>「启动并连接云端」</strong>；之后每次启动直接连接。
           </li>
           <li>
             连接成功后，本页顶部会显示「本机训练已连接」，即可进行结构校验、训练与代码导出。

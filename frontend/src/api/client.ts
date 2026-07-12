@@ -29,13 +29,13 @@ export function clientWebSocketUrl(token: string): string {
   return `${wsBase}/client/ws?token=${encodeURIComponent(token)}`;
 }
 
-// 本机训练应用的下载地址（内含用户令牌，双击即自动连接绑定账号）
+// 本机训练应用的下载地址（内含用户令牌，启动后自动连接绑定账号）
 export function agentDownloadUrl(token: string, platform?: string): string {
   const base = `${API_BASE_URL}/agent/download?token=${encodeURIComponent(token)}`;
   return platform ? `${base}&platform=${encodeURIComponent(platform)}` : base;
 }
 
-// 获取长期有效的 Agent 令牌（供用户手动更新已下载应用 config.json 的 token）
+// 获取长期有效的 Agent 令牌（供用户在应用界面里粘贴更新令牌）
 export async function fetchAgentToken(token: string): Promise<{ token: string; expires_days?: number }> {
   return request(`/agent/token?token=${encodeURIComponent(token)}`);
 }
