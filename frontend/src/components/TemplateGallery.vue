@@ -4,6 +4,8 @@ import { loadTemplateToCanvas } from "../actions";
 import { templateLibrary, ui } from "../store";
 import type { TemplateMeta } from "../types";
 
+const emit = defineEmits<{ selected: [] }>();
+
 // 模板分类的展示样式（图标 + 中文标签 + 颜色）
 const FAMILY_STYLES: Record<string, { icon: string; label: string; color: string }> = {
   feedforward: { icon: "mdi:ray-start-end", label: "全连接", color: "cyan" },
@@ -56,8 +58,11 @@ function close() {
   ui.templateGalleryOpen = false;
 }
 
-function pick(template: TemplateMeta) {
-  void loadTemplateToCanvas(template.key, template.name);
+async function pick(template: TemplateMeta) {
+  await loadTemplateToCanvas(template.key, template.name);
+  // loadTemplateToCanvas 仅在加载成功后关闭窗口。
+  // 因此只有真正选择并成功加载模板时，才通知首页进入工作台。
+  if (!ui.templateGalleryOpen) emit("selected");
 }
 </script>
 

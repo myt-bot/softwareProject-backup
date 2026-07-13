@@ -4,6 +4,8 @@ import { fetchMyProjects, loadProjectToCanvas, removeProject } from "../actions"
 import { ui } from "../store";
 import type { ProjectMeta } from "../types";
 
+const emit = defineEmits<{ selected: [] }>();
+
 const projects = ref<ProjectMeta[]>([]);
 const loading = ref(false);
 const confirmingId = ref<string | null>(null);
@@ -38,6 +40,12 @@ function formatTime(iso?: string) {
 
 function layerCount(project: ProjectMeta) {
   return project.model_graph?.layers?.length ?? 0;
+}
+
+async function openProject(project: ProjectMeta) {
+  await loadProjectToCanvas(project);
+  // 只有项目成功加载并关闭列表后才进入工作台；直接关闭窗口仍停留在首页。
+  if (!ui.projectsModalOpen) emit("selected");
 }
 
 async function confirmDelete(project: ProjectMeta) {
@@ -86,7 +94,7 @@ async function confirmDelete(project: ProjectMeta) {
               <span class="project-meta">{{ layerCount(project) }} 层 · 更新于 {{ formatTime(project.updated_at) }}</span>
             </div>
             <div class="project-actions">
-              <button class="secondary-button" @click="loadProjectToCanvas(project)">
+              <button class="secondary-button" @click="openProject(project)">
                 <iconify-icon icon="mdi:open-in-app"></iconify-icon>
                 加载
               </button>
