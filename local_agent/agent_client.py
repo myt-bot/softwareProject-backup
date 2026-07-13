@@ -38,6 +38,10 @@ class AgentState:
 
 state = AgentState()
 
+# 与云端 backend.cloud_training.AGENT_REPLACED_CLOSE_CODE 保持一致。收到该关闭码
+# 表示同账号已有更新的 Agent 会话，当前实例应停止重连，避免两个实例反复互相覆盖。
+AGENT_REPLACED_CLOSE_CODE = 4001
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -376,6 +380,9 @@ async def connect_to_cloud_server(
                 finally:
                     heartbeat.cancel()
         except Exception as exc:
+            if getattr(exc, "code", None) == AGENT_REPLACED_CLOSE_CODE:
+                print("[agent] 当前连接已被同账号的新 Agent 会话替换，停止自动重连。", flush=True)
+                return
             print(f"[agent] 与云端连接中断，将在 3 秒后重连：{exc}")
         finally:
             state.websocket = None

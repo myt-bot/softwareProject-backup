@@ -16,6 +16,7 @@ import asyncio
 import hashlib
 import io
 import json
+import logging
 import os
 import py_compile
 import sys
@@ -35,6 +36,8 @@ from .security import create_access_token, verify_access_token
 
 router = APIRouter(tags=["cloud-training"])
 
+logger = logging.getLogger(__name__)
+
 # 当前云端提供的训练运行时版本；Agent 据此判断是否需要下载/更新本机训练代码
 RUNTIME_VERSION = "1.0.0"
 MIN_AGENT_VERSION = "1.0.0"
@@ -52,6 +55,31 @@ _PYC_PYTHON = f"{sys.version_info.major}.{sys.version_info.minor}"
 
 # 注入本机 Agent 的令牌有效期（Agent 是长期后台连接，需长期有效，取一年）
 AGENT_TOKEN_EXPIRE_MINUTES = 60 * 24 * 365
+
+
+def _positive_float_env(name: str, default: float) -> float:
+    """读取正浮点环境变量；非法值安全回退到默认值。"""
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+# 本机 Agent 默认每 15 秒发送一次 heartbeat。连续约 3 个周期未收到心跳即认为
+# 会话失效；扫描周期独立配置，便于测试和不同部署环境调优。
+AGENT_HEARTBEAT_TIMEOUT_SECONDS = _positive_float_env(
+    "AGENT_HEARTBEAT_TIMEOUT_SECONDS", 45.0
+)
+AGENT_HEARTBEAT_SWEEP_INTERVAL_SECONDS = _positive_float_env(
+    "AGENT_HEARTBEAT_SWEEP_INTERVAL_SECONDS", 10.0
+)
+AGENT_WEBSOCKET_CLOSE_TIMEOUT_SECONDS = _positive_float_env(
+    "AGENT_WEBSOCKET_CLOSE_TIMEOUT_SECONDS", 2.0
+)
+# 4xxx 为应用自定义 WebSocket 关闭码。被新会话替换属于永久性冲突，旧 Agent
+# 收到后应停止自动重连；心跳超时仍用 1001，使同一个 Agent 可以自动恢复。
+AGENT_REPLACED_CLOSE_CODE = 4001
 
 # 下载版应用的使用说明（随包附带）
 _AGENT_README = """\
@@ -229,6 +257,10 @@ class Registry:
         self.clients: dict[str, set[WebSocket]] = {}
         # 训练任务记录（job_id -> record）
         self.jobs: dict[str, dict[str, Any]] = {}
+        # Agent RPC 的定向回复路由：云端代理 request_id -> 发起请求的浏览器连接。
+        # 训练进度仍广播给所有标签页；只有 validate/devices/export/list_dir 这类
+        # 请求-响应消息需要回到原始标签页。
+        self.agent_requests: dict[str, dict[str, Any]] = {}
 
     def add_client(self, user_id: str, websocket: WebSocket) -> None:
         self.clients.setdefault(user_id, set()).add(websocket)
@@ -239,6 +271,29 @@ class Registry:
             conns.discard(websocket)
             if not conns:
                 self.clients.pop(user_id, None)
+        # 标签页断开后清理它尚未完成的 Agent RPC 路由。
+        for proxy_id, route in list(self.agent_requests.items()):
+            if route.get("websocket") is websocket:
+                self.agent_requests.pop(proxy_id, None)
+
+    def register_agent_request(
+        self,
+        user_id: str,
+        websocket: WebSocket,
+        client_request_id: str,
+    ) -> str:
+        """登记一次 Agent RPC，并返回不会与其它标签页冲突的代理 ID。"""
+        proxy_id = f"agent_req_{uuid.uuid4().hex}"
+        self.agent_requests[proxy_id] = {
+            "user_id": user_id,
+            "websocket": websocket,
+            "client_request_id": client_request_id,
+            "created_at": time.time(),
+        }
+        return proxy_id
+
+    def pop_agent_request(self, proxy_id: str) -> Optional[dict[str, Any]]:
+        return self.agent_requests.pop(proxy_id, None)
 
     async def broadcast_to_clients(self, user_id: str, message: dict[str, Any]) -> None:
         """把一条消息推送给该用户所有在线浏览器标签页。"""
@@ -250,6 +305,107 @@ class Registry:
 
 
 registry = Registry()
+
+
+# —————————————————————————————————————————————
+# Agent 心跳过期清理器
+# —————————————————————————————————————————————
+
+_heartbeat_cleanup_task: Optional[asyncio.Task[None]] = None
+
+
+async def cleanup_stale_agents(
+    *,
+    now: Optional[float] = None,
+    timeout_seconds: Optional[float] = None,
+) -> list[str]:
+    """移除超过心跳时限的 Agent，并通知该用户的浏览器。
+
+    清理前后都用对象身份检查当前注册会话，避免旧会话超时清理与新 Agent
+    重连发生竞态时误删或错误广播新会话离线。
+
+    返回本轮实际移除的 user_id 列表，便于测试与运行监控。
+    """
+    checked_at = time.time() if now is None else now
+    timeout = (
+        AGENT_HEARTBEAT_TIMEOUT_SECONDS
+        if timeout_seconds is None
+        else max(0.0, timeout_seconds)
+    )
+    removed: list[str] = []
+
+    # 快照遍历，避免清理过程中注册表发生变化导致迭代异常。
+    for user_id, session in list(registry.agents.items()):
+        if checked_at - session.last_heartbeat_at <= timeout:
+            continue
+
+        # 只有该过期对象仍是当前会话时才移除；新连接可能已经覆盖它。
+        if registry.agents.get(user_id) is not session:
+            continue
+        registry.agents.pop(user_id, None)
+        removed.append(user_id)
+
+        logger.warning(
+            "Agent heartbeat expired: user_id=%s agent_id=%s age=%.1fs",
+            user_id,
+            session.agent_id or "<unregistered>",
+            checked_at - session.last_heartbeat_at,
+        )
+
+        # 主动关闭半开连接，促使本机 Agent 的重连循环尽快建立新会话。
+        try:
+            await asyncio.wait_for(
+                session.websocket.close(code=1001, reason="Agent 心跳超时"),
+                timeout=AGENT_WEBSOCKET_CLOSE_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Failed to close stale Agent websocket: user_id=%s error=%r",
+                user_id,
+                exc,
+            )
+
+        # close() 期间可能已有新 Agent 接管。仅在仍无当前会话时广播离线，
+        # 避免浏览器在新 Agent 已上线后收到一条过期的 offline 消息。
+        if registry.agents.get(user_id) is None:
+            await registry.broadcast_to_clients(
+                user_id, {"type": "agent_status", "online": False}
+            )
+
+    return removed
+
+
+async def _heartbeat_cleanup_loop() -> None:
+    """后台循环：按固定间隔扫描并清理过期 Agent。"""
+    while True:
+        await asyncio.sleep(AGENT_HEARTBEAT_SWEEP_INTERVAL_SECONDS)
+        try:
+            await cleanup_stale_agents()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # 单轮异常不能终止后续清理；保留堆栈便于生产排障。
+            logger.exception("Agent heartbeat cleanup sweep failed")
+
+
+async def start_agent_heartbeat_cleanup() -> None:
+    """随 FastAPI 启动心跳清理后台任务（幂等）。"""
+    global _heartbeat_cleanup_task
+    if _heartbeat_cleanup_task is None or _heartbeat_cleanup_task.done():
+        _heartbeat_cleanup_task = asyncio.create_task(
+            _heartbeat_cleanup_loop(), name="agent-heartbeat-cleanup"
+        )
+
+
+async def stop_agent_heartbeat_cleanup() -> None:
+    """随 FastAPI 关闭清理后台任务，避免遗留 Task。"""
+    global _heartbeat_cleanup_task
+    task = _heartbeat_cleanup_task
+    _heartbeat_cleanup_task = None
+    if task is None:
+        return
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
 
 
 # —————————————————————————————————————————————
@@ -457,8 +613,27 @@ async def agent_websocket_endpoint(websocket: WebSocket, token: Optional[str] = 
 
     await websocket.accept()
     session = AgentSession(user_id, websocket)
+    previous_session = registry.agents.get(user_id)
     registry.agents[user_id] = session
     await websocket.send_json({"type": "welcome", "runtime_version": RUNTIME_VERSION})
+
+    # 同一用户只允许一个当前 Agent。先原子替换注册表，再关闭旧连接；这样旧连接
+    # 的 finally 不会误删新会话，而主动 close 会促使旧 Agent 尽快进入重连流程。
+    if previous_session is not None and previous_session is not session:
+        try:
+            await asyncio.wait_for(
+                previous_session.websocket.close(
+                    code=AGENT_REPLACED_CLOSE_CODE,
+                    reason="已被新的 Agent 会话替换",
+                ),
+                timeout=AGENT_WEBSOCKET_CLOSE_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Failed to close replaced Agent websocket: user_id=%s error=%r",
+                user_id,
+                exc,
+            )
 
     try:
         while True:
@@ -479,6 +654,17 @@ async def _handle_agent_message(session: AgentSession, message: dict[str, Any]) 
     """处理本机 Agent 上报的一条消息。"""
     msg_type = message.get("type")
     user_id = session.user_id
+
+    # 新连接覆盖旧连接后，旧 WebSocket 可能仍有已在途消息。任何来自非当前
+    # 会话的消息都必须丢弃，防止它继续更新任务或向浏览器推送状态。
+    if registry.agents.get(user_id) is not session:
+        logger.info(
+            "Ignored message from replaced Agent session: user_id=%s agent_id=%s type=%s",
+            user_id,
+            session.agent_id or "<unregistered>",
+            msg_type,
+        )
+        return
 
     if msg_type == "hello":
         session.agent_id = message.get("agent_id") or f"agent_{uuid.uuid4().hex[:8]}"
@@ -513,8 +699,24 @@ async def _handle_agent_message(session: AgentSession, message: dict[str, Any]) 
         return
 
     if msg_type == "agent_response":
-        # 校验/设备/导出等请求-响应的回执，原样中转给浏览器
-        await registry.broadcast_to_clients(user_id, message)
+        # 校验/设备/导出等 RPC 只回复最初发起请求的浏览器标签页。
+        proxy_id = str(message.get("request_id") or "")
+        route = registry.pop_agent_request(proxy_id)
+        if route is None or route.get("user_id") != user_id:
+            logger.info(
+                "Ignored unmatched Agent response: user_id=%s request_id=%s",
+                user_id,
+                proxy_id,
+            )
+            return
+
+        response = dict(message)
+        response["request_id"] = route.get("client_request_id", "")
+        target = route.get("websocket")
+        try:
+            await target.send_json(response)
+        except Exception:
+            registry.remove_client(user_id, target)
         return
 
 
@@ -541,7 +743,7 @@ async def client_websocket_endpoint(websocket: WebSocket, token: Optional[str] =
     try:
         while True:
             message = await websocket.receive_json()
-            await _handle_client_message(user_id, message)
+            await _handle_client_message(user_id, websocket, message)
     except WebSocketDisconnect:
         pass
     except Exception:
@@ -550,7 +752,11 @@ async def client_websocket_endpoint(websocket: WebSocket, token: Optional[str] =
         registry.remove_client(user_id, websocket)
 
 
-async def _handle_client_message(user_id: str, message: dict[str, Any]) -> None:
+async def _handle_client_message(
+    user_id: str,
+    websocket: WebSocket,
+    message: dict[str, Any],
+) -> None:
     """处理浏览器上行消息（校验/设备/导出等需要 Agent 执行的请求）。"""
     if message.get("type") != "agent_request":
         return
@@ -558,8 +764,8 @@ async def _handle_client_message(user_id: str, message: dict[str, Any]) -> None:
     request_id = message.get("request_id", "")
     agent = registry.agents.get(user_id)
     if agent is None:
-        # 无在线 Agent，直接回错误响应给浏览器
-        await registry.broadcast_to_clients(user_id, {
+        # 无在线 Agent，只回复发起请求的标签页。
+        await websocket.send_json({
             "type": "agent_response",
             "request_id": request_id,
             "ok": False,
@@ -567,13 +773,23 @@ async def _handle_client_message(user_id: str, message: dict[str, Any]) -> None:
         })
         return
 
-    # 转发给该用户的本机 Agent 执行
-    await agent.send({
-        "type": "agent_request",
-        "request_id": request_id,
-        "action": message.get("action"),
-        "payload": message.get("payload", {}),
-    })
+    # 使用云端生成的代理 ID 转发，避免多个标签页生成相同 request_id 时串包。
+    proxy_id = registry.register_agent_request(user_id, websocket, request_id)
+    try:
+        await agent.send({
+            "type": "agent_request",
+            "request_id": proxy_id,
+            "action": message.get("action"),
+            "payload": message.get("payload", {}),
+        })
+    except Exception:
+        registry.pop_agent_request(proxy_id)
+        await websocket.send_json({
+            "type": "agent_response",
+            "request_id": request_id,
+            "ok": False,
+            "error": "向本机 Agent 转发请求失败，请稍后重试。",
+        })
 
 
 # —————————————————————————————————————————————

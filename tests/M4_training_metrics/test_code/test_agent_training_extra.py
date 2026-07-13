@@ -616,10 +616,14 @@ class CloudCancelAndAgentStatusTests(unittest.TestCase):
     def setUp(self):
         self.ct.registry.jobs.clear()
         self.ct.registry.agents.clear()
+        self.ct.registry.clients.clear()
+        self.ct.registry.agent_requests.clear()
 
     def tearDown(self):
         self.ct.registry.jobs.clear()
         self.ct.registry.agents.clear()
+        self.ct.registry.clients.clear()
+        self.ct.registry.agent_requests.clear()
 
     def _make_request(self):
         graph = valid_cnn_graph()
@@ -670,6 +674,130 @@ class CloudCancelAndAgentStatusTests(unittest.TestCase):
         })
         self.assertFalse(result["accepted"])
         self.assertEqual("ignored", result["status"])
+
+    def test_heartbeat_cleanup_removes_stale_agent_and_notifies_clients(self):
+        """超时 Agent 被移除、连接被关闭，并向浏览器广播离线。"""
+        websocket = mock.AsyncMock()
+        session = self.ct.AgentSession("user_1", websocket)
+        session.agent_id = "agent_stale"
+        session.last_heartbeat_at = 100.0
+        self.ct.registry.agents["user_1"] = session
+
+        with mock.patch.object(
+            self.ct.registry, "broadcast_to_clients", new=mock.AsyncMock()
+        ) as broadcast:
+            removed = asyncio.run(
+                self.ct.cleanup_stale_agents(now=200.0, timeout_seconds=45.0)
+            )
+
+        self.assertEqual(["user_1"], removed)
+        self.assertNotIn("user_1", self.ct.registry.agents)
+        websocket.close.assert_awaited_once_with(code=1001, reason="Agent 心跳超时")
+        broadcast.assert_awaited_once_with(
+            "user_1", {"type": "agent_status", "online": False}
+        )
+
+    def test_heartbeat_cleanup_keeps_fresh_agent(self):
+        """仍在心跳时限内的 Agent 不应被清理。"""
+        websocket = mock.AsyncMock()
+        session = self.ct.AgentSession("user_1", websocket)
+        session.last_heartbeat_at = 180.0
+        self.ct.registry.agents["user_1"] = session
+
+        removed = asyncio.run(
+            self.ct.cleanup_stale_agents(now=200.0, timeout_seconds=45.0)
+        )
+
+        self.assertEqual([], removed)
+        self.assertIs(session, self.ct.registry.agents["user_1"])
+        websocket.close.assert_not_awaited()
+
+    def test_heartbeat_cleanup_does_not_offline_replacement_agent(self):
+        """旧连接关闭期间若新 Agent 接管，不应把新会话广播为离线。"""
+        stale_websocket = mock.AsyncMock()
+        stale = self.ct.AgentSession("user_1", stale_websocket)
+        stale.last_heartbeat_at = 100.0
+        replacement = self.ct.AgentSession("user_1", mock.AsyncMock())
+        replacement.last_heartbeat_at = 200.0
+        self.ct.registry.agents["user_1"] = stale
+
+        async def replace_on_close(**_kwargs):
+            self.ct.registry.agents["user_1"] = replacement
+
+        stale_websocket.close.side_effect = replace_on_close
+        with mock.patch.object(
+            self.ct.registry, "broadcast_to_clients", new=mock.AsyncMock()
+        ) as broadcast:
+            removed = asyncio.run(
+                self.ct.cleanup_stale_agents(now=200.0, timeout_seconds=45.0)
+            )
+
+        self.assertEqual(["user_1"], removed)
+        self.assertIs(replacement, self.ct.registry.agents["user_1"])
+        broadcast.assert_not_awaited()
+
+    def test_replaced_agent_messages_are_ignored(self):
+        """被新会话覆盖的旧 Agent 即使还有在途消息，也不能继续更新任务。"""
+        stale = self.ct.AgentSession("user_1", mock.AsyncMock())
+        stale.agent_id = "agent_old"
+        replacement = self.ct.AgentSession("user_1", mock.AsyncMock())
+        replacement.agent_id = "agent_new"
+        self.ct.registry.agents["user_1"] = replacement
+
+        with mock.patch.object(
+            self.ct, "handle_agent_training_update"
+        ) as update, mock.patch.object(
+            self.ct.registry, "broadcast_to_clients", new=mock.AsyncMock()
+        ) as broadcast:
+            asyncio.run(self.ct._handle_agent_message(stale, {
+                "type": "training_update",
+                "job_id": "job_1",
+                "status": "running",
+            }))
+
+        update.assert_not_called()
+        broadcast.assert_not_awaited()
+
+    def test_agent_response_returns_only_to_originating_tab(self):
+        """Agent RPC 响应通过代理 request_id 定向返回，不广播到其它标签页。"""
+        agent_socket = mock.AsyncMock()
+        session = self.ct.AgentSession("user_1", agent_socket)
+        session.agent_id = "agent_current"
+        self.ct.registry.agents["user_1"] = session
+
+        first_tab = mock.AsyncMock()
+        second_tab = mock.AsyncMock()
+        self.ct.registry.add_client("user_1", first_tab)
+        self.ct.registry.add_client("user_1", second_tab)
+
+        asyncio.run(self.ct._handle_client_message(
+            "user_1",
+            first_tab,
+            {
+                "type": "agent_request",
+                "request_id": "req_from_first_tab",
+                "action": "devices",
+                "payload": {},
+            },
+        ))
+
+        forwarded = agent_socket.send_json.await_args.args[0]
+        proxy_id = forwarded["request_id"]
+        self.assertNotEqual("req_from_first_tab", proxy_id)
+
+        asyncio.run(self.ct._handle_agent_message(session, {
+            "type": "agent_response",
+            "request_id": proxy_id,
+            "ok": True,
+            "data": {"available_devices": ["cpu"]},
+        }))
+
+        first_tab.send_json.assert_awaited_once()
+        response = first_tab.send_json.await_args.args[0]
+        self.assertEqual("req_from_first_tab", response["request_id"])
+        self.assertTrue(response["ok"])
+        second_tab.send_json.assert_not_awaited()
+        self.assertNotIn(proxy_id, self.ct.registry.agent_requests)
 
 
 if __name__ == "__main__":

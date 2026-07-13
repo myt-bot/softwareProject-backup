@@ -6,6 +6,7 @@ M1（甘淞文）：用户 CRUD + 项目 CRUD + /auth/* 认证路由 + JWT 令�
 M3：模型校验、形状推导
 """
 
+from contextlib import asynccontextmanager
 from typing import Any, Dict
 
 from fastapi import Body, Depends, FastAPI
@@ -16,7 +17,11 @@ from local_agent.runtime.validator import validate_model_graph
 
 from . import auth as auth_mgr
 from . import projects as project_mgr
-from .cloud_training import router as cloud_training_router
+from .cloud_training import (
+    router as cloud_training_router,
+    start_agent_heartbeat_cleanup,
+    stop_agent_heartbeat_cleanup,
+)
 from .assistant import router as assistant_router
 from .teaching_api import router as teaching_router
 from .schemas import (
@@ -32,7 +37,17 @@ from .schemas import (
 from .security import create_access_token, get_current_user
 
 
-app = FastAPI(title="Visual Deep Learning Model Builder")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """管理云端后台任务的启动与干净退出。"""
+    await start_agent_heartbeat_cleanup()
+    try:
+        yield
+    finally:
+        await stop_agent_heartbeat_cleanup()
+
+
+app = FastAPI(title="Visual Deep Learning Model Builder", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
