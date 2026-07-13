@@ -176,6 +176,7 @@ export interface WorkCanvas {
   inFeatures: number;
   lastValidationResult: ValidationResult | null;
   validating: boolean;
+  validationRequestError: string | null;
   // 训练任务
   epochs: number;
   trainStarting: boolean;
@@ -215,6 +216,7 @@ export function createCanvas(
     inFeatures: 1024,
     lastValidationResult: null,
     validating: false,
+    validationRequestError: null,
     epochs: 1,
     trainStarting: false,
     trainingJob: null,
@@ -325,10 +327,7 @@ export function applyDatasetInputShapes(): boolean {
   for (const canvas of store.canvases) {
     const canvasChanged = setInputsToShape(canvas.nodes, shape, shapeKey);
     if (canvasChanged) {
-      canvas.validationStatus = "unvalidated";
-      canvas.nodeBadge = "none";
-      canvas.nodeErrors = {};
-      canvas.lastValidationResult = null;
+      resetValidationAfterGraphChange(canvas);
       changedAny = true;
     }
   }
@@ -703,6 +702,7 @@ export function resetValidationAfterGraphChange(canvas: WorkCanvas = activeCanva
   canvas.nodeBadge = "none";
   canvas.nodeErrors = {};
   canvas.lastValidationResult = null;
+  canvas.validationRequestError = null;
 }
 
 

@@ -7,12 +7,14 @@ import {
   fetchParameterTeaching,
   isBackendUnavailable,
 } from "../api/client";
+import { CONTAINER_ID_SEP } from "../store";
 import type {
   ErrorTeachingSuggestion,
   GraphNode,
   LayerShapeInfo,
   LayerTeaching,
   ModelGraph,
+  ModelGraphLayer,
   ModelTeachingOverview,
   ParameterTeaching,
   ValidationResult,
@@ -24,6 +26,8 @@ const props = defineProps<{
   selectedLayer: GraphNode | null;
   modelGraph: ModelGraph;
   validationResult: ValidationResult | null;
+  validationRequestError: string | null;
+  validationInProgress: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -33,6 +37,51 @@ const emit = defineEmits<{
 }>();
 
 type TeachingTab = "layer" | "parameters" | "model" | "guidance";
+
+interface GuidanceTarget {
+  layerId: string;
+  layerType: string | null;
+  originalError: string;
+  parameter: string | null;
+  currentValue: unknown;
+  expectedValue: unknown;
+  suggestedValue: unknown;
+  isContainerInternal: boolean;
+}
+
+interface GuidanceValues {
+  parameter: string | null;
+  currentValue: unknown;
+  expectedValue: unknown;
+  suggestedValue: unknown;
+}
+
+interface GuidanceValueSummary extends GuidanceValues {
+  hasValues: boolean;
+  consistent: boolean;
+}
+
+interface GuidanceGroup {
+  category: string;
+  severity: string;
+  title: string;
+  reason: string;
+  suggestions: string[];
+  related_layers: string[];
+  related_parameters: string[];
+  targets: GuidanceTarget[];
+  valueSamples: GuidanceValues[];
+  valueSummary: GuidanceValueSummary;
+}
+
+interface ParsedLayerReference {
+  layerId: string;
+  layerType: string | null;
+}
+
+interface ResolvedLayerLocation {
+  isContainerInternal: boolean;
+}
 
 const activeTab = ref<TeachingTab>("layer");
 
@@ -46,7 +95,8 @@ const layerTeaching = ref<LayerTeaching | null>(null);
 const selectedParameter = ref<string | null>(null);
 const parameterTeaching = ref<ParameterTeaching | null>(null);
 const modelOverview = ref<ModelTeachingOverview | null>(null);
-const errorSuggestions = ref<ErrorTeachingSuggestion[]>([]);
+const errorSuggestions = ref<GuidanceGroup[]>([]);
+const currentTargetIndexes = ref<Record<string, number>>({});
 const layerLoading = ref(false);
 const parameterLoading = ref(false);
 const modelLoading = ref(false);
@@ -61,8 +111,11 @@ let layerRequestId = 0;
 let parameterRequestId = 0;
 let modelRequestId = 0;
 let guidanceRequestId = 0;
+let loadedGuidanceResult: ValidationResult | null = null;
+let observedGuidanceResult: ValidationResult | null | undefined;
 
 const parameters = computed(() => Object.keys(props.selectedLayer?.params ?? {}));
+const validationRequestMessage = computed(() => props.validationRequestError?.trim() ?? "");
 const currentParameterValue = computed(() => {
   if (!props.selectedLayer || !selectedParameter.value) return undefined;
   return props.selectedLayer.params[selectedParameter.value];
@@ -83,8 +136,56 @@ function displayValue(value: unknown): string {
   }
 }
 
-function findModelLayerType(layerId: string): string | null {
-  return props.modelGraph.layers.find(layer => layer.id === layerId)?.type ?? null;
+function findModelLayer(layerId: string): ModelGraphLayer | null {
+  const directLayer = props.modelGraph.layers.find(layer => layer.id === layerId);
+  if (directLayer) return directLayer;
+  if (!layerId.includes(CONTAINER_ID_SEP)) return null;
+
+  const path = layerId.split(CONTAINER_ID_SEP);
+  let currentLayer = props.modelGraph.layers.find(layer => layer.id === path[0]);
+  for (const innerId of path.slice(1)) {
+    currentLayer = currentLayer?.subgraph?.layers.find(layer => layer.id === innerId);
+    if (!currentLayer) return null;
+  }
+  return currentLayer ?? null;
+}
+
+function resolveLayerLocation(layerId: string): ResolvedLayerLocation | null {
+  if (props.modelGraph.layers.some(layer => layer.id === layerId)) {
+    return { isContainerInternal: false };
+  }
+  if (!layerId.includes(CONTAINER_ID_SEP)) return null;
+
+  const containerId = layerId.split(CONTAINER_ID_SEP)[0];
+  const container = props.modelGraph.layers.find(
+    layer => layer.id === containerId && layer.type === "Container",
+  );
+  if (!container || !findModelLayer(layerId)) return null;
+  return { isContainerInternal: true };
+}
+
+function parseExplicitLayerReference(errorText: string): ParsedLayerReference | null {
+  const colonMatch = errorText.match(/^层\s+([^\s():]+)(?:\(([^)]+)\))?\s*:/);
+  if (colonMatch?.[1]) {
+    return {
+      layerId: colonMatch[1],
+      layerType: colonMatch[2]?.trim() || null,
+    };
+  }
+
+  const connectionMatch = errorText.match(
+    /^层\s+([^\s():]+)\s+(?:没有输入连接|没有输出连接|不在任何 Input 出发的路径上|无法到达任何 Output)(?:[，。\s]|$)/,
+  );
+  if (connectionMatch?.[1]) {
+    return { layerId: connectionMatch[1], layerType: null };
+  }
+
+  const isolatedMatch = errorText.match(/^存在孤立节点或连接异常:\s*([^\s,\[\]]+)\s*$/);
+  if (isolatedMatch?.[1]) {
+    return { layerId: isolatedMatch[1], layerType: null };
+  }
+
+  return null;
 }
 
 function buildErrorContext(
@@ -92,23 +193,29 @@ function buildErrorContext(
   result: ValidationResult,
 ): Record<string, unknown> {
   const shapes = result.shapes ?? {};
-  let layerId: string | null = null;
-  let parsedLayerType: string | null = null;
+  const explicitReference = parseExplicitLayerReference(errorMessage);
+  const exactShapeEntries = Object.entries(shapes).filter(
+    ([, info]) => info.error === errorMessage,
+  );
 
-  const exactShapeEntry = Object.entries(shapes).find(([, info]) => info.error === errorMessage);
-  if (exactShapeEntry) {
-    layerId = exactShapeEntry[0];
+  let parsedReference: ParsedLayerReference | null = null;
+  if (explicitReference) {
+    if (!resolveLayerLocation(explicitReference.layerId)) return {};
+    parsedReference = explicitReference;
+  } else if (exactShapeEntries.length === 1) {
+    const uniqueLayerId = exactShapeEntries[0]?.[0];
+    if (!uniqueLayerId || !resolveLayerLocation(uniqueLayerId)) return {};
+    parsedReference = { layerId: uniqueLayerId, layerType: null };
   } else {
-    const match = errorMessage.match(/^层\s+([^\s():]+)(?:\(([^)]+)\))?\s*:/);
-    if (match) {
-      layerId = match[1] ?? null;
-      parsedLayerType = match[2]?.trim() || null;
-    }
+    return {};
   }
 
-  if (!layerId) return {};
+  const layerId = parsedReference.layerId;
   const shapeInfo: LayerShapeInfo | undefined = shapes[layerId];
-  const layerType = shapeInfo?.layer_type ?? parsedLayerType ?? findModelLayerType(layerId);
+  const layerType = shapeInfo?.layer_type
+    ?? parsedReference.layerType
+    ?? findModelLayer(layerId)?.type
+    ?? null;
   return {
     layer_id: layerId,
     layer_type: layerType,
@@ -120,34 +227,295 @@ function validationPassed(result: ValidationResult): boolean {
   return result.valid === true || result.status === "ok";
 }
 
-async function loadErrorGuidance() {
-  const requestId = ++guidanceRequestId;
-  const validationResult = props.validationResult;
+function isNonEmptyText(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function normalizedSuggestionCategory(suggestion: ErrorTeachingSuggestion): string {
+  return isNonEmptyText(suggestion.category)
+    ? suggestion.category.trim().toLowerCase()
+    : "";
+}
+
+function isReliableSuggestion(suggestion: ErrorTeachingSuggestion): boolean {
+  const category = normalizedSuggestionCategory(suggestion);
+  return suggestion.matched === true
+    && category.length > 0
+    && category !== "unknown"
+    && category !== "unknown_error"
+    && isNonEmptyText(suggestion.title)
+    && isNonEmptyText(suggestion.reason)
+    && Array.isArray(suggestion.suggestions)
+    && suggestion.suggestions.some(isNonEmptyText);
+}
+
+function normalizedSuggestionLayerId(
+  suggestion: ErrorTeachingSuggestion,
+): string | null {
+  if (
+    suggestion.can_locate !== true
+    || typeof suggestion.layer_id !== "string"
+  ) {
+    return null;
+  }
+
+  const layerId = suggestion.layer_id.trim();
+  if (!layerId || !resolveLayerLocation(layerId)) return null;
+  return layerId;
+}
+
+function suppressContainedSuggestions(
+  suggestions: ErrorTeachingSuggestion[],
+): ErrorTeachingSuggestion[] {
+  const reliableSuggestions = suggestions.filter(isReliableSuggestion);
+  const isolatedLayerIds = new Set<string>();
+
+  for (const suggestion of reliableSuggestions) {
+    if (normalizedSuggestionCategory(suggestion) !== "isolated_node") continue;
+    const layerId = normalizedSuggestionLayerId(suggestion);
+    if (layerId) isolatedLayerIds.add(layerId);
+  }
+
+  return reliableSuggestions.filter(suggestion => {
+    const category = normalizedSuggestionCategory(suggestion);
+    if (
+      category !== "missing_input_connection"
+      && category !== "missing_output_connection"
+    ) {
+      return true;
+    }
+
+    const layerId = normalizedSuggestionLayerId(suggestion);
+    return !layerId || !isolatedLayerIds.has(layerId);
+  });
+}
+
+const GLOBAL_GUIDANCE_CATEGORIES = new Set([
+  "missing_input",
+  "missing_output",
+  "cycle_detected",
+]);
+
+function suggestionValues(suggestion: ErrorTeachingSuggestion): GuidanceValues {
+  return {
+    parameter: typeof suggestion.parameter === "string" ? suggestion.parameter : null,
+    currentValue: suggestion.current_value,
+    expectedValue: suggestion.expected_value,
+    suggestedValue: suggestion.suggested_value,
+  };
+}
+
+function hasConcreteGuidanceValue(values: GuidanceValues): boolean {
+  return values.currentValue != null
+    || values.expectedValue != null
+    || values.suggestedValue != null;
+}
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
+function guidanceValuesEqual(left: GuidanceValues, right: GuidanceValues): boolean {
+  return left.parameter === right.parameter
+    && valuesEqual(left.currentValue, right.currentValue)
+    && valuesEqual(left.expectedValue, right.expectedValue)
+    && valuesEqual(left.suggestedValue, right.suggestedValue);
+}
+
+function summarizeGuidanceValues(group: GuidanceGroup): GuidanceValueSummary {
+  const samples: GuidanceValues[] = group.targets.length
+    ? group.targets
+    : group.valueSamples;
+  const first = samples[0] ?? {
+    parameter: null,
+    currentValue: null,
+    expectedValue: null,
+    suggestedValue: null,
+  };
+  return {
+    ...first,
+    hasValues: samples.some(hasConcreteGuidanceValue),
+    consistent: samples.every(sample => guidanceValuesEqual(first, sample)),
+  };
+}
+
+function buildGuidanceGroups(suggestions: ErrorTeachingSuggestion[]): GuidanceGroup[] {
+  const groups = new Map<string, GuidanceGroup>();
+
+  for (const suggestion of suggestions) {
+    if (!isReliableSuggestion(suggestion)) continue;
+
+    const category = normalizedSuggestionCategory(suggestion);
+    let group = groups.get(category);
+    if (!group) {
+      group = {
+        category,
+        severity: suggestion.severity,
+        title: suggestion.title.trim(),
+        reason: suggestion.reason.trim(),
+        suggestions: suggestion.suggestions.filter(isNonEmptyText).map(item => item.trim()),
+        related_layers: Array.isArray(suggestion.related_layers)
+          ? suggestion.related_layers.filter(isNonEmptyText)
+          : [],
+        related_parameters: Array.isArray(suggestion.related_parameters)
+          ? suggestion.related_parameters.filter(isNonEmptyText)
+          : [],
+        targets: [],
+        valueSamples: [],
+        valueSummary: {
+          parameter: null,
+          currentValue: null,
+          expectedValue: null,
+          suggestedValue: null,
+          hasValues: false,
+          consistent: true,
+        },
+      };
+      groups.set(category, group);
+    }
+
+    const values = suggestionValues(suggestion);
+    group.valueSamples.push(values);
+
+    const layerId = typeof suggestion.layer_id === "string"
+      ? suggestion.layer_id.trim()
+      : "";
+    const resolvedLocation = layerId ? resolveLayerLocation(layerId) : null;
+    if (
+      suggestion.can_locate === true
+      && layerId
+      && resolvedLocation
+      && !GLOBAL_GUIDANCE_CATEGORIES.has(category)
+      && !group.targets.some(target => target.layerId === layerId)
+    ) {
+      group.targets.push({
+        layerId,
+        layerType: typeof suggestion.layer_type === "string"
+          ? suggestion.layer_type
+          : null,
+        originalError: typeof suggestion.original_error === "string"
+          ? suggestion.original_error
+          : String(suggestion.original_error ?? ""),
+        ...values,
+        isContainerInternal: resolvedLocation.isContainerInternal,
+      });
+    }
+  }
+
+  const result = [...groups.values()];
+  for (const group of result) {
+    group.valueSummary = summarizeGuidanceValues(group);
+  }
+  return result;
+}
+
+function currentTargetIndex(group: GuidanceGroup): number {
+  const index = currentTargetIndexes.value[group.category] ?? 0;
+  return index >= 0 && index < group.targets.length ? index : 0;
+}
+
+function currentTarget(group: GuidanceGroup): GuidanceTarget | null {
+  return group.targets[currentTargetIndex(group)] ?? null;
+}
+
+function currentTargetLabel(group: GuidanceGroup): string {
+  const target = currentTarget(group);
+  if (!target) return "";
+  const modelLayer = findModelLayer(target.layerId);
+  return modelLayer?.name?.trim() || target.layerType || target.layerId;
+}
+
+function selectPreviousTarget(group: GuidanceGroup) {
+  const index = currentTargetIndex(group);
+  if (index > 0) currentTargetIndexes.value[group.category] = index - 1;
+}
+
+function selectNextTarget(group: GuidanceGroup) {
+  const index = currentTargetIndex(group);
+  if (index < group.targets.length - 1) {
+    currentTargetIndexes.value[group.category] = index + 1;
+  }
+}
+
+function locateCurrentTarget(group: GuidanceGroup) {
+  const target = currentTarget(group);
+  if (target) emit("locate-layer", target.layerId);
+}
+
+function clearGuidanceState() {
+  guidanceRequestId += 1;
+  loadedGuidanceResult = null;
   errorSuggestions.value = [];
+  currentTargetIndexes.value = {};
   guidanceError.value = "";
   guidanceLoading.value = false;
+}
 
-  if (!props.open || !validationResult || validationPassed(validationResult)) return;
+async function loadErrorGuidance() {
+  const validationResult = props.validationResult;
+  if (!props.open) return;
+  if (
+    props.validationInProgress
+    || (!validationResult && validationRequestMessage.value)
+  ) {
+    clearGuidanceState();
+    return;
+  }
+  if (!validationResult || validationPassed(validationResult)) {
+    clearGuidanceState();
+    return;
+  }
+  if (loadedGuidanceResult === validationResult) {
+    guidanceLoading.value = false;
+    return;
+  }
+
   const errors = validationResult.errors ?? [];
-  if (!errors.length) return;
+  if (!errors.length) {
+    loadedGuidanceResult = validationResult;
+    guidanceLoading.value = false;
+    return;
+  }
 
+  const requestId = ++guidanceRequestId;
+  guidanceError.value = "";
   guidanceLoading.value = true;
   try {
-    const suggestions = await Promise.all(
+    const settledSuggestions = await Promise.allSettled(
       errors.map(errorMessage => fetchErrorTeaching(
         errorMessage,
         buildErrorContext(errorMessage, validationResult),
       )),
+    );
+    const suggestions = settledSuggestions.flatMap(result =>
+      result.status === "fulfilled" ? [result.value] : []
+    );
+    const hasFulfilledSuggestion = settledSuggestions.some(
+      result => result.status === "fulfilled",
     );
     if (
       requestId === guidanceRequestId
       && props.open
       && props.validationResult === validationResult
     ) {
-      errorSuggestions.value = suggestions;
+      errorSuggestions.value = buildGuidanceGroups(
+        suppressContainedSuggestions(suggestions),
+      );
+      loadedGuidanceResult = hasFulfilledSuggestion ? validationResult : null;
     }
   } catch (error) {
-    if (requestId === guidanceRequestId) guidanceError.value = errorMessage(error);
+    if (
+      requestId === guidanceRequestId
+      && props.open
+      && props.validationResult === validationResult
+    ) {
+      guidanceError.value = errorMessage(error);
+    }
   } finally {
     if (requestId === guidanceRequestId) guidanceLoading.value = false;
   }
@@ -248,8 +616,28 @@ watch(
 );
 
 watch(
-  () => [props.open, props.validationResult] as const,
-  () => void loadErrorGuidance(),
+  () => [
+    props.open,
+    props.validationResult,
+    props.validationInProgress,
+    props.validationRequestError,
+  ] as const,
+  ([open, validationResult, validationInProgress, validationRequestError]) => {
+    const resultChanged = observedGuidanceResult !== validationResult;
+    observedGuidanceResult = validationResult;
+    const hasRequestError = !validationResult && isNonEmptyText(validationRequestError);
+
+    if (resultChanged || validationInProgress || hasRequestError) {
+      clearGuidanceState();
+    }
+    if (!open) {
+      guidanceRequestId += 1;
+      guidanceLoading.value = false;
+      return;
+    }
+    if (validationInProgress || hasRequestError) return;
+    void loadErrorGuidance();
+  },
   { immediate: true },
 );
 </script>
@@ -386,9 +774,21 @@ watch(
       </section>
 
       <section v-else class="teaching-section guidance-section">
-        <div v-if="!validationResult" class="teaching-empty">
+        <div v-if="validationInProgress" class="teaching-state">
+          <iconify-icon class="spin" icon="mdi:loading"></iconify-icon>
+          正在检查模型结构，请稍候。
+        </div>
+        <div
+          v-else-if="!validationResult && validationRequestMessage"
+          class="teaching-error guidance-request-error"
+        >
+          <strong>结构检查请求未完成</strong>
+          <span>{{ validationRequestMessage }}</span>
+          <small>请根据页面提示处理后重新点击“检查结构”。</small>
+        </div>
+        <div v-else-if="!validationResult" class="teaching-empty">
           <iconify-icon icon="mdi:clipboard-search-outline"></iconify-icon>
-          <p>请先点击页面下方的检查结构按钮。</p>
+          <p>暂无可用的结构检查结果，请点击“检查结构”。</p>
         </div>
         <div v-else-if="validationPassed(validationResult)" class="guidance-success">
           <iconify-icon icon="mdi:check-circle-outline"></iconify-icon>
@@ -401,11 +801,17 @@ watch(
           <iconify-icon class="spin" icon="mdi:loading"></iconify-icon> 正在生成修改指导
         </div>
         <div v-else-if="guidanceError" class="teaching-error">{{ guidanceError }}</div>
+        <div v-else-if="!errorSuggestions.length" class="teaching-notice">
+          当前检查结果中没有能够确定原因的修改指导，请根据画布中的错误提示检查连接和参数。
+        </div>
         <div v-else class="guidance-list">
-          <article v-for="(suggestion, index) in errorSuggestions" :key="index" class="guidance-card">
+          <article v-for="(suggestion, index) in errorSuggestions" :key="suggestion.category" class="guidance-card">
             <header>
               <span class="guidance-index">{{ index + 1 }}</span>
-              <div><h3>{{ suggestion.title }}</h3><code>{{ suggestion.category }}</code></div>
+              <div>
+                <h3>{{ suggestion.title }}</h3>
+                <small v-if="suggestion.targets.length > 1">发现 {{ suggestion.targets.length }} 处</small>
+              </div>
             </header>
             <p class="guidance-reason">{{ suggestion.reason }}</p>
             <div class="teaching-list-block">
@@ -415,19 +821,54 @@ watch(
             <dl class="guidance-meta">
               <div v-if="suggestion.related_layers.length"><dt>相关层</dt><dd>{{ suggestion.related_layers.join("、") }}</dd></div>
               <div v-if="suggestion.related_parameters.length"><dt>相关参数</dt><dd>{{ suggestion.related_parameters.join("、") }}</dd></div>
-              <div v-if="suggestion.current_value !== null"><dt>当前值</dt><dd>{{ displayValue(suggestion.current_value) }}</dd></div>
-              <div v-if="suggestion.expected_value !== null"><dt>期望值</dt><dd>{{ displayValue(suggestion.expected_value) }}</dd></div>
-              <div v-if="suggestion.suggested_value !== null"><dt>建议值</dt><dd>{{ displayValue(suggestion.suggested_value) }}</dd></div>
+              <div v-if="suggestion.valueSummary.consistent && suggestion.valueSummary.currentValue != null"><dt>当前值</dt><dd>{{ displayValue(suggestion.valueSummary.currentValue) }}</dd></div>
+              <div v-if="suggestion.valueSummary.consistent && suggestion.valueSummary.expectedValue != null"><dt>期望值</dt><dd>{{ displayValue(suggestion.valueSummary.expectedValue) }}</dd></div>
+              <div v-if="suggestion.valueSummary.consistent && suggestion.valueSummary.suggestedValue != null"><dt>建议值</dt><dd>{{ displayValue(suggestion.valueSummary.suggestedValue) }}</dd></div>
             </dl>
-            <button
-              v-if="suggestion.can_locate && suggestion.layer_id"
-              class="locate-layer-button"
-              type="button"
-              @click="emit('locate-layer', suggestion.layer_id)"
+            <div
+              v-if="suggestion.targets.length > 1 && suggestion.valueSummary.hasValues && !suggestion.valueSummary.consistent"
+              class="teaching-notice guidance-value-warning"
             >
-              <iconify-icon icon="mdi:crosshairs-gps"></iconify-icon>
-              定位节点
-            </button>
+              不同位置的具体参数值可能不同，请逐个定位检查。
+            </div>
+            <div v-if="suggestion.targets.length > 0" class="guidance-target-block">
+              <div v-if="suggestion.targets.length > 1" class="guidance-target-position">
+                位置 {{ currentTargetIndex(suggestion) + 1 }} / {{ suggestion.targets.length }}：{{ currentTargetLabel(suggestion) }}
+              </div>
+              <div v-if="currentTarget(suggestion)?.isContainerInternal" class="guidance-container-hint">
+                问题位于该容器内部，定位后请打开容器继续检查。
+              </div>
+              <div v-if="suggestion.targets.length > 1" class="guidance-target-actions">
+                <button
+                  class="guidance-target-step"
+                  type="button"
+                  title="上一处问题位置"
+                  :disabled="currentTargetIndex(suggestion) === 0"
+                  @click="selectPreviousTarget(suggestion)"
+                >
+                  <iconify-icon icon="mdi:chevron-left"></iconify-icon>
+                  上一处
+                </button>
+                <button class="locate-layer-button" type="button" @click="locateCurrentTarget(suggestion)">
+                  <iconify-icon icon="mdi:crosshairs-gps"></iconify-icon>
+                  定位当前节点
+                </button>
+                <button
+                  class="guidance-target-step"
+                  type="button"
+                  title="下一处问题位置"
+                  :disabled="currentTargetIndex(suggestion) === suggestion.targets.length - 1"
+                  @click="selectNextTarget(suggestion)"
+                >
+                  下一处
+                  <iconify-icon icon="mdi:chevron-right"></iconify-icon>
+                </button>
+              </div>
+              <button v-else class="locate-layer-button" type="button" @click="locateCurrentTarget(suggestion)">
+                <iconify-icon icon="mdi:crosshairs-gps"></iconify-icon>
+                定位问题节点
+              </button>
+            </div>
           </article>
         </div>
       </section>
@@ -493,6 +934,10 @@ watch(
 .teaching-state, .teaching-error, .teaching-notice, .teaching-hint { border-radius: 8px; padding: 11px 12px; font-size: 13px; line-height: 1.55; }
 .teaching-state { background: var(--panel-2); color: var(--muted); display: flex; align-items: center; gap: 8px; }
 .teaching-error { background: #fff1f2; border: 1px solid #fecdd3; color: #be123c; }
+.guidance-request-error { display: grid; gap: 5px; }
+.guidance-request-error strong { font-size: 14px; }
+.guidance-request-error span, .guidance-request-error small { overflow-wrap: anywhere; }
+.guidance-request-error small { color: #9f1239; }
 .teaching-notice { background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; }
 .teaching-hint { background: var(--panel-2); color: var(--muted); text-align: center; }
 .teaching-title-row { display: flex; align-items: center; gap: 12px; }
@@ -554,6 +999,14 @@ watch(
 .guidance-meta div { min-width: 0; padding: 8px; border-radius: 7px; background: var(--panel-2); }
 .guidance-meta dt { color: var(--faint); font-size: 10px; font-weight: 800; }
 .guidance-meta dd { margin: 3px 0 0; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+.guidance-value-warning { margin: 0; }
+.guidance-target-block { display: grid; gap: 8px; }
+.guidance-target-position { color: var(--text); font-size: 12px; font-weight: 800; overflow-wrap: anywhere; }
+.guidance-container-hint { padding: 8px 10px; border-left: 3px solid #f59e0b; background: #fff7ed; color: #9a3412; font-size: 12px; line-height: 1.5; }
+.guidance-target-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(116px, 1.35fr) minmax(0, 1fr); gap: 6px; }
+.guidance-target-step { min-height: 36px; padding: 0 7px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); color: var(--text); display: flex; align-items: center; justify-content: center; gap: 2px; font-size: 12px; font-weight: 800; cursor: pointer; }
+.guidance-target-step:hover:not(:disabled) { border-color: var(--indigo); color: var(--indigo-strong); }
+.guidance-target-step:disabled { opacity: .45; cursor: not-allowed; }
 .locate-layer-button { min-height: 36px; border: 1px solid var(--indigo); border-radius: 8px; background: rgba(99, 102, 241, .07); color: var(--indigo-strong); display: flex; align-items: center; justify-content: center; gap: 7px; font-weight: 800; cursor: pointer; }
 .locate-layer-button:hover { background: rgba(99, 102, 241, .13); }
 @media (max-width: 720px) {

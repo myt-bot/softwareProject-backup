@@ -44,6 +44,35 @@ type ExportAgentResult = {
   filename?: string;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(item => typeof item === "string");
+}
+
+function isValidationResult(value: unknown): value is ValidationResult {
+  if (!isRecord(value)) return false;
+  if (typeof value.valid !== "boolean") return false;
+  if (!isStringArray(value.errors)) return false;
+  if (value.warnings !== undefined && !isStringArray(value.warnings)) return false;
+  if (value.shapes !== undefined && !isRecord(value.shapes)) return false;
+  if (
+    value.message !== undefined
+    && value.message !== null
+    && typeof value.message !== "string"
+  ) {
+    return false;
+  }
+  if (value.status !== undefined && typeof value.status !== "string") return false;
+  return true;
+}
+
+function validationToastMessage(canvas: WorkCanvas, message: string): string {
+  return activeCanvas().id === canvas.id ? message : `${canvas.name}：${message}`;
+}
+
 export function showBackendError(error: unknown, fallbackMessage: string) {
   if (isBackendNotImplemented(error)) {
     showToast("warning", fallbackMessage);
@@ -115,9 +144,18 @@ export async function handleValidateModel(): Promise<ValidationResult | null> {
   const modelSnapshot = getCurrentModelGraph(canvas);
   const serializedSnapshot = JSON.stringify(modelSnapshot);
   canvas.validating = true;
+  canvas.validationRequestError = null;
 
   try {
-    const result = await validateModelStructure(modelSnapshot);
+    const response: unknown = await validateModelStructure(modelSnapshot);
+    if (!isValidationResult(response)) {
+      throw new Error("结构检查服务返回了无法识别的结果，请重新检查。");
+    }
+    const result = response;
+
+    if (!store.canvases.includes(canvas)) {
+      return null;
+    }
 
     if (JSON.stringify(getCurrentModelGraph(canvas)) !== serializedSnapshot) {
       return null;
@@ -126,9 +164,17 @@ export async function handleValidateModel(): Promise<ValidationResult | null> {
     applyValidationResult(canvas, result);
     return result;
   } catch (error) {
-    showToast("error", (error as Error)?.message || "结构校验失败。");
+    if (!store.canvases.includes(canvas)) return null;
+    if (JSON.stringify(getCurrentModelGraph(canvas)) !== serializedSnapshot) return null;
+
+    const message = (error as Error)?.message?.trim()
+      || "结构检查请求未完成，请稍后重试。";
+    showToast("error", validationToastMessage(canvas, message));
     canvas.validationStatus = "unvalidated";
     canvas.lastValidationResult = null;
+    canvas.validationRequestError = message;
+    canvas.nodeBadge = "none";
+    canvas.nodeErrors = {};
     return null;
   } finally {
     canvas.validating = false;
@@ -139,6 +185,7 @@ export async function handleValidateModel(): Promise<ValidationResult | null> {
 
 
 function applyValidationResult(canvas: WorkCanvas, result: ValidationResult) {
+  canvas.validationRequestError = null;
   canvas.lastValidationResult = result;
   canvas.nodeErrors = {};
   const valid = result?.valid === true || result?.status === "ok";
@@ -171,7 +218,7 @@ function applyValidationResult(canvas: WorkCanvas, result: ValidationResult) {
   if (errorNodeIds.length > 0) {
     // 选中并聚焦第一个出错节点，方便用户直接看到
     const firstMsg = nodeErrors[errorNodeIds[0]!]!;
-    showToast("error", `结构有问题：${firstMsg}（出错的层已在画布上标红）`);
+    showToast("error", `${canvas.name} 结构有问题：${firstMsg}（出错的层已在画布上标红）`);
     return;
   }
 

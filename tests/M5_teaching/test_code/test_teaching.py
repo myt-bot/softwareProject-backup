@@ -265,12 +265,12 @@ def assert_unknown_error_payload(payload, expected_original_error):
     assert payload["matched"] is False
     assert payload["category"] == "unknown_error"
     assert payload["severity"] == "error"
+    assert payload["title"] == ""
     assert payload["original_error"] == expected_original_error
-    assert isinstance(payload["suggestions"], list)
-    assert payload["suggestions"]
-    assert all(isinstance(item, str) and item.strip() for item in payload["suggestions"])
-    assert isinstance(payload["related_layers"], list)
-    assert isinstance(payload["related_parameters"], list)
+    assert payload["reason"] == ""
+    assert payload["suggestions"] == []
+    assert payload["related_layers"] == []
+    assert payload["related_parameters"] == []
     assert payload["layer_id"] is None
     assert payload["layer_type"] is None
     assert payload["parameter"] is None
@@ -522,6 +522,29 @@ def test_error_suggestion_context_adds_location_without_changing_rule_content():
     assert payload["can_auto_fix"] is False
 
 
+def test_missing_output_connection_rule_uses_real_context_location_only():
+    error_message = "层 pool_2 没有输出连接，必须最终连接到 Output"
+    base = teaching.get_error_suggestion(error_message)
+
+    assert base["matched"] is True
+    assert base["category"] == "missing_output_connection"
+    assert "输出连接" in base["title"]
+    assert "继续" in base["reason"]
+    assert base["suggestions"]
+    assert base["related_layers"] == []
+    assert base["layer_id"] is None
+    assert base["can_locate"] is False
+
+    located = teaching.get_error_suggestion(
+        error_message,
+        {"layer_id": "pool_2", "layer_type": "Pooling"},
+    )
+
+    assert located["layer_id"] == "pool_2"
+    assert located["layer_type"] == "Pooling"
+    assert located["can_locate"] is True
+
+
 @pytest.mark.parametrize(
     ("raw_layer_type", "expected_layer_type"),
     [
@@ -544,7 +567,7 @@ def test_error_context_normalizes_layer_type(raw_layer_type, expected_layer_type
     assert payload["category"] == "unknown_error"
     assert payload["layer_type"] == expected_layer_type
     assert payload["layer_id"] == "node_1"
-    assert payload["can_locate"] is True
+    assert payload["can_locate"] is False
 
 
 def test_linear_error_context_uses_validator_shape_fields():
@@ -619,7 +642,7 @@ def test_error_context_values_are_deep_copied():
     }
 
     payload = teaching.get_error_suggestion(
-        "这是一个陌生错误",
+        "层 dropout_1(Dropout): p 必须是 0 到 1 之间的数值",
         context,
     )
 

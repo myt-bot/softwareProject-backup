@@ -284,6 +284,8 @@ onBeforeUnmount(() => {
               :selected-layer="selectedTeachingNode"
               :model-graph="teachingModelGraph"
               :validation-result="teachingValidationResult"
+              :validation-request-error="canvas.validationRequestError"
+              :validation-in-progress="canvas.validating"
               @open="teachingPanelOpen = true"
               @close="teachingPanelOpen = false"
               @locate-layer="locateTeachingLayer"

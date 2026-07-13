@@ -132,8 +132,31 @@ def test_unknown_and_non_string_errors_use_core_fallback():
         )
 
         assert response.status_code == 200
-        assert response.json()["matched"] is False
-        assert response.json()["category"] == "unknown_error"
+        body = response.json()
+        assert body["matched"] is False
+        assert body["category"] == "unknown_error"
+        assert body["title"] == ""
+        assert body["reason"] == ""
+        assert body["suggestions"] == []
+        assert body["can_locate"] is False
+        assert body["can_auto_fix"] is False
+
+
+def test_unknown_error_context_never_enables_location():
+    response = client.post(
+        "/teaching/errors/explain",
+        json={
+            "error_message": "unrecognized error",
+            "context": {"layer_id": "node_1", "layer_type": "Linear"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["matched"] is False
+    assert body["layer_id"] == "node_1"
+    assert body["layer_type"] == "Linear"
+    assert body["can_locate"] is False
 
 
 def test_model_explanation_identifies_simple_cnn():

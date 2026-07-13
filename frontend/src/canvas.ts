@@ -1550,6 +1550,7 @@ export function enterContainer(containerId: string) {
   canvas.nodeBadge = "none";
   canvas.nodeErrors = {};
   canvas.lastValidationResult = null;
+  canvas.validationRequestError = null;
   canvas.hasCenteredInitialGraph = true;
   clearHistory(canvas.id);
 
@@ -1579,6 +1580,7 @@ export function exitContainer() {
   canvas.nodeBadge = "none";
   canvas.nodeErrors = {};
   canvas.lastValidationResult = null;
+  canvas.validationRequestError = null;
   canvas.inFeatures = frame.inFeatures;
   canvas.zoom = frame.zoom;
   canvas.panX = frame.panX;

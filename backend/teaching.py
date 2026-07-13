@@ -900,7 +900,7 @@ _ERROR_SUGGESTION_RULES: tuple[dict[str, Any], ...] = (
             "确保所有有效分支最终都能到达 Output。",
             "如果这是多余层，请删除它；如果是有效分支，请把它接回主路径。",
         ],
-        "related_layers": ["Output"],
+        "related_layers": [],
         "related_parameters": [],
     },
     {
@@ -1405,22 +1405,22 @@ def _enrich_error_suggestion(
     layer_id = context.get("layer_id")
     if layer_id is not None:
         result["layer_id"] = layer_id
-        result["can_locate"] = True
+        result["can_locate"] = suggestion.get("matched") is True
 
     if "layer_type" in context:
         result["layer_type"] = context["layer_type"]
 
     # 调用方明确指定的参数优先于规则中的 primary_parameter。
-    if "parameter" in context:
+    if suggestion.get("matched") is True and "parameter" in context:
         result["parameter"] = context["parameter"]
 
     for field in ("current_value", "expected_value", "suggested_value"):
-        if field in context:
+        if suggestion.get("matched") is True and field in context:
             result[field] = copy.deepcopy(context[field])
 
     # M3 的字段语义：expected_in_features 是当前 Linear 配置值，
     # actual_in_features 是上一层实际输出、Linear 应接收的特征数。
-    if result.get("category") == "linear_in_features_mismatch":
+    if result.get("matched") is True and result.get("category") == "linear_in_features_mismatch":
         configured_value = context.get("expected_in_features")
         actual_value = context.get("actual_in_features")
 
@@ -1485,14 +1485,10 @@ def _unknown_error_suggestion(original_error: Any) -> ErrorSuggestion:
         "matched": False,
         "category": "unknown_error",
         "severity": "error",
-        "title": "暂未识别的错误",
+        "title": "",
         "original_error": original_error,
-        "reason": "当前教学知识库还没有匹配到明确的错误类型。",
-        "suggestions": [
-            "先查看模型是否从 Input 连到 Output，且中间没有断开的节点。",
-            "再检查出错层附近的参数是否符合要求，例如正整数、非负整数或 0 到 1 的概率。",
-            "如果错误来自某个具体层，请结合层说明和参数说明逐项排查。",
-        ],
+        "reason": "",
+        "suggestions": [],
         "related_layers": [],
         "related_parameters": [],
         "layer_id": None,
