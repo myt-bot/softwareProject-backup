@@ -8,6 +8,7 @@ import {
   datasetInputShape,
   getCurrentModelGraph,
   getTrainConfig,
+  resetValidationAfterGraphChange,
   setDataset,
   storagePaths,
   templateLibrary,
@@ -18,7 +19,9 @@ import {
   addNodeFromLayer,
   applyTemplateGraph,
   autoLayoutGraph,
+  deleteNodeById,
   drawLines,
+  recordHistory,
   redrawAfterDomUpdate,
 } from "./canvas";
 import {
@@ -26,7 +29,7 @@ import {
   fetchProjectTemplates,
   validateModelStructure,
 } from "./api/client";
-import { handleExportCode, handleStartTraining } from "./actions";
+import { handleExportCode, handleStartTraining, handleValidateModel } from "./actions";
 import { handleStopTraining, monitor } from "./monitor";
 
 export interface AssistantCommandResult {
@@ -90,12 +93,6 @@ export function buildAssistantSnapshot() {
     model_graph: getCurrentModelGraph(),
     training: getTrainConfig(),
   };
-}
-
-// 端点里取基节点 id（容器端口形如 "容器id::端口id"）
-function baseId(endpoint: string): string {
-  const i = endpoint.indexOf("::");
-  return i === -1 ? endpoint : endpoint.slice(0, i);
 }
 
 // 新节点落点：在现有节点下方错开，避免重叠
@@ -183,7 +180,9 @@ export async function executeAssistantCommand(
       }
 
       case "validate_model": {
-        const r = await validateModelStructure(getCurrentModelGraph());
+        // 复用用户「检查结构」按钮的处理：同步更新各层徽标 / 维度提示 / 底栏状态，再把结论回传模型
+        const r = await handleValidateModel();
+        if (!r) return { ok: false, error: "校验未执行（可能正在校验中），请稍后重试" };
         return {
           ok: true,
           result: { valid: r.valid, errors: r.errors, warnings: r.warnings, message: r.message },
@@ -243,7 +242,10 @@ export async function executeAssistantCommand(
         if (conns.some(([s, t]) => s === source && t === target)) {
           return { ok: true, result: { connected: [source, target], note: "该连接已存在" } };
         }
+        // 与用户手动连线（completeConnection）一致：记录历史 + 重置校验状态 + 重绘
+        recordHistory();
         conns.push([source, target]);
+        resetValidationAfterGraphChange();
         drawLines();
         return { ok: true, result: { connected: [source, target] } };
       }
@@ -262,14 +264,8 @@ export async function executeAssistantCommand(
       case "delete_node": {
         const nodeId = String(args.node_id ?? "").trim();
         if (!nodeId) return { ok: false, error: "缺少 node_id" };
-        const canvas = activeCanvas();
-        if (!canvas.nodes.some(n => n.id === nodeId)) return { ok: false, error: "节点不存在" };
-        canvas.connections = canvas.connections.filter(
-          ([s, t]) => baseId(s) !== nodeId && baseId(t) !== nodeId
-        );
-        canvas.nodes = canvas.nodes.filter(n => n.id !== nodeId);
-        if (canvas.selectedNodeId === nodeId) canvas.selectedNodeId = null;
-        drawLines();
+        // 复用用户右键删除的同一函数：记录历史、清边控制点/挂起连线、重置校验并重绘
+        if (!deleteNodeById(nodeId)) return { ok: false, error: "节点不存在" };
         return { ok: true, result: { deleted: nodeId } };
       }
 

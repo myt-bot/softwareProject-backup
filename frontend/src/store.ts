@@ -13,6 +13,7 @@ import type {
   ModelGraph,
   ModelGraphConnection,
   ModelGraphLayer,
+  MonitorEdge,
   MonitorLayer,
   Point,
   SubGraph,
@@ -1007,14 +1008,110 @@ export function getTrainConfig(canvas: WorkCanvas = activeCanvas()): TrainConfig
 }
 
 
+// 训练面板的模型结构图：按连线做拓扑分层（行=阶段、列=并行分支），返回带行列坐标的
+// 节点与（过滤 Add 后的）边，供面板用直角连线画出分支。Add 只是“合并两输入”，直接
+// 过滤并把它的输入接到它的输出（与后端 serializeGraph 一致）。Output 强制置于最后一层。
+export function getTrainingGraph(canvas: WorkCanvas = activeCanvas()): { layers: MonitorLayer[]; edges: MonitorEdge[] } {
+  const nodes = canvas.nodes;
+  const nodeMap = new Map(nodes.map(node => [node.id, node]));
+  const order = new Map(nodes.map((node, i) => [node.id, i])); // 原始顺序，用于同层内排序
+
+  // 原始邻接（基节点 id）
+  const rawOut = new Map<string, string[]>();
+  for (const [s, t] of canvas.connections) {
+    const src = endpointBaseId(s);
+    const tgt = endpointBaseId(t);
+    if (!nodeMap.has(src) || !nodeMap.has(tgt)) continue;
+    const list = rawOut.get(src);
+    if (list) list.push(tgt);
+    else rawOut.set(src, [tgt]);
+  }
+  const isAdd = (id: string) => nodeMap.get(id)?.type === "Add";
+  // 跳过 Add 解析真实后继（Add 视作直通：其输入直接接到其非 Add 后继）
+  const resolveTargets = (id: string, seen = new Set<string>()): string[] => {
+    const res: string[] = [];
+    for (const t of rawOut.get(id) ?? []) {
+      if (isAdd(t)) {
+        if (seen.has(t)) continue;
+        seen.add(t);
+        res.push(...resolveTargets(t, seen));
+      } else {
+        res.push(t);
+      }
+    }
+    return res;
+  };
+
+  const keptNodes = nodes.filter(node => node.type !== "Add");
+  const out = new Map<string, Set<string>>();
+  const inDeg = new Map<string, number>();
+  keptNodes.forEach(node => {
+    out.set(node.id, new Set());
+    inDeg.set(node.id, 0);
+  });
+  const edges: MonitorEdge[] = [];
+  for (const node of keptNodes) {
+    for (const t of resolveTargets(node.id)) {
+      if (t === node.id || !out.has(t) || out.get(node.id)!.has(t)) continue;
+      out.get(node.id)!.add(t);
+      inDeg.set(t, (inDeg.get(t) ?? 0) + 1);
+      edges.push({ source: node.id, target: t });
+    }
+  }
+
+  // 最长路径分层（Kahn 拓扑 + DP）：并行分支落在同一层
+  const level = new Map<string, number>();
+  keptNodes.forEach(node => level.set(node.id, 0));
+  const indegWork = new Map(inDeg);
+  const queue = keptNodes.filter(node => (indegWork.get(node.id) ?? 0) === 0).map(node => node.id);
+  let processed = 0;
+  while (queue.length) {
+    const id = queue.shift()!;
+    processed++;
+    for (const t of out.get(id) ?? []) {
+      level.set(t, Math.max(level.get(t) ?? 0, (level.get(id) ?? 0) + 1));
+      indegWork.set(t, (indegWork.get(t) ?? 0) - 1);
+      if ((indegWork.get(t) ?? 0) === 0) queue.push(t);
+    }
+  }
+  // 有环兜底：退回原始顺序单列
+  if (processed < keptNodes.length) {
+    return {
+      layers: keptNodes.map((node, i) => ({ id: node.id, type: node.badge || node.type, color: node.color || "cyan", row: i, col: 0 })),
+      edges,
+    };
+  }
+
+  // Output 强制放到最后一层（保证它一定是最底部）
+  const maxLevel = keptNodes.reduce((m, node) => Math.max(m, level.get(node.id) ?? 0), 0);
+  for (const node of keptNodes) {
+    if (node.type === "Output") level.set(node.id, maxLevel);
+  }
+
+  // 按层分组、层内按原始顺序赋 col
+  const byRow = new Map<number, string[]>();
+  for (const node of keptNodes) {
+    const r = level.get(node.id) ?? 0;
+    const list = byRow.get(r);
+    if (list) list.push(node.id);
+    else byRow.set(r, [node.id]);
+  }
+  const layers: MonitorLayer[] = [];
+  for (const r of [...byRow.keys()].sort((a, b) => a - b)) {
+    const ids = byRow.get(r)!.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+    ids.forEach((id, col) => {
+      const node = nodeMap.get(id)!;
+      layers.push({ id, type: node.badge || node.type, color: node.color || "cyan", row: r, col });
+    });
+  }
+  // 按 (row,col) 排序，供逐层扫描动画按 Input→…→Output 顺序推进
+  layers.sort((a, b) => (a.row! - b.row!) || (a.col! - b.col!));
+  return { layers, edges };
+}
+
+// 兼容旧调用：只取分层后的节点列表
 export function getTrainingLayers(canvas: WorkCanvas = activeCanvas()): MonitorLayer[] {
-  return canvas.nodes
-    .filter(node => node.type !== "Add")
-    .map(node => ({
-      id: node.id,
-      type: node.badge || node.type,
-      color: node.color || "cyan",
-    }));
+  return getTrainingGraph(canvas).layers;
 }
 
 

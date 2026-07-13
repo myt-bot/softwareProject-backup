@@ -69,6 +69,57 @@ const epochPercent = computed(() =>
 // 高亮"正在运行的层"：由本机训练运行时的真实 forward 事件驱动。
 const activeLayerIndex = computed(() => monitor.activeLayerIndex);
 
+// 模型结构分支图：按拓扑行列坐标定位节点，边用直角折线（横平竖直）连接，展现分支。
+const TM_NODE_W = 64;
+const TM_NODE_H = 30;
+const TM_H_GAP = 12;
+const TM_V_GAP = 24;
+const graphLayout = computed(() => {
+  const raw = monitor.layers;
+  const hasLayout = raw.some(l => l.row != null); // 真实训练带行列；demo 默认无 → 退回单列
+  const positioned = raw.map((l, i) => ({
+    id: l.id ?? `d${i}`,
+    type: l.type,
+    color: l.color,
+    row: hasLayout ? l.row ?? 0 : i,
+    col: hasLayout ? l.col ?? 0 : 0,
+    index: i,
+  }));
+  const rowCount = new Map<number, number>();
+  positioned.forEach(l => rowCount.set(l.row, Math.max(rowCount.get(l.row) ?? 0, l.col + 1)));
+  const maxCols = Math.max(1, ...positioned.map(l => l.col + 1));
+  const maxRow = Math.max(0, ...positioned.map(l => l.row));
+  const totalW = maxCols * TM_NODE_W + (maxCols - 1) * TM_H_GAP;
+  const totalH = (maxRow + 1) * TM_NODE_H + maxRow * TM_V_GAP;
+  const pos = new Map<string, { x: number; y: number }>();
+  const nodes = positioned.map(l => {
+    const count = rowCount.get(l.row) ?? 1;
+    const rowW = count * TM_NODE_W + (count - 1) * TM_H_GAP;
+    const x = (totalW - rowW) / 2 + l.col * (TM_NODE_W + TM_H_GAP);
+    const y = l.row * (TM_NODE_H + TM_V_GAP);
+    pos.set(l.id, { x, y });
+    return { ...l, x, y };
+  });
+  const rawEdges = monitor.edges?.length
+    ? monitor.edges
+    : nodes.slice(0, -1).map((n, i) => ({ source: n.id, target: nodes[i + 1].id }));
+  const edges = rawEdges
+    .map(e => {
+      const s = pos.get(e.source);
+      const t = pos.get(e.target);
+      if (!s || !t) return null;
+      const x1 = s.x + TM_NODE_W / 2;
+      const y1 = s.y + TM_NODE_H;
+      const x2 = t.x + TM_NODE_W / 2;
+      const y2 = t.y;
+      const midY = y1 + (y2 - y1) / 2;
+      // 直角折线：竖 → 横 → 竖
+      return { d: `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}` };
+    })
+    .filter((e): e is { d: string } => e !== null);
+  return { nodes, edges, totalW, totalH };
+});
+
 // 超参数用中文 + 英文名标注，对新手更友好
 const hpRows = computed(() => [
   { label: "训练轮次 epochs", value: monitor.hyperparams.epochs },
@@ -254,17 +305,30 @@ function formatBytes(value: number) {
         <aside class="tm-sidebar">
           <section class="tm-card">
             <h3>模型结构 Model Graph</h3>
-            <div class="tm-minimap">
-              <template v-for="(layer, index) in monitor.layers" :key="index">
+            <div class="tm-graph-scroll">
+              <div class="tm-graph" :style="{ width: graphLayout.totalW + 'px', height: graphLayout.totalH + 'px' }">
+                <svg class="tm-graph-edges" :width="graphLayout.totalW" :height="graphLayout.totalH">
+                  <defs>
+                    <marker id="tm-arrow" markerWidth="7" markerHeight="7" refX="3" refY="3" orient="auto">
+                      <path d="M0,0 L4,3 L0,6 Z" class="tm-arrow-head" />
+                    </marker>
+                  </defs>
+                  <path
+                    v-for="(e, i) in graphLayout.edges"
+                    :key="i"
+                    :d="e.d"
+                    class="tm-edge"
+                    marker-end="url(#tm-arrow)"
+                  />
+                </svg>
                 <div
-                  :class="[`tm-mini-node ${layer.color}`, { 'running-layer': index === activeLayerIndex }]"
-                >{{ layer.type }}</div>
-                <iconify-icon
-                  v-if="index < monitor.layers.length - 1"
-                  class="tm-mini-arrow"
-                  icon="mdi:chevron-down"
-                ></iconify-icon>
-              </template>
+                  v-for="n in graphLayout.nodes"
+                  :key="n.id"
+                  :class="['tm-gnode', n.color, { 'running-layer': n.index === activeLayerIndex }]"
+                  :style="{ left: n.x + 'px', top: n.y + 'px' }"
+                  :title="n.type"
+                >{{ n.type }}</div>
+              </div>
             </div>
             <div class="tm-summary-grid">
               <div><span>#params</span><strong>{{ formatInt(monitor.paramCount) }}</strong></div>

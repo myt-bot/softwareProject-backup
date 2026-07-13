@@ -490,8 +490,13 @@ def prepare_dataset(dataset_name, batch_size, data_dir=None, cancel_check=None, 
         )
 
     _raise_if_cancelled(cancel_check)
+    # 训练集与测试集都放进同一个进度+可中断下载上下文。否则像 QMNIST 这类数据集的
+    # 测试集是另一份单独文件：训练集下完(进度 100%、状态“就绪”)后，测试集会在上下文外
+    # “静默下载”，界面看着像卡住、也无法中途停止。纳入后测试集下载同样有进度、可停止。
     with _interruptible_torchvision_download(cancel_check, progress_callback, dataset_key):
         train_data = _load_split(True)
+        _raise_if_cancelled(cancel_check)
+        test_data = _load_split(False)
 
     _raise_if_cancelled(cancel_check)
     _report_dataset_progress(progress_callback, {
@@ -503,8 +508,6 @@ def prepare_dataset(dataset_name, batch_size, data_dir=None, cancel_check=None, 
         "file_name": "",
         "message": f"{dataset_key} 数据集已就绪",
     })
-
-    test_data = _load_split(False)
 
     train_dataloader = torch.utils.data.DataLoader(
         dataset=train_data,
@@ -561,7 +564,9 @@ def _interruptible_torchvision_download(cancel_check, progress_callback=None, da
         request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         file_name = os.path.basename(str(filename)) or str(url).rsplit("/", 1)[-1]
         try:
-            with urllib.request.urlopen(request) as response, open(filename, "wb") as output:  # noqa: S310
+            # 设置超时：连接或读取停滞时不无限阻塞，从而能每隔至多 timeout 秒检查一次取消，
+            # 对慢速/停滞的数据集源（如 GitHub 上的 QMNIST）也能较快响应“停止”。
+            with urllib.request.urlopen(request, timeout=15) as response, open(filename, "wb") as output:  # noqa: S310
                 total_bytes = int(response.headers.get("Content-Length") or 0)
                 downloaded_bytes = 0
                 last_percent = -1.0
@@ -576,7 +581,11 @@ def _interruptible_torchvision_download(cancel_check, progress_callback=None, da
                 })
                 while True:
                     _raise_if_cancelled(cancel_check)
-                    chunk = response.read(chunk_size)
+                    try:
+                        chunk = response.read(chunk_size)
+                    except TimeoutError:
+                        # 读取停滞超时：回到循环开头检查取消后继续尝试（不算失败）
+                        continue
                     if not chunk:
                         break
                     output.write(chunk)
