@@ -1476,6 +1476,7 @@ export function enterContainer(containerId: string) {
   canvas.validationStatus = "unvalidated";
   canvas.nodeBadge = "none";
   canvas.nodeErrors = {};
+  canvas.lastValidationResult = null;
   canvas.hasCenteredInitialGraph = true;
   clearHistory(canvas.id);
 
@@ -1504,6 +1505,7 @@ export function exitContainer() {
   canvas.validationStatus = "unvalidated";
   canvas.nodeBadge = "none";
   canvas.nodeErrors = {};
+  canvas.lastValidationResult = null;
   canvas.inFeatures = frame.inFeatures;
   canvas.zoom = frame.zoom;
   canvas.panX = frame.panX;

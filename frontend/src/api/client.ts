@@ -20,6 +20,7 @@ import type {
   LayerTeaching,
   ParameterTeaching,
   ModelTeachingOverview,
+  ErrorTeachingSuggestion,
 } from "../types";
 
 // 后端地址：生产构建时由 VITE_API_BASE_URL 注入（见 frontend/.env.production），
@@ -72,6 +73,16 @@ export async function fetchModelTeaching(modelGraph: ModelGraph): Promise<ModelT
   return request("/teaching/models/explain", {
     method: "POST",
     body: JSON.stringify({ model_graph: modelGraph }),
+  });
+}
+
+export async function fetchErrorTeaching(
+  errorMessage: unknown,
+  context: unknown,
+): Promise<ErrorTeachingSuggestion> {
+  return request("/teaching/errors/explain", {
+    method: "POST",
+    body: JSON.stringify({ error_message: errorMessage, context }),
   });
 }
 

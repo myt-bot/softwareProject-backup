@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { loadProjectTemplates } from "./actions";
 import { auth, initializeAuth, isLoggedIn } from "./auth";
 import { cancelPendingConnection, hideConnectionMenu, hideNodeMenu, redoGraphChange, undoGraphChange } from "./canvas";
-import { activeCanvas, closeHelpModal, getCurrentModelGraph, initializeBeginnerGuide, ui } from "./store";
+import { activeCanvas, closeHelpModal, CONTAINER_ID_SEP, getCurrentModelGraph, initializeBeginnerGuide, ui } from "./store";
 import ActionBar from "./components/ActionBar.vue";
 import AgentModal from "./components/AgentModal.vue";
 import AssistantPanel from "./components/AssistantPanel.vue";
@@ -33,6 +33,27 @@ const selectedTeachingNode = computed(() =>
   canvas.value.nodes.find(node => node.id === canvas.value.selectedNodeId) ?? null
 );
 const teachingModelGraph = computed(() => getCurrentModelGraph(canvas.value));
+const teachingValidationResult = computed(() =>
+  canvas.value.validationStatus === "unvalidated" ? null : canvas.value.lastValidationResult
+);
+
+function locateTeachingLayer(layerId: string) {
+  const directNode = canvas.value.nodes.find(node => node.id === layerId);
+  const containerId = layerId.includes(CONTAINER_ID_SEP)
+    ? layerId.split(CONTAINER_ID_SEP)[0]
+    : null;
+  const targetNode = directNode ?? (
+    containerId
+      ? canvas.value.nodes.find(node => node.id === containerId && node.type === "Container")
+      : null
+  );
+  if (!targetNode) return;
+
+  canvas.value.selectedNodeId = targetNode.id;
+  canvas.value.selectedConnectionKey = null;
+  ui.inspectorCollapsed = false;
+  teachingPanelOpen.value = false;
+}
 
 function handleDocumentClick() {
   hideConnectionMenu();
@@ -124,8 +145,10 @@ onBeforeUnmount(() => {
           :available="!ui.assistantOpen"
           :selected-layer="selectedTeachingNode"
           :model-graph="teachingModelGraph"
+          :validation-result="teachingValidationResult"
           @open="teachingPanelOpen = true"
           @close="teachingPanelOpen = false"
+          @locate-layer="locateTeachingLayer"
         />
         <!-- 左侧组件库收起/展开把手（贴在侧栏右缘，跟随收拢动画） -->
         <button

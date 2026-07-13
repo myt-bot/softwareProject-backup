@@ -1,17 +1,21 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import {
+  fetchErrorTeaching,
   fetchLayerTeaching,
   fetchModelTeaching,
   fetchParameterTeaching,
   isBackendUnavailable,
 } from "../api/client";
 import type {
+  ErrorTeachingSuggestion,
   GraphNode,
+  LayerShapeInfo,
   LayerTeaching,
   ModelGraph,
   ModelTeachingOverview,
   ParameterTeaching,
+  ValidationResult,
 } from "../types";
 
 const props = defineProps<{
@@ -19,31 +23,37 @@ const props = defineProps<{
   available: boolean;
   selectedLayer: GraphNode | null;
   modelGraph: ModelGraph;
+  validationResult: ValidationResult | null;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   open: [];
   close: [];
+  "locate-layer": [layerId: string];
 }>();
 
-type TeachingTab = "layer" | "parameters" | "model";
+type TeachingTab = "layer" | "parameters" | "model" | "guidance";
 
 const activeTab = ref<TeachingTab>("layer");
 const layerTeaching = ref<LayerTeaching | null>(null);
 const selectedParameter = ref<string | null>(null);
 const parameterTeaching = ref<ParameterTeaching | null>(null);
 const modelOverview = ref<ModelTeachingOverview | null>(null);
+const errorSuggestions = ref<ErrorTeachingSuggestion[]>([]);
 const layerLoading = ref(false);
 const parameterLoading = ref(false);
 const modelLoading = ref(false);
+const guidanceLoading = ref(false);
 const layerError = ref("");
 const parameterError = ref("");
 const modelError = ref("");
+const guidanceError = ref("");
 const layerCache = new Map<string, LayerTeaching>();
 const parameterCache = new Map<string, ParameterTeaching>();
 let layerRequestId = 0;
 let parameterRequestId = 0;
 let modelRequestId = 0;
+let guidanceRequestId = 0;
 
 const parameters = computed(() => Object.keys(props.selectedLayer?.params ?? {}));
 const currentParameterValue = computed(() => {
@@ -63,6 +73,76 @@ function displayValue(value: unknown): string {
     return JSON.stringify(value);
   } catch {
     return String(value);
+  }
+}
+
+function findModelLayerType(layerId: string): string | null {
+  return props.modelGraph.layers.find(layer => layer.id === layerId)?.type ?? null;
+}
+
+function buildErrorContext(
+  errorMessage: string,
+  result: ValidationResult,
+): Record<string, unknown> {
+  const shapes = result.shapes ?? {};
+  let layerId: string | null = null;
+  let parsedLayerType: string | null = null;
+
+  const exactShapeEntry = Object.entries(shapes).find(([, info]) => info.error === errorMessage);
+  if (exactShapeEntry) {
+    layerId = exactShapeEntry[0];
+  } else {
+    const match = errorMessage.match(/^层\s+([^\s():]+)(?:\(([^)]+)\))?\s*:/);
+    if (match) {
+      layerId = match[1] ?? null;
+      parsedLayerType = match[2]?.trim() || null;
+    }
+  }
+
+  if (!layerId) return {};
+  const shapeInfo: LayerShapeInfo | undefined = shapes[layerId];
+  const layerType = shapeInfo?.layer_type ?? parsedLayerType ?? findModelLayerType(layerId);
+  return {
+    layer_id: layerId,
+    layer_type: layerType,
+    ...(shapeInfo ? { shape_info: shapeInfo } : {}),
+  };
+}
+
+function validationPassed(result: ValidationResult): boolean {
+  return result.valid === true || result.status === "ok";
+}
+
+async function loadErrorGuidance() {
+  const requestId = ++guidanceRequestId;
+  const validationResult = props.validationResult;
+  errorSuggestions.value = [];
+  guidanceError.value = "";
+  guidanceLoading.value = false;
+
+  if (!props.open || !validationResult || validationPassed(validationResult)) return;
+  const errors = validationResult.errors ?? [];
+  if (!errors.length) return;
+
+  guidanceLoading.value = true;
+  try {
+    const suggestions = await Promise.all(
+      errors.map(errorMessage => fetchErrorTeaching(
+        errorMessage,
+        buildErrorContext(errorMessage, validationResult),
+      )),
+    );
+    if (
+      requestId === guidanceRequestId
+      && props.open
+      && props.validationResult === validationResult
+    ) {
+      errorSuggestions.value = suggestions;
+    }
+  } catch (error) {
+    if (requestId === guidanceRequestId) guidanceError.value = errorMessage(error);
+  } finally {
+    if (requestId === guidanceRequestId) guidanceLoading.value = false;
   }
 }
 
@@ -159,6 +239,12 @@ watch(
   },
   { immediate: true },
 );
+
+watch(
+  () => [props.open, props.validationResult] as const,
+  () => void loadErrorGuidance(),
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -188,6 +274,7 @@ watch(
       <button :class="{ active: activeTab === 'layer' }" @click="activeTab = 'layer'">当前层</button>
       <button :class="{ active: activeTab === 'parameters' }" @click="activeTab = 'parameters'">参数说明</button>
       <button :class="{ active: activeTab === 'model' }" @click="activeTab = 'model'">模型概览</button>
+      <button :class="{ active: activeTab === 'guidance' }" @click="activeTab = 'guidance'">修改指导</button>
     </nav>
 
     <div class="teaching-content">
@@ -267,7 +354,7 @@ watch(
         </template>
       </section>
 
-      <section v-else class="teaching-section">
+      <section v-else-if="activeTab === 'model'" class="teaching-section">
         <button class="explain-model-button" type="button" :disabled="modelLoading" @click="explainCurrentModel">
           <iconify-icon :class="{ spin: modelLoading }" :icon="modelLoading ? 'mdi:loading' : 'mdi:book-open-page-variant-outline'"></iconify-icon>
           {{ modelLoading ? "正在讲解" : "讲解当前模型" }}
@@ -295,6 +382,53 @@ watch(
           <div v-if="modelOverview.beginner_warnings.length" class="teaching-list-block warning"><h4>初学者提醒</h4><ul><li v-for="item in modelOverview.beginner_warnings" :key="item">{{ item }}</li></ul></div>
         </template>
       </section>
+
+      <section v-else class="teaching-section guidance-section">
+        <div v-if="!validationResult" class="teaching-empty">
+          <iconify-icon icon="mdi:clipboard-search-outline"></iconify-icon>
+          <p>请先点击页面下方的检查结构按钮。</p>
+        </div>
+        <div v-else-if="validationPassed(validationResult)" class="guidance-success">
+          <iconify-icon icon="mdi:check-circle-outline"></iconify-icon>
+          <div><strong>模型结构检查通过</strong><span>目前没有需要修改的问题。</span></div>
+        </div>
+        <div v-else-if="!(validationResult.errors?.length)" class="teaching-notice">
+          结构检查未通过，但校验器没有返回可解释的错误信息。
+        </div>
+        <div v-else-if="guidanceLoading" class="teaching-state">
+          <iconify-icon class="spin" icon="mdi:loading"></iconify-icon> 正在生成修改指导
+        </div>
+        <div v-else-if="guidanceError" class="teaching-error">{{ guidanceError }}</div>
+        <div v-else class="guidance-list">
+          <article v-for="(suggestion, index) in errorSuggestions" :key="index" class="guidance-card">
+            <header>
+              <span class="guidance-index">{{ index + 1 }}</span>
+              <div><h3>{{ suggestion.title }}</h3><code>{{ suggestion.category }}</code></div>
+            </header>
+            <p class="guidance-reason">{{ suggestion.reason }}</p>
+            <div class="teaching-list-block">
+              <h4>修改步骤</h4>
+              <ol><li v-for="item in suggestion.suggestions" :key="item">{{ item }}</li></ol>
+            </div>
+            <dl class="guidance-meta">
+              <div v-if="suggestion.related_layers.length"><dt>相关层</dt><dd>{{ suggestion.related_layers.join("、") }}</dd></div>
+              <div v-if="suggestion.related_parameters.length"><dt>相关参数</dt><dd>{{ suggestion.related_parameters.join("、") }}</dd></div>
+              <div v-if="suggestion.current_value !== null"><dt>当前值</dt><dd>{{ displayValue(suggestion.current_value) }}</dd></div>
+              <div v-if="suggestion.expected_value !== null"><dt>期望值</dt><dd>{{ displayValue(suggestion.expected_value) }}</dd></div>
+              <div v-if="suggestion.suggested_value !== null"><dt>建议值</dt><dd>{{ displayValue(suggestion.suggested_value) }}</dd></div>
+            </dl>
+            <button
+              v-if="suggestion.can_locate && suggestion.layer_id"
+              class="locate-layer-button"
+              type="button"
+              @click="emit('locate-layer', suggestion.layer_id)"
+            >
+              <iconify-icon icon="mdi:crosshairs-gps"></iconify-icon>
+              定位节点
+            </button>
+          </article>
+        </div>
+      </section>
     </div>
   </aside>
 </template>
@@ -309,7 +443,7 @@ watch(
 .teaching-head h2 { margin: 2px 0 0; font-size: 18px; }
 .teaching-icon-button { width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); color: var(--muted); display: grid; place-items: center; cursor: pointer; }
 .teaching-icon-button:hover { color: var(--text); border-color: var(--border-2); }
-.teaching-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--border); padding: 0 12px; }
+.teaching-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--border); padding: 0 12px; }
 .teaching-tabs button { min-width: 0; height: 42px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-weight: 700; cursor: pointer; }
 .teaching-tabs button.active { color: var(--indigo-strong); border-bottom-color: var(--indigo); }
 .teaching-content { min-height: 0; flex: 1; overflow-y: auto; }
@@ -336,6 +470,7 @@ watch(
 .teaching-list-block { display: grid; gap: 8px; }
 .teaching-list-block h4 { margin: 0; font-size: 13px; }
 .teaching-list-block ul { margin: 0; padding-left: 19px; display: grid; gap: 6px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.teaching-list-block ol { margin: 0; padding-left: 21px; display: grid; gap: 7px; color: var(--muted); font-size: 13px; line-height: 1.55; }
 .teaching-list-block.warning { border: 1px solid #fde68a; background: #fffbeb; padding: 12px; border-radius: 8px; }
 .teaching-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .teaching-section-head div { display: grid; gap: 2px; }
@@ -365,5 +500,23 @@ watch(
 .key-layer-list div { display: grid; gap: 4px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; }
 .key-layer-list code { color: var(--indigo-strong); font-size: 12px; }
 .key-layer-list span { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.guidance-section { align-content: start; }
+.guidance-success { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid #a7f3d0; border-radius: 8px; background: #ecfdf5; color: #047857; }
+.guidance-success iconify-icon { flex: 0 0 auto; font-size: 26px; }
+.guidance-success div { display: grid; gap: 3px; }
+.guidance-success span { font-size: 12px; }
+.guidance-list { display: grid; gap: 12px; }
+.guidance-card { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.guidance-card header { display: flex; align-items: flex-start; gap: 10px; }
+.guidance-card header h3 { margin: 0 0 3px; font-size: 14px; line-height: 1.4; }
+.guidance-card header code { color: var(--muted); font-size: 10px; }
+.guidance-index { flex: 0 0 auto; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: #fee2e2; color: #b91c1c; font-size: 11px; font-weight: 800; }
+.guidance-reason { margin: 0; padding: 10px; border-left: 3px solid #fb7185; background: #fff1f2; color: #881337; font-size: 13px; line-height: 1.55; }
+.guidance-meta { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.guidance-meta div { min-width: 0; padding: 8px; border-radius: 7px; background: var(--panel-2); }
+.guidance-meta dt { color: var(--faint); font-size: 10px; font-weight: 800; }
+.guidance-meta dd { margin: 3px 0 0; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+.locate-layer-button { min-height: 36px; border: 1px solid var(--indigo); border-radius: 8px; background: rgba(99, 102, 241, .07); color: var(--indigo-strong); display: flex; align-items: center; justify-content: center; gap: 7px; font-weight: 800; cursor: pointer; }
+.locate-layer-button:hover { background: rgba(99, 102, 241, .13); }
 @media (max-width: 720px) { .teaching-launch { top: 10px; right: 10px; } .teaching-panel { width: 100%; } }
 </style>

@@ -113,6 +113,7 @@ export interface LayerShapeInfo {
   layer_type?: string;
   input_shape?: number[] | null;
   output_shape?: number[] | null;
+  error?: string;
   expected_in_features?: number;
   actual_in_features?: number;
 }
@@ -124,6 +125,26 @@ export interface ValidationResult {
   errors?: string[];
   warnings?: string[];
   shapes?: Record<string, LayerShapeInfo>;
+}
+
+export interface ErrorTeachingSuggestion {
+  matched: boolean;
+  category: string;
+  severity: string;
+  title: string;
+  original_error: unknown;
+  reason: string;
+  suggestions: string[];
+  related_layers: string[];
+  related_parameters: string[];
+  layer_id: string | null;
+  layer_type: string | null;
+  parameter: string | null;
+  current_value: unknown;
+  expected_value: unknown;
+  suggested_value: unknown;
+  can_locate: boolean;
+  can_auto_fix: boolean;
 }
 
 export interface LayerTeaching {
