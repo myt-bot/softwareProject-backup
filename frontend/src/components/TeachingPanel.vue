@@ -262,7 +262,7 @@ watch(
   <aside v-if="open" class="teaching-panel" aria-label="教学辅助面板">
     <header class="teaching-head">
       <div>
-        <span class="teaching-kicker">M5 TEACHING</span>
+        <span class="teaching-kicker">TEACHING</span>
         <h2>教学辅助</h2>
       </div>
       <button class="teaching-icon-button" type="button" title="关闭教学辅助" @click="$emit('close')">
@@ -434,7 +434,24 @@ watch(
 </template>
 
 <style scoped>
-.teaching-launch { position: absolute; top: 18px; right: 18px; z-index: 55; height: 36px; padding: 0 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); box-shadow: var(--shadow-md); display: inline-flex; align-items: center; gap: 7px; font-weight: 700; cursor: pointer; }
+.teaching-launch {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 55;
+  height: 40px;
+  padding: 0 15px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow-md);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 700;
+  cursor: pointer;
+}
 .teaching-launch:hover { color: var(--indigo-strong); border-color: var(--indigo); }
 .teaching-launch iconify-icon { font-size: 18px; color: var(--indigo); }
 .teaching-panel { position: absolute; inset: 0 0 0 auto; z-index: 60; width: min(410px, 100%); background: var(--panel); border-left: 1px solid var(--border); box-shadow: -16px 0 36px -20px rgba(35, 48, 74, .32); display: flex; flex-direction: column; color: var(--text); }
@@ -518,5 +535,14 @@ watch(
 .guidance-meta dd { margin: 3px 0 0; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
 .locate-layer-button { min-height: 36px; border: 1px solid var(--indigo); border-radius: 8px; background: rgba(99, 102, 241, .07); color: var(--indigo-strong); display: flex; align-items: center; justify-content: center; gap: 7px; font-weight: 800; cursor: pointer; }
 .locate-layer-button:hover { background: rgba(99, 102, 241, .13); }
-@media (max-width: 720px) { .teaching-launch { top: 10px; right: 10px; } .teaching-panel { width: 100%; } }
+@media (max-width: 720px) {
+  .teaching-launch {
+    right: 10px;
+    bottom: 10px;
+  }
+
+  .teaching-panel {
+    width: 100%;
+  }
+}
 </style>

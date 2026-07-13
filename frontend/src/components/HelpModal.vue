@@ -43,6 +43,7 @@ import { closeHelpModal, ui } from "../store";
           <h3><iconify-icon icon="mdi:lightbulb-on-outline"></iconify-icon>实用小技巧</h3>
           <ul>
             <li><b>单击节点</b>：选中节点，在右侧面板查看和修改参数</li>
+            <li><b>教学辅助</b>：打开工作区右下角的“教学辅助”，可查看当前层作用、参数说明、模型概览和结构错误修改指导</li>
             <li><b>拖动节点</b>：按住节点移动，调整画布布局</li>
             <li><b>右键连线</b>：可以删除不需要的连线</li>
             <li><b>快速开始</b>：不知道从哪下手？点画布上方的“快速开始模板”，从模板库一键加载现成的经典网络结构</li>
