@@ -23,6 +23,7 @@ import {
   isTrainingJobActive,
   isKnownLayerType,
   nextCanvasName,
+  pokeMinimap,
   resetValidationAfterGraphChange,
   showToast,
   store,
@@ -103,6 +104,14 @@ export function registerCanvasElements(elements: {
   svgEl = elements.svg;
   nodesEl = elements.nodes;
   gridEl = elements.grid;
+}
+
+
+// 当前画布可视区（视口）的像素尺寸，供迷你地图计算视口框
+export function getCanvasViewportSize() {
+  return canvasEl
+    ? { width: canvasEl.clientWidth, height: canvasEl.clientHeight }
+    : { width: 0, height: 0 };
 }
 
 
@@ -290,6 +299,7 @@ export function drawLines() {
 export async function redrawAfterDomUpdate() {
   await nextTick();
   drawLines();
+  pokeMinimap(); // 节点增删 / 参数更新等结构变化时短暂显现迷你地图
 }
 
 
@@ -1077,6 +1087,7 @@ function dragCanvasToPointer(clientX: number, clientY: number) {
     canvas.panX = panState.startPanX + deltaX;
     canvas.panY = panState.startPanY + deltaY;
     applyTransform();
+    pokeMinimap();
   }
 }
 
@@ -1089,6 +1100,7 @@ export function handleCanvasWheel(event: WheelEvent) {
   canvas.panX -= event.deltaX;
   canvas.panY -= event.deltaY;
   applyTransform();
+  pokeMinimap();
 }
 
 
@@ -1182,6 +1194,7 @@ function dragNodeToPointer(clientX: number, clientY: number) {
   const point = getCanvasPoint(clientX, clientY);
   node.x = point.x - dragOffsetX;
   node.y = point.y - dragOffsetY;
+  pokeMinimap();
   drawLines();
 }
 
@@ -1650,6 +1663,7 @@ function setZoomAroundViewportCenter(newZoom: number) {
   canvas.panX = centerX - contentX * newZoom;
   canvas.panY = centerY - contentY * newZoom;
   applyTransform();
+  pokeMinimap();
 }
 
 

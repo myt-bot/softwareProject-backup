@@ -1227,6 +1227,9 @@ button:disabled {
   transform: translateX(100%);
   transition: transform 0.25s ease;
   overflow: visible;
+  /* flex 列：节点头部固定高，参数滚动区占满剩余并可滚动（避免内容溢出被操作栏遮挡） */
+  display: flex;
+  flex-direction: column;
 }
 
 .inspector-panel.open {
@@ -2347,33 +2350,43 @@ button:disabled {
   border-top-color: #1f2a44;
 }
 
-/* 参数推荐范围小字 */
-.param-recommend {
-  color: var(--faint);
-  font-size: 11px;
+/* 参数推荐值：小药丸标签，比灰字更醒目友好 */
+.form-field small.param-recommend {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 8px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #eef6ff;
+  color: #1c6fbf;
+  font-size: 10.5px;
+  font-weight: 700;
 }
 
-/* 实时输出尺寸预览 */
+/* 实时输出尺寸预览：醒目的结果卡片 */
 .shape-preview {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 4px 0 2px;
-  padding: 9px 12px;
-  border-radius: 10px;
-  background: #ecfeff;
+  gap: 12px;
+  margin: 18px 0 2px;
+  padding: 13px 16px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ecfeff, #e2f5ff);
   border: 1px solid #a5f3fc;
+  box-shadow: 0 6px 16px rgba(8, 145, 178, 0.08);
 }
 
 .shape-preview span {
   font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
+  font-weight: 700;
+  color: #0e7490;
 }
 
 .shape-preview strong {
-  font-size: 14px;
-  color: var(--cyan);
+  font-size: 17px;
+  font-weight: 800;
+  color: #0891b2;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
@@ -2647,6 +2660,40 @@ body.is-connecting .node-port {
 }
 
 /* 画布浮动控件 */
+/* 画布迷你地图：右上角缩略图，操作时淡入、3.5 秒后淡出 */
+.canvas-minimap {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 30;
+  width: 178px;
+  height: 118px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 22px rgba(40, 70, 120, 0.14);
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.4s ease, transform 0.4s ease, visibility 0.4s ease;
+  pointer-events: none;
+}
+.canvas-minimap.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.canvas-minimap svg { width: 100%; height: 100%; display: block; }
+.canvas-minimap .mm-node { opacity: 0.9; }
+.canvas-minimap .mm-viewport {
+  fill: rgba(14, 165, 233, 0.1);
+  stroke: var(--indigo);
+  stroke-width: 1.5;
+}
+
 /* 画布功能栏：半透明毛玻璃胶囊；默认收成把手，悬停向右展开；空闲自动淡出 */
 .canvas-toolbar {
   position: absolute;
@@ -2816,7 +2863,8 @@ body.is-connecting .node-port {
 
 .empty-inspector,
 .simple-inspector {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2824,6 +2872,58 @@ body.is-connecting .node-port {
   text-align: center;
   padding: 40px;
   color: var(--faint);
+}
+
+/* 节点头部：彩色图标芯片 + 可编辑名称 + 类型（参数面板顶部固定） */
+.inspector-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+}
+.inspector-head-icon { width: 44px; height: 44px; border-radius: 13px; font-size: 24px; }
+.inspector-head-main { min-width: 0; flex: 1; }
+.inspector-name-row { display: flex; align-items: center; gap: 3px; }
+.inspector-name-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 3px 6px;
+  margin-left: -6px;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  outline: none;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.inspector-name-input:hover { background: var(--panel-2); }
+.inspector-name-input:focus { background: var(--panel); border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12); }
+/* 浅灰编辑图标：提示名称可改；聚焦时变蓝 */
+.inspector-name-pencil {
+  flex: 0 0 auto;
+  font-size: 15px;
+  color: var(--faint);
+  pointer-events: none;
+  transition: color 0.15s ease;
+}
+.inspector-name-input:hover + .inspector-name-pencil { color: var(--muted); }
+.inspector-name-input:focus + .inspector-name-pencil { color: var(--indigo); }
+.inspector-head-type {
+  display: block;
+  margin-top: 3px;
+  padding-left: 1px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .empty-inspector iconify-icon,
@@ -2850,29 +2950,33 @@ body.is-connecting .node-port {
 }
 
 .inspector-scroll {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;   /* 说明气泡已 Teleport 到 body，这里不再需要横向滚动 */
-  padding: 24px 20px;
+  padding: 20px 20px 28px;
+  scrollbar-width: none;              /* 过长时可滚动，但隐藏滚动条保持整洁 */
 }
+.inspector-scroll::-webkit-scrollbar { display: none; }
 
+/* 参数分组小标题（节点头部已展示类型，这里做成轻量的分区标签） */
 .inspector-title {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 22px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--border);
+  gap: 7px;
+  margin-bottom: 14px;
+  color: var(--muted);
 }
 
 .inspector-title iconify-icon {
-  font-size: 28px;
+  font-size: 17px;
 }
 
 .inspector-title h2 {
   margin: 0;
-  font-size: 17px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
 .field-stack {
@@ -2887,12 +2991,17 @@ body.is-connecting .node-port {
 }
 
 .form-field span {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 5px;
   margin-bottom: 8px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+  line-height: 1.1;
 }
+/* 参数名旁的“?”与文字垂直对齐：文字视觉重心偏下，将图标下移一点对齐其光学中心 */
+.form-field span .info-tip { line-height: 1; transform: translateY(1.5px); }
 
 .form-field input {
   width: 100%;
@@ -3142,9 +3251,9 @@ body.is-connecting .node-port {
 .info-card,
 .error-card,
 .shape-panel {
-  margin-top: 24px;
-  border-radius: 12px;
-  padding: 16px;
+  margin-top: 20px;
+  border-radius: 14px;
+  padding: 14px 16px;
 }
 
 .info-card {

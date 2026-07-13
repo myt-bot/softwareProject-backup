@@ -8,6 +8,7 @@ import {
   containerLayerCount,
   containerOutputPorts,
   getCurrentModelGraph,
+  layerGroups,
   saveContainerToLibrary,
   showToast,
   ui,
@@ -21,6 +22,22 @@ const canvas = computed(() => activeCanvas());
 const selectedNode = computed(() =>
   canvas.value.nodes.find(item => item.id === canvas.value.selectedNodeId) || null
 );
+
+// 层类型 → 图标 / 颜色 / 描述（用于参数面板顶部的节点头部）
+const LAYER_META: Record<string, { icon: string; color: string; desc: string }> = Object.fromEntries(
+  layerGroups.flatMap(group => group.layers.map(l => [l.type, { icon: l.icon, color: l.color, desc: l.desc }]))
+);
+const nodeMeta = computed(() => {
+  const node = selectedNode.value;
+  if (!node) return null;
+  const meta = LAYER_META[node.type];
+  return {
+    icon: meta?.icon || "mdi:cube-outline",
+    color: node.color || meta?.color || "cyan",
+    desc: meta?.desc || "",
+    badge: node.badge || node.type,
+  };
+});
 
 // 实时形状预览：改参数时向云端请求维度推导（防抖），无需本地 Agent
 const shapesMap = ref<Record<string, LayerShapeInfo>>({});
@@ -262,6 +279,27 @@ const inputShapeValue = computed(() => {
       <iconify-icon icon="mdi:chevron-right"></iconify-icon>
     </button>
 
+    <!-- 节点头部：彩色图标 + 可编辑名称 + 类型（所有卡片通用；容器用其专属段落） -->
+    <div v-if="selectedNode && selectedNode.type !== 'Container'" class="inspector-head">
+      <span v-if="nodeMeta" :class="`inspector-head-icon layer-icon ${nodeMeta.color}`">
+        <iconify-icon :icon="nodeMeta.icon"></iconify-icon>
+      </span>
+      <div class="inspector-head-main">
+        <div class="inspector-name-row">
+          <input
+            class="inspector-name-input"
+            type="text"
+            :value="selectedNode.title"
+            placeholder="未命名"
+            title="点击可修改这张卡片的名称"
+            @change="renamePort"
+          >
+          <iconify-icon class="inspector-name-pencil" icon="mdi:pencil-outline"></iconify-icon>
+        </div>
+        <span class="inspector-head-type">{{ nodeMeta?.badge }}<template v-if="nodeMeta?.desc"> · {{ nodeMeta?.desc }}</template></span>
+      </div>
+    </div>
+
     <!-- 未选中节点 -->
     <div v-if="!selectedNode" class="empty-inspector">
       <iconify-icon icon="mdi:cursor-default-click-outline"></iconify-icon>
@@ -362,12 +400,6 @@ const inputShapeValue = computed(() => {
       </div>
 
       <label class="form-field">
-        <span>名称</span>
-        <input type="text" :value="selectedNode.title" @change="renamePort">
-        <small>在容器里作为输入端口的名字，多个输入时便于区分</small>
-      </label>
-
-      <label class="form-field">
         <span>Input Shape 输入形状</span>
         <input id="input-shape-field" type="text" :value="inputShapeValue" @change="handleInputShapeChange">
         <small>格式示例：1,28,28（作为容器端口时，实际尺寸由外部连接决定）</small>
@@ -380,12 +412,6 @@ const inputShapeValue = computed(() => {
         <iconify-icon class="text-rose" icon="mdi:logout-variant"></iconify-icon>
         <h2>Output 参数</h2>
       </div>
-
-      <label class="form-field">
-        <span>名称</span>
-        <input type="text" :value="selectedNode.title" @change="renamePort">
-        <small>在容器里作为输出端口的名字，多个输出时便于区分</small>
-      </label>
 
       <section class="info-card">
         <p>Output 标记数据的出口。放在容器子画板里时，它就是容器对外的一个输出端口。</p>

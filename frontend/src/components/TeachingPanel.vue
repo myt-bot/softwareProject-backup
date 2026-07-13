@@ -35,6 +35,13 @@ const emit = defineEmits<{
 type TeachingTab = "layer" | "parameters" | "model" | "guidance";
 
 const activeTab = ref<TeachingTab>("layer");
+
+// tab 切换的左右滑动方向（仿首页页面切换）：目标在右→向左推(forward)，反之向右(back)
+const TAB_ORDER: Record<TeachingTab, number> = { layer: 0, parameters: 1, model: 2, guidance: 3 };
+const tabTransition = ref<"teach-forward" | "teach-back">("teach-forward");
+watch(activeTab, (next, prev) => {
+  tabTransition.value = TAB_ORDER[next] >= TAB_ORDER[prev] ? "teach-forward" : "teach-back";
+});
 const layerTeaching = ref<LayerTeaching | null>(null);
 const selectedParameter = ref<string | null>(null);
 const parameterTeaching = ref<ParameterTeaching | null>(null);
@@ -249,11 +256,13 @@ watch(
 
 <template>
   <!-- 启动入口已并入顶栏「帮助」菜单；此处仅渲染展开后的面板 -->
+  <Transition name="teaching-slide">
   <aside v-if="open" class="teaching-panel" aria-label="教学辅助面板">
     <header class="teaching-head">
-      <div>
-        <span class="teaching-kicker">TEACHING</span>
+      <span class="teaching-head-icon"><iconify-icon icon="mdi:school-outline"></iconify-icon></span>
+      <div class="teaching-head-copy">
         <h2>教学辅助</h2>
+        <span>逐层讲解 · 参数说明 · 修改指导</span>
       </div>
       <button class="teaching-icon-button" type="button" title="关闭教学辅助" @click="$emit('close')">
         <iconify-icon icon="mdi:close"></iconify-icon>
@@ -265,9 +274,12 @@ watch(
       <button :class="{ active: activeTab === 'parameters' }" @click="activeTab = 'parameters'">参数说明</button>
       <button :class="{ active: activeTab === 'model' }" @click="activeTab = 'model'">模型概览</button>
       <button :class="{ active: activeTab === 'guidance' }" @click="activeTab = 'guidance'">修改指导</button>
+      <span class="teaching-tab-underline" :style="{ transform: `translateX(${TAB_ORDER[activeTab] * 100}%)` }"></span>
     </nav>
 
     <div class="teaching-content">
+      <Transition :name="tabTransition">
+      <div class="teaching-pane" :key="activeTab">
       <section v-if="activeTab === 'layer'" class="teaching-section">
         <div v-if="!selectedLayer" class="teaching-empty">
           <iconify-icon icon="mdi:cursor-default-click-outline"></iconify-icon>
@@ -419,8 +431,11 @@ watch(
           </article>
         </div>
       </section>
+      </div>
+      </Transition>
     </div>
   </aside>
+  </Transition>
 </template>
 
 <style scoped>
@@ -445,15 +460,31 @@ watch(
 .teaching-launch:hover { color: var(--indigo-strong); border-color: var(--indigo); }
 .teaching-launch iconify-icon { font-size: 18px; color: var(--indigo); }
 .teaching-panel { position: absolute; inset: 0 0 0 auto; z-index: 60; width: min(410px, 100%); background: var(--panel); border-left: 1px solid var(--border); box-shadow: -16px 0 36px -20px rgba(35, 48, 74, .32); display: flex; flex-direction: column; color: var(--text); }
-.teaching-head { min-height: 66px; padding: 12px 14px 10px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
-.teaching-kicker { font-size: 10px; font-weight: 800; color: var(--indigo); letter-spacing: 0; }
-.teaching-head h2 { margin: 2px 0 0; font-size: 18px; }
+/* 面板滑入 / 滑出（右侧） */
+.teaching-slide-enter-active, .teaching-slide-leave-active { transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.28s ease; }
+.teaching-slide-enter-from, .teaching-slide-leave-to { transform: translateX(100%); opacity: 0.5; }
+.teaching-head { min-height: 64px; padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; background: linear-gradient(180deg, var(--panel-2), var(--panel)); }
+.teaching-head-icon { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-size: 22px; color: var(--indigo); background: rgba(99, 102, 241, .1); }
+.teaching-head-copy { flex: 1; min-width: 0; }
+.teaching-head-copy h2 { margin: 0; font-size: 17px; font-weight: 800; }
+.teaching-head-copy span { display: block; margin-top: 2px; font-size: 11.5px; color: var(--muted); }
 .teaching-icon-button { width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); color: var(--muted); display: grid; place-items: center; cursor: pointer; }
 .teaching-icon-button:hover { color: var(--text); border-color: var(--border-2); }
-.teaching-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--border); padding: 0 12px; }
-.teaching-tabs button { min-width: 0; height: 42px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-weight: 700; cursor: pointer; }
-.teaching-tabs button.active { color: var(--indigo-strong); border-bottom-color: var(--indigo); }
-.teaching-content { min-height: 0; flex: 1; overflow-y: auto; }
+.teaching-tabs { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--border); padding: 0; }
+.teaching-tabs button { min-width: 0; height: 42px; border: 0; background: transparent; color: var(--muted); font-weight: 700; cursor: pointer; transition: color 0.15s ease; }
+.teaching-tabs button:hover { color: var(--text); }
+.teaching-tabs button.active { color: var(--indigo-strong); }
+/* 滑动下划线：随激活 tab 平移（仿首页导航） */
+.teaching-tab-underline { position: absolute; left: 0; bottom: -1px; width: 25%; height: 2px; border-radius: 2px; background: var(--indigo); transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1); }
+.teaching-content { position: relative; min-height: 0; flex: 1; overflow-y: auto; overflow-x: hidden; }
+.teaching-pane { width: 100%; }
+/* tab 内容左右滑动过渡（方向由 tabTransition 决定） */
+.teach-forward-enter-active, .teach-forward-leave-active, .teach-back-enter-active, .teach-back-leave-active { transition: transform 0.26s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.22s ease; }
+.teach-forward-leave-active, .teach-back-leave-active { position: absolute; top: 0; left: 0; width: 100%; }
+.teach-forward-enter-from { opacity: 0; transform: translateX(42px); }
+.teach-forward-leave-to { opacity: 0; transform: translateX(-42px); }
+.teach-back-enter-from { opacity: 0; transform: translateX(-42px); }
+.teach-back-leave-to { opacity: 0; transform: translateX(42px); }
 .teaching-section { padding: 18px; display: grid; gap: 14px; }
 .teaching-empty { min-height: 240px; display: grid; place-items: center; align-content: center; gap: 10px; color: var(--muted); text-align: center; }
 .teaching-empty iconify-icon { font-size: 34px; color: var(--faint); }

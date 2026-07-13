@@ -37,6 +37,7 @@ import {
   ui,
 } from "../store";
 import type { GraphNode } from "../types";
+import CanvasMinimap from "./CanvasMinimap.vue";
 import CanvasTabs from "./CanvasTabs.vue";
 import PetMascot from "./PetMascot.vue";
 
@@ -202,6 +203,8 @@ onBeforeUnmount(() => {
       <iconify-icon icon="mdi:close-circle-outline"></iconify-icon>
       退出连线
     </button>
+    <!-- 迷你地图：操作画布时短暂淡入，随后淡出 -->
+    <CanvasMinimap />
     <!-- 画布功能栏：空闲时收成"缩放"胶囊，悬停向右展开 视图/历史；空闲自动淡出 -->
     <div class="canvas-toolbar" :class="{ 'is-faded': !toolbarActive }" @mouseenter="pokeToolbar">
       <!-- 常驻：缩放 -->
@@ -367,14 +370,6 @@ onBeforeUnmount(() => {
             <span>输出尺寸</span>
             <strong class="shape-value" :class="{ pending: node.hint === '?' }">{{ shapeHintText(node.hint) }}</strong>
           </div>
-          <!-- 输入锚点（顶部） -->
-          <div
-            v-if="node.type !== 'Input'"
-            class="node-port node-port-in"
-            :data-endpoint="node.id"
-            data-port-kind="in"
-            title="连线接入点"
-          ></div>
           <!-- 输出端口（底部）：按住拖到另一个节点即可连线 -->
           <div
             v-if="node.type !== 'Output'"

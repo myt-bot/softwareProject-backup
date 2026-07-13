@@ -443,6 +443,23 @@ export const ui = reactive({
 
 
 // —————————————————————————————————————————————
+// 画布迷你地图：仅在移动/缩放/更新画布时短暂显现，随后淡出
+// —————————————————————————————————————————————
+
+export const minimap = reactive({ visible: false });
+let minimapHideTimer: ReturnType<typeof setTimeout> | undefined;
+
+// 有画布操作时唤起迷你地图并重置 3.5 秒淡出计时
+export function pokeMinimap() {
+  minimap.visible = true;
+  if (minimapHideTimer) clearTimeout(minimapHideTimer);
+  minimapHideTimer = setTimeout(() => {
+    minimap.visible = false;
+  }, 3500);
+}
+
+
+// —————————————————————————————————————————————
 // 确认弹窗（替代浏览器原生 window.confirm，风格与系统一致；Promise 化便于 await）
 // —————————————————————————————————————————————
 
