@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { loadTemplateToCanvas } from "../actions";
-import { templateLibrary, ui } from "../store";
+import { templateLibrary } from "../store";
 import type { TemplateMeta } from "../types";
 
-const emit = defineEmits<{ selected: [] }>();
+const emit = defineEmits<{
+  enterWorkspace: [];
+}>();
 
 // 模板分类的展示样式（图标 + 中文标签 + 颜色）
 const FAMILY_STYLES: Record<string, { icon: string; label: string; color: string }> = {
@@ -16,7 +18,6 @@ const FAMILY_STYLES: Record<string, { icon: string; label: string; color: string
   graph: { icon: "mdi:graph", label: "图网络", color: "emerald" },
 };
 
-// 每个模板的新手友好元信息：难度、一句话用途、结构预览、是否推荐新手
 interface ExtraMeta {
   difficulty: "新手" | "进阶";
   purpose: string;
@@ -45,7 +46,6 @@ function familyStyle(template: TemplateMeta) {
   return FAMILY_STYLES[template.family || ""] || { icon: "mdi:shape-outline", label: "模板", color: "cyan" };
 }
 
-// 新手模板排在前面，便于初学者先看到简单的
 const sortedTemplates = computed(() =>
   [...templateLibrary.items].sort((a, b) => {
     const da = extraMeta(a).difficulty === "新手" ? 0 : 1;
@@ -54,32 +54,23 @@ const sortedTemplates = computed(() =>
   })
 );
 
-function close() {
-  ui.templateGalleryOpen = false;
-}
-
 async function pick(template: TemplateMeta) {
-  // 仅在模板加载成功时通知外层进入工作台
-  if (await loadTemplateToCanvas(template.key, template.name)) emit("selected");
+  // 加载成功后直接进入工作台开始编辑
+  if (await loadTemplateToCanvas(template.key, template.name)) emit("enterWorkspace");
 }
 </script>
 
 <template>
-  <!-- 快速开始模板库 -->
-  <div class="modal" :class="{ hidden: !ui.templateGalleryOpen }" id="template-gallery">
-    <div class="modal-card template-gallery-card">
-      <div class="modal-header">
-        <div class="modal-title">
-          <iconify-icon icon="mdi:lightning-bolt"></iconify-icon>
-          <div>
-            <h2>快速开始模板</h2>
-            <p>选择一个经典网络，一键加载到当前画布</p>
-          </div>
+  <main class="mw-subpage">
+      <header class="mw-subpage-head">
+        <span class="mw-subpage-icon lightning"><iconify-icon icon="mdi:lightning-bolt"></iconify-icon></span>
+        <div>
+          <h1>模板库</h1>
+          <p>选择一个经典网络，一键加载到画布并进入工作台开始编辑</p>
         </div>
-        <button class="icon-button" id="btn-close-gallery" @click="close"><iconify-icon icon="mdi:close"></iconify-icon></button>
-      </div>
+      </header>
 
-      <div class="template-grid">
+      <div class="template-grid mw-subpage-grid">
         <button
           v-for="template in sortedTemplates"
           :key="template.key"
@@ -101,7 +92,6 @@ async function pick(template: TemplateMeta) {
           </div>
           <strong>{{ template.name }}</strong>
           <p>{{ extraMeta(template).purpose || template.description }}</p>
-          <!-- 结构预览：层的流程缩略 -->
           <div v-if="extraMeta(template).structure.length" class="template-structure">
             <template v-for="(step, i) in extraMeta(template).structure" :key="i">
               <span class="template-step">{{ step }}</span>
@@ -110,6 +100,47 @@ async function pick(template: TemplateMeta) {
           </div>
         </button>
       </div>
-    </div>
-  </div>
+  </main>
 </template>
+
+<style scoped>
+.mw-subpage {
+  width: min(1180px, calc(100% - 64px));
+  margin: 0 auto;
+  flex: 1;
+  padding: 32px 0 40px;
+}
+.mw-subpage-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+.mw-subpage-icon {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  font-size: 27px;
+}
+.mw-subpage-icon.lightning { color: #dd8a12; background: #fff2d9; }
+.mw-subpage-head h1 { margin: 0; font-size: 26px; letter-spacing: -.02em; }
+.mw-subpage-head p { margin: 5px 0 0; color: #6d7f9b; font-size: 14px; }
+
+/* 页面版模板网格：铺满整页、去掉弹窗内的滚动约束 */
+.mw-subpage-grid {
+  padding: 0;
+  overflow: visible;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 960px) {
+  .mw-subpage { width: min(100% - 40px, 820px); }
+  .mw-subpage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .mw-subpage-grid { grid-template-columns: 1fr; }
+}
+</style>

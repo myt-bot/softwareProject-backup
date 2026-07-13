@@ -43,9 +43,8 @@ function layerCount(project: ProjectMeta) {
 }
 
 async function openProject(project: ProjectMeta) {
-  await loadProjectToCanvas(project);
-  // 只有项目成功加载并关闭列表后才进入工作台；直接关闭窗口仍停留在首页。
-  if (!ui.projectsModalOpen) emit("selected");
+  // 仅在项目成功加载时通知外层进入工作台
+  if (await loadProjectToCanvas(project)) emit("selected");
 }
 
 async function confirmDelete(project: ProjectMeta) {

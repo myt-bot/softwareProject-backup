@@ -2,11 +2,13 @@
 import { auth, handleLogout } from "../auth";
 import { agent, openHelpModal, ui } from "../store";
 import PetMascot from "./PetMascot.vue";
+
+const emit = defineEmits<{ home: [] }>();
 </script>
 
 <template>
   <header class="topbar">
-    <div class="brand">
+    <div class="brand" role="button" title="返回首页" @click="emit('home')">
       <div class="brand-mark">
         <iconify-icon icon="mdi:brain"></iconify-icon>
       </div>
@@ -14,6 +16,12 @@ import PetMascot from "./PetMascot.vue";
     </div>
 
     <div class="top-actions">
+      <!-- 返回首页 -->
+      <button class="guide-button" id="btn-home" title="返回首页" @click="emit('home')">
+        <iconify-icon icon="mdi:home-variant"></iconify-icon>
+        首页
+      </button>
+
       <!-- 本机训练 Agent 连接状态（点击查看如何启动本地 Agent） -->
       <button
         class="agent-chip"
@@ -59,3 +67,7 @@ import PetMascot from "./PetMascot.vue";
     </div>
   </header>
 </template>
+
+<style scoped>
+.brand { cursor: pointer; }
+</style>

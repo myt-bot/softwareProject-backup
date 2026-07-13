@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { fetchMyProjects } from "../actions";
-import { auth, handleLogout } from "../auth";
+import { auth } from "../auth";
 import type { ProjectMeta } from "../types";
 
 const emit = defineEmits<{
-  enterWorkspace: [];
+  navigate: [page: "home" | "templates" | "projects"];
   createProject: [];
-  browseTemplates: [];
-  openProjects: [];
   openProject: [project: ProjectMeta];
 }>();
 
@@ -55,50 +53,7 @@ function projectType(project: ProjectMeta, index: number) {
 </script>
 
 <template>
-  <div class="mw-home-page">
-    <header class="mw-home-header">
-      <div class="mw-brand">
-        <span class="mw-brand-mark"><iconify-icon icon="mdi:brain"></iconify-icon></span>
-        <span class="mw-brand-copy">
-          <strong>模型工坊</strong>
-          <small>深度学习可视化搭建平台</small>
-        </span>
-      </div>
-
-      <nav class="mw-nav" aria-label="首页导航">
-        <button class="mw-nav-item active" type="button">
-          <iconify-icon icon="mdi:home-variant"></iconify-icon>
-          首页
-        </button>
-        <button class="mw-nav-item" type="button" @click="emit('browseTemplates')">
-          <iconify-icon icon="mdi:cube-outline"></iconify-icon>
-          模板库
-        </button>
-        <button class="mw-nav-item" type="button" @click="emit('openProjects')">
-          <iconify-icon icon="mdi:account-outline"></iconify-icon>
-          我的项目
-        </button>
-      </nav>
-
-      <div class="mw-header-actions">
-        <button class="mw-notice" type="button" title="暂无新通知">
-          <iconify-icon icon="mdi:bell-outline"></iconify-icon>
-        </button>
-        <button class="mw-enter-button" type="button" @click="emit('enterWorkspace')">
-          进入工作台
-          <iconify-icon icon="mdi:chevron-right"></iconify-icon>
-        </button>
-        <div class="mw-user-chip" :title="auth.user?.email || ''">
-          <span class="mw-avatar"><iconify-icon icon="mdi:account"></iconify-icon></span>
-          <span>{{ auth.user?.username || auth.user?.email }}</span>
-          <button class="mw-logout" type="button" title="退出登录" @click="handleLogout">
-            <iconify-icon icon="mdi:logout-variant"></iconify-icon>
-          </button>
-        </div>
-      </div>
-    </header>
-
-    <main class="mw-home-main">
+  <main class="mw-home-main">
       <section class="mw-hero">
         <div class="mw-hero-copy">
           <h1>{{ greeting }}，{{ displayName }}！今天想做点什么？</h1>
@@ -140,7 +95,7 @@ function projectType(project: ProjectMeta, index: number) {
           <div>
             <h2>从模板开始</h2>
             <p>使用优秀模板，快速构建经典模型</p>
-            <button type="button" @click="emit('browseTemplates')">
+            <button type="button" @click="emit('navigate', 'templates')">
               浏览模板库
               <iconify-icon icon="mdi:chevron-right"></iconify-icon>
             </button>
@@ -152,7 +107,7 @@ function projectType(project: ProjectMeta, index: number) {
           <div>
             <h2>打开已有项目</h2>
             <p>继续上次的工作，快速进入状态</p>
-            <button type="button" @click="emit('openProjects')">
+            <button type="button" @click="emit('navigate', 'projects')">
               打开项目
               <iconify-icon icon="mdi:chevron-right"></iconify-icon>
             </button>
@@ -199,7 +154,7 @@ function projectType(project: ProjectMeta, index: number) {
             <header class="mw-panel-title mw-recent-title">
               <span><iconify-icon icon="mdi:clock-outline"></iconify-icon></span>
               <h2>最近项目</h2>
-              <button type="button" @click="emit('openProjects')">
+              <button type="button" @click="emit('navigate', 'projects')">
                 查看全部项目
                 <iconify-icon icon="mdi:chevron-right"></iconify-icon>
               </button>
@@ -284,143 +239,19 @@ function projectType(project: ProjectMeta, index: number) {
               <div class="mw-node output"><b>OUTPUT</b><strong>输出层</strong><small>10</small></div>
             </div>
           </div>
-
         </article>
       </section>
-    </main>
-
-    <footer class="mw-footer">
-      <span>© 2026 模型工坊 · 深度学习可视化搭建平台</span>
-      <nav aria-label="页脚信息">
-        <span>帮助文档</span>
-        <span>社区支持</span>
-        <span>意见反馈</span>
-        <span>关于我们</span>
-      </nav>
-    </footer>
-  </div>
+  </main>
 </template>
 
 <style scoped>
-.mw-home-page {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  overflow-x: hidden;
-  color: #172541;
-  background: #f7faff;
-  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
-}
-
 button { font: inherit; }
 
-.mw-home-header {
-  height: 70px;
-  flex: 0 0 70px;
-  padding: 0 30px;
-  display: grid;
-  grid-template-columns: minmax(250px, 1fr) auto minmax(340px, 1fr);
-  align-items: center;
-  gap: 18px;
-  position: relative;
-  z-index: 20;
-  background: rgba(255,255,255,.98);
-  border-bottom: 1px solid #e6edf7;
-  box-shadow: 0 4px 18px rgba(34,65,108,.035);
-}
-
-.mw-brand,
-.mw-nav,
-.mw-nav-item,
-.mw-header-actions,
-.mw-enter-button,
-.mw-user-chip,
 .mw-panel-title,
 .mw-preview-title > div {
   display: flex;
   align-items: center;
 }
-
-.mw-brand { width: fit-content; gap: 12px; }
-.mw-brand-mark {
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  color: #fff;
-  font-size: 24px;
-  background: linear-gradient(145deg,#2b9cf0,#0bb7dc);
-  box-shadow: 0 8px 20px rgba(20,158,226,.25);
-}
-.mw-brand-copy strong,
-.mw-brand-copy small { display: block; }
-.mw-brand-copy strong { font-size: 21px; letter-spacing: .01em; }
-.mw-brand-copy small { margin-top: 3px; color: #8a9bb3; font-size: 12px; }
-
-.mw-nav { height: 100%; gap: 10px; }
-.mw-nav-item {
-  height: 52px;
-  padding: 0 14px;
-  gap: 7px;
-  border: 0;
-  border-bottom: 3px solid transparent;
-  color: #53647e;
-  background: transparent;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.mw-nav-item iconify-icon { font-size: 18px; }
-.mw-nav-item:hover { color: #128ce5; }
-.mw-nav-item.active { color: #118fe7; border-bottom-color: #1ca2eb; }
-
-.mw-header-actions { justify-content: flex-end; gap: 12px; }
-.mw-notice,
-.mw-logout {
-  border: 0;
-  color: #6f819d;
-  background: transparent;
-  cursor: pointer;
-}
-.mw-notice { width: 34px; height: 34px; display: grid; place-items: center; font-size: 19px; }
-.mw-notice:hover { color: #138fe8; }
-.mw-enter-button {
-  height: 42px;
-  padding: 0 19px;
-  gap: 7px;
-  border: 0;
-  border-radius: 10px;
-  color: #fff;
-  background: linear-gradient(135deg,#1aa2ed,#118ce3);
-  box-shadow: 0 8px 18px rgba(19,148,229,.22);
-  font-size: 14px;
-  font-weight: 800;
-  cursor: pointer;
-  transition: transform .18s ease, box-shadow .18s ease;
-}
-.mw-enter-button:hover { transform: translateY(-1px); box-shadow: 0 11px 24px rgba(19,148,229,.28); }
-.mw-user-chip {
-  gap: 8px;
-  padding: 4px 6px;
-  border-radius: 22px;
-  color: #33445f;
-  background: #f4f7fc;
-  font-size: 13px;
-  font-weight: 700;
-}
-.mw-avatar {
-  width: 31px;
-  height: 31px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  color: #7b91b3;
-  background: #e5edf8;
-  font-size: 18px;
-}
-.mw-logout { width: 28px; height: 28px; border-radius: 50%; }
-.mw-logout:hover { color: #e85865; background: #fff0f2; }
 
 .mw-home-main {
   width: min(1390px, calc(100% - 64px));
@@ -763,26 +594,6 @@ button { font: inherit; }
 .mw-node.linear { left: 202px; bottom: 27px; }
 .mw-node.output { left: 76px; bottom: 27px; border-color: #f4b1b8; }
 .mw-node.output b { color: #d45361; }
-.mw-footer {
-  min-height: 42px;
-  margin-top: 14px;
-  padding: 0 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 42px;
-  border-top: 1px solid #e6edf5;
-  color: #8090a6;
-  background: #fff;
-  font-size: 11px;
-}
-.mw-footer nav { display: flex; gap: 28px; }
-
-@media (max-width: 1040px) {
-  .mw-home-header { grid-template-columns: 1fr auto; }
-  .mw-nav { display: none; }
-  .mw-header-actions { justify-self: end; }
-}
 
 @media (max-width: 960px) {
   .mw-home-main { width: min(100% - 30px, 900px); }
@@ -795,11 +606,6 @@ button { font: inherit; }
 }
 
 @media (max-width: 720px) {
-  .mw-home-header { height: 62px; flex-basis: 62px; padding: 0 13px; }
-  .mw-brand-copy small,
-  .mw-notice,
-  .mw-user-chip > span:not(.mw-avatar) { display: none; }
-  .mw-enter-button { padding: 0 12px; }
   .mw-home-main { width: min(100% - 22px, 680px); }
   .mw-hero { min-height: 188px; padding: 34px 20px 58px; margin-inline: -11px; }
   .mw-hero-copy h1 { font-size: 32px; }
@@ -811,12 +617,9 @@ button { font: inherit; }
   .mw-guide-arrow { display: none; }
   .mw-preview-workspace { grid-template-columns: 100px 1fr; }
   .mw-node { transform: scale(.8); transform-origin: top left; }
-  .mw-footer { flex-direction: column; gap: 6px; padding: 10px 16px; }
-  .mw-footer nav { gap: 12px; }
 }
 
 @media (max-height: 820px) and (min-width: 961px) {
-  .mw-home-header { height: 64px; flex-basis: 64px; }
   .mw-hero { min-height: 168px; padding-top: 32px; padding-bottom: 60px; }
   .mw-hero-copy h1 { font-size: 38px; }
   .mw-hero-art { top: 2px; transform: scale(.87) rotate(-3deg); transform-origin: center; }
@@ -833,6 +636,5 @@ button { font: inherit; }
   .mw-project-card { height: 66px; }
   .mw-project-preview { width: 46px; height: 44px; }
   .mw-preview-title { height: 44px; }
-  .mw-footer { min-height: 36px; margin-top: 10px; }
 }
 </style>

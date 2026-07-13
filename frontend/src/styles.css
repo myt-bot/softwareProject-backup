@@ -3596,11 +3596,18 @@ body.is-connecting .node-port {
    ============================================================ */
 .toast-container {
   position: fixed;
-  top: 76px;
-  right: 24px;
+  bottom: 96px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 100;
   display: grid;
   gap: 12px;
+  justify-items: center;
+  pointer-events: none;
+}
+
+.toast-container .toast {
+  pointer-events: auto;
 }
 
 .toast {
@@ -3630,14 +3637,14 @@ body.is-connecting .node-port {
 }
 
 .toast-out {
-  transform: translateX(120%);
+  transform: translateY(16px);
   opacity: 0;
   transition: 0.4s ease;
 }
 
 @keyframes slide-in {
-  from { transform: translateX(100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 /* ============================================================

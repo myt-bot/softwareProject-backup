@@ -71,20 +71,22 @@ export async function loadProjectTemplates() {
 }
 
 
-export async function loadTemplateToCanvas(templateKey: string, templateName?: string) {
+export async function loadTemplateToCanvas(templateKey: string, templateName?: string): Promise<boolean> {
   try {
     const result = await fetchProjectTemplate(templateKey);
     const graph = result?.model;
     if (!graph) {
       showToast("error", "模板数据为空，无法加载。");
-      return;
+      return false;
     }
 
     applyTemplateGraph(graph);
     ui.templateGalleryOpen = false;
     showToast("success", `已加载模板: ${templateName || templateKey}`);
+    return true;
   } catch (error) {
     showBackendError(error, "模板加载接口暂未实现。");
+    return false;
   }
 }
 
@@ -243,13 +245,13 @@ export async function fetchMyProjects(): Promise<ProjectMeta[]> {
 
 
 // 把已保存的项目加载到画布：新建一个画布并铺开模型图
-export async function loadProjectToCanvas(project: ProjectMeta): Promise<void> {
+export async function loadProjectToCanvas(project: ProjectMeta): Promise<boolean> {
   try {
     const detail = await getProject(project.id);
     const graph = detail?.data?.model_graph;
     if (!graph) {
       showToast("error", "项目数据为空，无法加载。");
-      return;
+      return false;
     }
     // 新建画布承载该项目，避免覆盖当前正在编辑的画布
     addCanvas();
@@ -258,8 +260,10 @@ export async function loadProjectToCanvas(project: ProjectMeta): Promise<void> {
     applyTemplateGraph(graph);
     ui.projectsModalOpen = false;
     showToast("success", `已加载模型：${project.name}`);
+    return true;
   } catch (error) {
     showBackendError(error, "加载模型失败。");
+    return false;
   }
 }
 
