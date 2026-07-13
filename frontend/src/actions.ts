@@ -28,6 +28,7 @@ import {
   isTrainingJobActive,
   setTrainingJob,
   showToast,
+  store,
   templateLibrary,
   ui,
   updateShapeHints,
@@ -80,6 +81,15 @@ export async function loadTemplateToCanvas(templateKey: string, templateName?: s
       return false;
     }
 
+    // 防覆盖：无画布、或当前画布已有内容时，把模板载入到新画布，
+    // 避免清掉用户正在编辑的模型，也避免落到占位画布上
+    const current = store.canvases.length > 0 ? activeCanvas() : null;
+    if (!current || current.nodes.length > 0 || current.connections.length > 0) {
+      addCanvas();
+    }
+    const target = activeCanvas();
+    // 画布名称与模板名保持一致，标签页一眼可辨
+    if (templateName) target.name = templateName;
     applyTemplateGraph(graph);
     ui.templateGalleryOpen = false;
     showToast("success", `已加载模板: ${templateName || templateKey}`);
@@ -392,6 +402,17 @@ export async function handleStartTraining() {
   if (isTrainingJobActive(canvas.trainingJob)) {
     showToast("info", "当前画布已有训练任务进行中，请打开训练详情查看进度。");
     openTrainingMonitorForCanvas(canvas);
+    return;
+  }
+
+  // 必须先通过结构检查（按钮已不再禁用，这里做中央兜底，覆盖 AI 等其它入口）
+  if (canvas.validationStatus !== "passing") {
+    showToast(
+      canvas.nodes.length ? "error" : "warning",
+      canvas.nodes.length
+        ? "请先点击「检查结构」并通过后，才能开始训练。"
+        : "画布还是空的，先拖入层搭好模型。"
+    );
     return;
   }
 

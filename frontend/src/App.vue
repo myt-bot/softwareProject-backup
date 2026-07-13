@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { loadProjectTemplates, loadProjectToCanvas } from "./actions";
 import { auth, initializeAuth, isLoggedIn } from "./auth";
 import { addCanvas, cancelPendingConnection, hideConnectionMenu, hideNodeMenu, redoGraphChange, undoGraphChange } from "./canvas";
-import { activeCanvas, closeHelpModal, CONTAINER_ID_SEP, getCurrentModelGraph, initializeBeginnerGuide, ui } from "./store";
+import { activeCanvas, closeHelpModal, CONTAINER_ID_SEP, getCurrentModelGraph, initializeBeginnerGuide, store, ui } from "./store";
 import ActionBar from "./components/ActionBar.vue";
 import AgentModal from "./components/AgentModal.vue";
 import AssistantPanel from "./components/AssistantPanel.vue";
@@ -46,6 +46,8 @@ watch(currentPage, (next, prev) => {
   if (next === "workspace") enteredWorkspace.value = true;
 });
 const canvas = computed(() => activeCanvas());
+// 工作台是否还有画布：删到 0 个时进入“无画布”空态，隐藏组件库等，提示先新建
+const hasCanvas = computed(() => store.canvases.length > 0);
 const selectedTeachingNode = computed(() =>
   canvas.value.nodes.find(node => node.id === canvas.value.selectedNodeId) ?? null
 );
@@ -85,11 +87,14 @@ function enterWorkspace() {
 }
 
 function createBlankProject() {
-  const current = activeCanvas();
-  // 当前画布已有内容时新建一个空画布，避免覆盖用户正在编辑的模型；
-  // 当前画布本来就是空白时直接复用，避免产生多余标签页。
-  if (current.nodes.length > 0 || current.connections.length > 0) {
+  // 无画布时先建一个；否则当前画布有内容才新建，避免覆盖或产生多余空标签页。
+  if (store.canvases.length === 0) {
     addCanvas();
+  } else {
+    const current = activeCanvas();
+    if (current.nodes.length > 0 || current.connections.length > 0) {
+      addCanvas();
+    }
   }
   currentPage.value = "workspace";
 }
@@ -232,33 +237,56 @@ onBeforeUnmount(() => {
       <!-- 工作台 -->
       <div v-else key="workspace" class="app-shell">
         <TopBar @home="goHome" />
-        <GuideStrip />
 
-        <div class="workspace" :class="{ 'sidebar-collapsed': ui.sidebarCollapsed }">
-          <LayerSidebar />
-          <CanvasBoard />
-          <InspectorPanel />
-          <TeachingPanel
-            :open="teachingPanelOpen"
-            :available="!ui.assistantOpen"
-            :selected-layer="selectedTeachingNode"
-            :model-graph="teachingModelGraph"
-            :validation-result="teachingValidationResult"
-            @open="teachingPanelOpen = true"
-            @close="teachingPanelOpen = false"
-            @locate-layer="locateTeachingLayer"
-          />
-          <!-- 左侧组件库收起/展开把手（贴在侧栏右缘，跟随收拢动画） -->
-          <button
-            class="sidebar-toggle"
-            :title="ui.sidebarCollapsed ? '展开组件库' : '收起组件库'"
-            @click="ui.sidebarCollapsed = !ui.sidebarCollapsed"
-          >
-            <iconify-icon :icon="ui.sidebarCollapsed ? 'mdi:chevron-right' : 'mdi:chevron-left'"></iconify-icon>
-          </button>
+        <!-- 有画布：正常工作台 -->
+        <template v-if="hasCanvas">
+          <GuideStrip />
+
+          <div class="workspace" :class="{ 'sidebar-collapsed': ui.sidebarCollapsed }">
+            <LayerSidebar />
+            <CanvasBoard />
+            <InspectorPanel />
+            <TeachingPanel
+              :open="teachingPanelOpen"
+              :available="!ui.assistantOpen"
+              :selected-layer="selectedTeachingNode"
+              :model-graph="teachingModelGraph"
+              :validation-result="teachingValidationResult"
+              @open="teachingPanelOpen = true"
+              @close="teachingPanelOpen = false"
+              @locate-layer="locateTeachingLayer"
+            />
+            <!-- 左侧组件库收起/展开把手（贴在侧栏右缘，跟随收拢动画） -->
+            <button
+              class="sidebar-toggle"
+              :title="ui.sidebarCollapsed ? '展开组件库' : '收起组件库'"
+              @click="ui.sidebarCollapsed = !ui.sidebarCollapsed"
+            >
+              <iconify-icon :icon="ui.sidebarCollapsed ? 'mdi:chevron-right' : 'mdi:chevron-left'"></iconify-icon>
+            </button>
+          </div>
+
+          <ActionBar />
+        </template>
+
+        <!-- 无画布：隐藏组件库/检查器/操作栏，提示先新建画布 -->
+        <div v-else class="workspace-empty">
+          <div class="workspace-empty-card">
+            <div class="we-illustration" aria-hidden="true">
+              <span class="we-node n1"></span>
+              <span class="we-node n2"></span>
+              <span class="we-node n3"></span>
+              <span class="we-plus"><iconify-icon icon="mdi:plus"></iconify-icon></span>
+            </div>
+            <h2>当前没有画布</h2>
+            <p>你已删除全部画布，新建一个即可继续搭建模型。</p>
+            <button class="workspace-empty-btn" @click="addCanvas">
+              <iconify-icon icon="mdi:plus"></iconify-icon>
+              新建画布
+            </button>
+            <span class="we-sub">也可点顶部「首页」，从模板快速开始</span>
+          </div>
         </div>
-
-        <ActionBar />
       </div>
     </Transition>
 
@@ -302,6 +330,132 @@ onBeforeUnmount(() => {
 .app-section-leave-to {
   opacity: 0;
 }
+
+/* 无画布空态：整块做成“空画布”网格底，中央一张精致卡片提示先新建画布 */
+.workspace-empty {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  background-color: #f5f8fe;
+  background-image: radial-gradient(#d5deee 1.1px, transparent 1.1px);
+  background-size: 22px 22px;
+}
+/* 顶部/底部柔光，避免纯网格显得死板 */
+.workspace-empty::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(60% 55% at 50% 42%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 70%),
+    radial-gradient(40% 40% at 82% 12%, rgba(96, 170, 244, 0.12), transparent 70%);
+  pointer-events: none;
+}
+
+.workspace-empty-card {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 40px 46px 34px;
+  border: 1px solid #e4ecf7;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 24px 60px rgba(43, 84, 138, 0.16), 0 2px 0 rgba(255, 255, 255, 0.8) inset;
+  animation: we-card-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes we-card-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* 空画布占位插画：虚线画框 + 幽灵节点 + 悬浮渐变“＋” */
+.we-illustration {
+  position: relative;
+  width: 188px;
+  height: 116px;
+  margin-bottom: 22px;
+  border: 2px dashed #bcd4f0;
+  border-radius: 16px;
+  background:
+    radial-gradient(#cfdcef 1px, transparent 1px) 0 0 / 15px 15px,
+    linear-gradient(180deg, #fbfdff, #f2f8ff);
+}
+.we-node {
+  position: absolute;
+  border-radius: 6px;
+  background: #fff;
+  border: 1.5px solid #d7e3f4;
+  box-shadow: 0 4px 10px rgba(52, 96, 150, 0.08);
+}
+.we-node.n1 { width: 34px; height: 20px; left: 16px; top: 20px; border-color: #bfe3d8; }
+.we-node.n2 { width: 30px; height: 20px; right: 20px; top: 26px; border-color: #cdd9ff; }
+.we-node.n3 { width: 34px; height: 20px; left: 50%; bottom: 16px; transform: translateX(-50%); border-color: #f3cdbf; }
+.we-plus {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48px;
+  height: 48px;
+  transform: translate(-50%, -50%);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 26px;
+  background: linear-gradient(135deg, #37b0f2, #1281e6);
+  box-shadow: 0 10px 22px rgba(20, 130, 230, 0.4);
+  animation: we-float 2.6s ease-in-out infinite;
+}
+@keyframes we-float {
+  0%, 100% { transform: translate(-50%, -50%); }
+  50% { transform: translate(-50%, calc(-50% - 5px)); }
+}
+
+.workspace-empty-card h2 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  background: linear-gradient(90deg, #1f3557, #1c74c9);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.workspace-empty-card p {
+  margin: 9px 0 0;
+  max-width: 360px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #6b7d99;
+}
+.workspace-empty-btn {
+  margin-top: 22px;
+  height: 46px;
+  padding: 0 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 13px;
+  color: #fff;
+  background: linear-gradient(135deg, #1aa2ed, #1181e2);
+  box-shadow: 0 12px 24px rgba(19, 132, 226, 0.32);
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+}
+.workspace-empty-btn:hover { transform: translateY(-2px); box-shadow: 0 16px 30px rgba(19, 132, 226, 0.4); filter: brightness(1.03); }
+.workspace-empty-btn:active { transform: translateY(0); }
+.workspace-empty-btn iconify-icon { font-size: 20px; }
+.we-sub { margin-top: 16px; font-size: 12px; color: #9aa8bd; }
 
 /* 方向性横向位移 + 淡入淡出：进入页与离开页朝同一方向一起平移并淡入淡出 */
 .page-forward-enter-active,

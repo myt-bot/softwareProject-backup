@@ -138,11 +138,6 @@ export function switchCanvas(id: number) {
 
 
 export function closeCanvas(id: number) {
-  if (store.canvases.length <= 1) {
-    showToast("warning", "至少保留一个画布。");
-    return;
-  }
-
   const index = store.canvases.findIndex(canvas => canvas.id === id);
   const canvas = store.canvases[index];
   if (!canvas) return;
@@ -156,6 +151,14 @@ export function closeCanvas(id: number) {
   }
 
   store.canvases.splice(index, 1);
+
+  // 删除了最后一个画布：工作台进入“无画布”空态，由界面提示用户先新建画布
+  if (store.canvases.length === 0) {
+    store.activeCanvasId = -1;
+    showToast("success", `已删除 ${canvas.name}。`);
+    return;
+  }
+
   if (store.activeCanvasId === id) {
     const neighbor = store.canvases[Math.min(index, store.canvases.length - 1)]!;
     activateCanvas(neighbor.id);

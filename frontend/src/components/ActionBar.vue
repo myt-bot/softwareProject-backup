@@ -79,16 +79,38 @@ const jobMeta = computed(() => {
 // 编辑容器子画板时：只允许"检查结构"验证内部，训练/导出面向整个模型，需退出后再用
 const editingContainer = computed(() => isEditingContainer());
 
+// 未校验通过不再禁用按钮：允许点击，改为点击后强提示引导先检查结构
 const trainDisabled = computed(
-  () => canvas.value.trainStarting || hasActiveJob.value || editingContainer.value || canvas.value.validationStatus !== "passing"
+  () => canvas.value.trainStarting || hasActiveJob.value || editingContainer.value
 );
 
 const trainButtonTitle = computed(() => {
   if (editingContainer.value) return "正在编辑容器内部，返回主画布后才能训练整个模型。";
   if (hasActiveJob.value) return "当前画布已有训练任务进行中，请先查看训练详情。";
-  if (canvas.value.validationStatus !== "passing") return "先通过“检查结构”，此按钮才会亮起";
+  if (canvas.value.validationStatus !== "passing") return "需先通过“检查结构”，点击会提示你先检查结构";
   return "开始训练当前模型";
 });
+
+// 点击“开始训练”：未通过结构检查时不启动，改为强提示 + 抖动高亮“检查结构”按钮
+const checkFlash = ref(false);
+let flashTimer: ReturnType<typeof setTimeout> | undefined;
+function onTrainClick() {
+  if (canvas.value.validationStatus !== "passing") {
+    if (canvas.value.nodes.length === 0) {
+      showToast("warning", "画布还是空的，先从左侧拖入层搭建模型。");
+    } else {
+      showToast("error", "请先点击「检查结构」并通过后，才能开始训练。");
+    }
+    // 重启抖动动画，把视线强引导到“检查结构”按钮
+    checkFlash.value = false;
+    requestAnimationFrame(() => { checkFlash.value = true; });
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => { checkFlash.value = false; }, 1200);
+    return;
+  }
+  handleStartTraining();
+}
+onBeforeUnmount(() => clearTimeout(flashTimer));
 
 const trainButtonText = computed(() => {
   if (canvas.value.trainStarting) return "启动训练...";
@@ -130,7 +152,7 @@ const needsCheck = computed(
         <button
           class="secondary-button"
           id="btn-validate"
-          :class="{ 'attention-pulse': needsCheck }"
+          :class="{ 'attention-pulse': needsCheck, 'shake-strong': checkFlash }"
           :title="needsCheck ? '训练前先点这里检查结构是否正确' : '自动检查每一层的尺寸是否匹配'"
           :disabled="canvas.validating"
           @click="handleValidateModel"
@@ -198,7 +220,7 @@ const needsCheck = computed(
           id="btn-train"
           :disabled="trainDisabled"
           :title="trainButtonTitle"
-          @click="handleStartTraining"
+          @click="onTrainClick"
         >
           <iconify-icon v-if="canvas.trainStarting" icon="mdi:loading" class="spin"></iconify-icon>
           <iconify-icon v-else-if="hasActiveJob" icon="mdi:timer-sand"></iconify-icon>

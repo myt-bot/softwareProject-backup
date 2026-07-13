@@ -63,7 +63,6 @@ function cancelRename() {
       <span v-else class="canvas-tab-name">{{ canvas.name }}</span>
       <span v-if="isTraining(canvas)" class="canvas-tab-dot" title="训练进行中"></span>
       <span
-        v-if="store.canvases.length > 1"
         class="canvas-tab-close"
         title="关闭画布"
         @click.stop="closeCanvas(canvas.id)"

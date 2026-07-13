@@ -261,8 +261,15 @@ export const store = reactive({
   draggingEdgeControlKey: null as string | null,
 });
 
+// 无画布时返回的占位画布：避免始终渲染的隐藏弹窗等读取 activeCanvas() 时崩溃。
+// 真正的“无画布”空态由界面用 store.canvases.length 守卫，不会真正使用它。
+let placeholderCanvas: WorkCanvas | null = null;
+
 export function activeCanvas(): WorkCanvas {
-  return store.canvases.find(canvas => canvas.id === store.activeCanvasId) ?? store.canvases[0]!;
+  const found = store.canvases.find(canvas => canvas.id === store.activeCanvasId) ?? store.canvases[0];
+  if (found) return found;
+  if (!placeholderCanvas) placeholderCanvas = createCanvas(-1, "");
+  return placeholderCanvas;
 }
 
 // 当前（或指定）数据集对应的输入形状；未知数据集回退到 MNIST 形状。

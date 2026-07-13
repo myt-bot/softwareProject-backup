@@ -54,6 +54,17 @@ const blankContainerLayer: LayerLike = {
   color: "teal",
   hint: "把一段完整的网络结构打包成一个节点。拖到画布后双击进入子画板，在里面像搭普通模型一样放入层并连线；子图里的每个 Input 都会变成容器顶部的一个输入端口，每个 Output 都会变成底部的一个输出端口。适合封装残差块、编码器、分类头等重复结构，保存后还能在“我的容器”中反复拖入复用。",
 };
+// 搜索时：空白容器是否命中关键词，以及“自定义容器”组是否有任何匹配项。
+// 用于让容器组也遵循和其它组一样的搜索行为（无匹配则整组隐藏、不自动展开）。
+const blankContainerMatched = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase();
+  return !query || `${blankContainerLayer.type} ${blankContainerLayer.desc}`.toLowerCase().includes(query);
+});
+const containerMatched = computed(() => blankContainerMatched.value || filteredContainers.value.length > 0);
+const isContainerOpen = computed(() =>
+  searchActive.value ? containerMatched.value : openGroup.value === CONTAINER_TITLE
+);
+
 const hovered = ref<{ layer: LayerLike; top: number; left: number } | null>(null);
 
 function showTip(event: MouseEvent, layer: LayerLike) {
@@ -117,7 +128,11 @@ function handleDragStart(event: DragEvent, layerType: string) {
     </div>
     <div class="layer-list" id="layer-palette">
       <!-- 自定义容器：拖入空白容器，双击进入子画板搭建内部 -->
-      <section class="layer-group" :class="{ collapsed: !isOpen(CONTAINER_TITLE) }">
+      <section
+        class="layer-group"
+        :class="{ collapsed: !isContainerOpen }"
+        v-show="!searchActive || containerMatched"
+      >
         <div class="folder-back" aria-hidden="true"></div>
         <div class="folder-peeks" aria-hidden="true">
           <span
@@ -138,6 +153,7 @@ function handleDragStart(event: DragEvent, layerType: string) {
         <div class="layer-group-body">
           <div class="layer-items">
           <article
+            v-show="blankContainerMatched"
             class="layer-item layer-item-container"
             draggable="true"
             @mouseenter="showTip($event, blankContainerLayer)"
