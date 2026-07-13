@@ -113,6 +113,7 @@ export interface LayerShapeInfo {
   layer_type?: string;
   input_shape?: number[] | null;
   output_shape?: number[] | null;
+  error?: string;
   expected_in_features?: number;
   actual_in_features?: number;
 }
@@ -124,6 +125,77 @@ export interface ValidationResult {
   errors?: string[];
   warnings?: string[];
   shapes?: Record<string, LayerShapeInfo>;
+}
+
+export interface ErrorTeachingSuggestion {
+  matched: boolean;
+  category: string;
+  severity: string;
+  title: string;
+  original_error: unknown;
+  reason: string;
+  suggestions: string[];
+  related_layers: string[];
+  related_parameters: string[];
+  layer_id: string | null;
+  layer_type: string | null;
+  parameter: string | null;
+  current_value: unknown;
+  expected_value: unknown;
+  suggested_value: unknown;
+  can_locate: boolean;
+  can_auto_fix: boolean;
+}
+
+export interface LayerTeaching {
+  known: boolean;
+  layer_type: string;
+  display_name: string;
+  purpose: string;
+  input_requirement: string;
+  output_effect: string;
+  common_position: string;
+  beginner_tip: string;
+  common_mistakes: string[];
+}
+
+export interface ParameterTeaching {
+  known: boolean;
+  layer_type: string;
+  parameter: string;
+  display_name: string;
+  explanation: string;
+  recommendation: string;
+  increase_effect: string;
+  decrease_effect: string;
+  constraint: string;
+  common_mistakes: string[];
+}
+
+export interface ModelFlowItem {
+  layer_id: string;
+  layer_type: string;
+  display_name: string;
+}
+
+export interface ModelKeyLayer {
+  layer_id: string;
+  layer_type: string;
+  role: string;
+}
+
+export interface ModelTeachingOverview {
+  understood: boolean;
+  model_family: string;
+  title: string;
+  summary: string;
+  layer_count: number;
+  connection_count: number;
+  layer_type_counts: Record<string, number>;
+  flow: ModelFlowItem[];
+  key_layers: ModelKeyLayer[];
+  learning_points: string[];
+  beginner_warnings: string[];
 }
 
 export interface EpochMetrics {

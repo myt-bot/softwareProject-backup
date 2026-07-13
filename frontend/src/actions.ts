@@ -100,14 +100,23 @@ export async function handleValidateModel(): Promise<ValidationResult | null> {
   if (canvas.validating) return null;
 
   // 结构校验与维度推导在云端完成，无需本地 Agent（训练才需要 Agent）
+  const modelSnapshot = getCurrentModelGraph(canvas);
+  const serializedSnapshot = JSON.stringify(modelSnapshot);
   canvas.validating = true;
+
   try {
-    const result = await validateModelStructure(getCurrentModelGraph(canvas));
+    const result = await validateModelStructure(modelSnapshot);
+
+    if (JSON.stringify(getCurrentModelGraph(canvas)) !== serializedSnapshot) {
+      return null;
+    }
+
     applyValidationResult(canvas, result);
     return result;
   } catch (error) {
     showToast("error", (error as Error)?.message || "结构校验失败。");
     canvas.validationStatus = "unvalidated";
+    canvas.lastValidationResult = null;
     return null;
   } finally {
     canvas.validating = false;
@@ -118,6 +127,7 @@ export async function handleValidateModel(): Promise<ValidationResult | null> {
 
 
 function applyValidationResult(canvas: WorkCanvas, result: ValidationResult) {
+  canvas.lastValidationResult = result;
   canvas.nodeErrors = {};
   const valid = result?.valid === true || result?.status === "ok";
   if (valid) {

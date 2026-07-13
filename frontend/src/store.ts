@@ -23,6 +23,7 @@ import type {
   TrainConfig,
   TrainingJob,
   TrainingModelSummary,
+  ValidationResult,
 } from "./types";
 
 // 自定义容器节点的类型标识（与后端 graph_utils.CONTAINER_TYPE 对应）
@@ -173,6 +174,7 @@ export interface WorkCanvas {
   // 校验失败时每个出错节点的人话提示（nodeId → 说明），用于在画布上标红定位
   nodeErrors: Record<string, string>;
   inFeatures: number;
+  lastValidationResult: ValidationResult | null;
   validating: boolean;
   // 训练任务
   epochs: number;
@@ -211,6 +213,7 @@ export function createCanvas(
     nodeBadge: "none",
     nodeErrors: {},
     inFeatures: 1024,
+    lastValidationResult: null,
     validating: false,
     epochs: 1,
     trainStarting: false,
@@ -301,6 +304,7 @@ export function applyDatasetInputShapes(): boolean {
       canvas.validationStatus = "unvalidated";
       canvas.nodeBadge = "none";
       canvas.nodeErrors = {};
+      canvas.lastValidationResult = null;
       changedAny = true;
     }
   }
@@ -616,6 +620,7 @@ export function resetValidationAfterGraphChange(canvas: WorkCanvas = activeCanva
   canvas.validationStatus = "unvalidated";
   canvas.nodeBadge = "none";
   canvas.nodeErrors = {};
+  canvas.lastValidationResult = null;
 }
 
 

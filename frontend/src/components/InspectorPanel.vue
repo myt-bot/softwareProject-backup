@@ -13,6 +13,7 @@ import {
   ui,
   updateNodeParam,
 } from "../store";
+import type { LayerShapeInfo } from "../types";
 import ParamNumberField from "./ParamNumberField.vue";
 
 const canvas = computed(() => activeCanvas());
@@ -22,15 +23,22 @@ const selectedNode = computed(() =>
 );
 
 // 实时形状预览：改参数时向云端请求维度推导（防抖），无需本地 Agent
-const shapesMap = ref<Record<string, { output_shape?: number[] | null }>>({});
+const shapesMap = ref<Record<string, LayerShapeInfo>>({});
 let shapeTimer: ReturnType<typeof setTimeout> | undefined;
+let shapeRequestId = 0;
 
 function refreshShapes() {
   clearTimeout(shapeTimer);
+  const requestId = ++shapeRequestId;
+  const requestCanvas = canvas.value;
+  const modelSnapshot = getCurrentModelGraph(requestCanvas);
+
   shapeTimer = setTimeout(async () => {
     try {
-      const result = await validateModelStructure(getCurrentModelGraph(canvas.value));
-      shapesMap.value = result.shapes || {};
+      const result = await validateModelStructure(modelSnapshot);
+      if (requestId === shapeRequestId && activeCanvas() === requestCanvas) {
+        shapesMap.value = result.shapes || {};
+      }
     } catch {
       // 预览失败不打扰用户（点"检查结构"仍会给出明确结果）
     }
@@ -43,10 +51,17 @@ const liveOutputShape = computed(() => {
   return shape && shape.length ? shape.join("×") : "—";
 });
 
-// 选中节点变化或组件挂载时刷新一次预览
-watch(selectedNode, node => {
-  if (node) refreshShapes();
-}, { immediate: true });
+// 画布或选中节点变化时先清除旧预览，并使仍在途的请求失效。
+watch(
+  () => [canvas.value.id, selectedNode.value?.id] as const,
+  ([, nodeId]) => {
+    clearTimeout(shapeTimer);
+    shapeRequestId += 1;
+    shapesMap.value = {};
+    if (nodeId) refreshShapes();
+  },
+  { immediate: true },
+);
 
 // 面板悬浮于画布之上：选中节点且未被手动收起时滑入，不改变画布尺寸
 const panelOpen = computed(() => Boolean(selectedNode.value) && !ui.inspectorCollapsed);
@@ -55,10 +70,12 @@ function collapsePanel() {
   ui.inspectorCollapsed = true;
 }
 
-// Linear 的 shape mismatch 提示（教学演示：in_features 应为 2704）
-const linearShapeError = computed(
-  () => canvas.value.validationStatus === "failed" && canvas.value.inFeatures !== 2704
-);
+const linearActualInFeatures = computed(() => {
+  const node = selectedNode.value;
+  if (!node) return "自动推导";
+  const value = shapesMap.value[node.id]?.actual_in_features;
+  return typeof value === "number" ? String(value) : "自动推导";
+});
 
 function setParam(key: string, value: number | boolean) {
   if (!selectedNode.value) return;
@@ -207,11 +224,6 @@ function handleBooleanChange(key: string, event: Event) {
   setParam(key, (event.target as HTMLInputElement).checked);
 }
 
-function autoFix() {
-  canvas.value.inFeatures = 2704;
-  showToast("success", "参数已自动修复为 2704。");
-}
-
 function handleInputShapeChange(event: Event) {
   const node = selectedNode.value;
   if (!node) return;
@@ -291,16 +303,10 @@ const inputShapeValue = computed(() => {
         <h2>Linear 参数</h2>
       </div>
 
-      <section v-if="linearShapeError" class="error-card">
-        <h4><iconify-icon icon="mdi:alert-circle"></iconify-icon> Shape mismatch</h4>
-        <p>前一层 Flatten 输出维度为 2704，而当前 Linear.in_features 设为 {{ canvas.inFeatures }}。</p>
-        <button id="btn-autofix" @click="autoFix">一键修复</button>
-      </section>
-
       <div class="field-stack">
         <label class="form-field muted-field">
           <span>In Features 输入特征数</span>
-          <input type="text" :value="canvas.inFeatures" readonly>
+          <input type="text" :value="linearActualInFeatures" readonly>
           <small>由前一层自动推导</small>
         </label>
 
