@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { NEW_CONTAINER_PAYLOAD } from "../canvas";
-import { containerLibrary, layerGroups } from "../store";
+import { isEditingContainer, NEW_CONTAINER_PAYLOAD } from "../canvas";
+import { activeCanvas, containerLibrary, layerGroups } from "../store";
 
 const searchQuery = ref("");
+
+// 空画布强引导：当前画布还没有节点时，脉冲高亮 Input 层并自动展开其所在的“基础层”组
+const baseLayersTitle = computed(() =>
+  layerGroups.find(group => group.layers.some(layer => layer.type === "Input"))?.title ?? ""
+);
+const highlightInput = computed(() => activeCanvas().nodes.length === 0 && !isEditingContainer());
 
 // —— 手风琴：一次展开一组；搜索时全部展开以免漏掉匹配项 ——
 const CONTAINER_TITLE = "自定义容器 / Container";
@@ -13,7 +19,9 @@ function toggleGroup(title: string) {
   openGroup.value = openGroup.value === title ? "" : title;
 }
 function isOpen(title: string) {
-  return searchActive.value || openGroup.value === title;
+  return searchActive.value
+    || openGroup.value === title
+    || (highlightInput.value && title === baseLayersTitle.value);
 }
 
 function handleNewContainerDragStart(event: DragEvent) {
@@ -127,7 +135,56 @@ function handleDragStart(event: DragEvent, layerType: string) {
       <input type="text" id="layer-search-input" placeholder="搜索组件，例如 Conv" v-model="searchQuery">
     </div>
     <div class="layer-list" id="layer-palette">
-      <!-- 自定义容器：拖入空白容器，双击进入子画板搭建内部 -->
+      <section
+        v-for="group in filteredGroups"
+        :key="group.title"
+        class="layer-group"
+        :class="{ collapsed: !isOpen(group.title) }"
+        v-show="group.layers.some(layer => layer.matched)"
+      >
+        <div class="folder-back" aria-hidden="true"></div>
+        <div class="folder-peeks" aria-hidden="true">
+          <span
+            v-for="(layer, i) in group.layers.slice(0, 3)"
+            :key="i"
+            :class="`folder-peek p${i} ${layer.color}`"
+          ><iconify-icon :icon="layer.icon"></iconify-icon></span>
+        </div>
+        <div class="folder-front">
+        <h3
+          @click="toggleGroup(group.title)"
+          @mouseenter="showGroupTip($event, group.title, group.layers)"
+          @mouseleave="hideGroupTip"
+        >
+          <span>{{ group.title }}</span>
+          <iconify-icon class="layer-group-chevron" icon="mdi:chevron-down"></iconify-icon>
+        </h3>
+        <div class="layer-group-body">
+          <div class="layer-items">
+          <article
+            v-for="layer in group.layers"
+            :key="layer.type"
+            v-show="layer.matched"
+            class="layer-item"
+            :class="{ 'layer-pulse': highlightInput && layer.type === 'Input' }"
+            :data-layer-type="layer.type"
+            draggable="true"
+            @mouseenter="showTip($event, layer)"
+            @mouseleave="hideTip"
+            @dragstart="handleDragStart($event, layer.type); hideTip()"
+          >
+            <span :class="`layer-icon ${layer.color}`"><iconify-icon :icon="layer.icon"></iconify-icon></span>
+            <div>
+              <strong>{{ layer.type }}</strong>
+              <span>{{ layer.desc }}</span>
+            </div>
+          </article>
+          </div>
+        </div>
+        </div>
+      </section>
+
+      <!-- 自定义容器（进阶功能）：放到常用层之后，避免压在新手最先要用的“基础层”上方 -->
       <section
         class="layer-group"
         :class="{ collapsed: !isContainerOpen }"
@@ -177,54 +234,6 @@ function handleDragStart(event: DragEvent, layerType: string) {
             <div>
               <strong>{{ def.name }}</strong>
               <span>已保存容器</span>
-            </div>
-          </article>
-          </div>
-        </div>
-        </div>
-      </section>
-
-      <section
-        v-for="group in filteredGroups"
-        :key="group.title"
-        class="layer-group"
-        :class="{ collapsed: !isOpen(group.title) }"
-        v-show="group.layers.some(layer => layer.matched)"
-      >
-        <div class="folder-back" aria-hidden="true"></div>
-        <div class="folder-peeks" aria-hidden="true">
-          <span
-            v-for="(layer, i) in group.layers.slice(0, 3)"
-            :key="i"
-            :class="`folder-peek p${i} ${layer.color}`"
-          ><iconify-icon :icon="layer.icon"></iconify-icon></span>
-        </div>
-        <div class="folder-front">
-        <h3
-          @click="toggleGroup(group.title)"
-          @mouseenter="showGroupTip($event, group.title, group.layers)"
-          @mouseleave="hideGroupTip"
-        >
-          <span>{{ group.title }}</span>
-          <iconify-icon class="layer-group-chevron" icon="mdi:chevron-down"></iconify-icon>
-        </h3>
-        <div class="layer-group-body">
-          <div class="layer-items">
-          <article
-            v-for="layer in group.layers"
-            :key="layer.type"
-            v-show="layer.matched"
-            class="layer-item"
-            :data-layer-type="layer.type"
-            draggable="true"
-            @mouseenter="showTip($event, layer)"
-            @mouseleave="hideTip"
-            @dragstart="handleDragStart($event, layer.type); hideTip()"
-          >
-            <span :class="`layer-icon ${layer.color}`"><iconify-icon :icon="layer.icon"></iconify-icon></span>
-            <div>
-              <strong>{{ layer.type }}</strong>
-              <span>{{ layer.desc }}</span>
             </div>
           </article>
           </div>

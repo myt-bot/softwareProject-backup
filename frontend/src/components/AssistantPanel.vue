@@ -56,7 +56,7 @@ const LAYER_PARAMS = assistantHelp.layerParams;
 const messages = ref<ChatMessage[]>([]);
 const input = ref("");
 const busy = ref(false); // AI 本轮是否正在处理
-const status = ref<"idle" | "connecting" | "open" | "closed" | "error">("idle");
+const status = ref<"idle" | "connecting" | "reconnecting" | "open" | "closed" | "error">("idle");
 const listRef = ref<HTMLElement | null>(null);
 const inputRef = ref<HTMLTextAreaElement | null>(null);
 
@@ -273,30 +273,86 @@ async function onMessage(event: MessageEvent) {
   }
 }
 
+// —— WebSocket 断线自动重连（指数退避，最大间隔 15 秒）——
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+let reconnectAttempts = 0;
+let wantConnection = false; // 期望保持连接：进入 AI 模式后为 true，退出/卸载置 false
+const RECONNECT_MAX_MS = 15000;
+
 function connect(): Promise<void> {
+  wantConnection = true;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+  }
   return new Promise((resolve, reject) => {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       if (ws.readyState === WebSocket.OPEN) resolve();
       else ws.addEventListener("open", () => resolve(), { once: true });
       return;
     }
-    status.value = "connecting";
+    if (status.value !== "reconnecting") status.value = "connecting";
+    let settled = false;
     ws = new WebSocket(wsUrl());
     ws.onopen = () => {
       status.value = "open";
+      reconnectAttempts = 0; // 连上即重置退避
+      settled = true;
       resolve();
     };
     ws.onmessage = onMessage;
     ws.onerror = () => {
-      status.value = "error";
-      reject(new Error("WebSocket 连接失败"));
+      if (status.value !== "reconnecting") status.value = "error";
+      if (!settled) {
+        settled = true;
+        reject(new Error("WebSocket 连接失败"));
+      }
     };
     ws.onclose = () => {
-      status.value = "closed";
       busy.value = false;
       ws = null;
+      if (!settled) {
+        settled = true;
+        reject(new Error("WebSocket 连接已关闭"));
+      }
+      // 非主动断开时，指数退避重连
+      if (wantConnection) scheduleReconnect();
+      else status.value = "closed";
     };
   });
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return; // 已有排队的重连
+  status.value = "reconnecting";
+  // 1s → 2s → 4s → 8s → 15s(封顶)，带 ±15% 抖动避免同时重连
+  const base = Math.min(RECONNECT_MAX_MS, 1000 * 2 ** reconnectAttempts);
+  const delay = Math.round(base * (0.85 + Math.random() * 0.3));
+  reconnectAttempts += 1;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = undefined;
+    if (!wantConnection) return;
+    void connect().catch(() => {}); // 失败会经 onclose 再次排队
+  }, delay);
+}
+
+function disconnect() {
+  wantConnection = false;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+  }
+  reconnectAttempts = 0;
+  if (ws) {
+    ws.onclose = null; // 主动关闭，不触发重连
+    try {
+      ws.close();
+    } catch {
+      /* ignore */
+    }
+    ws = null;
+  }
+  status.value = "closed";
 }
 
 function enterAi() {
@@ -315,6 +371,7 @@ function exitAi() {
   messages.value = []; // 切换模式时清空命令台内容
   aiTurnIndex = -1;
   streamOpen = false;
+  disconnect(); // 退出 AI 模式：主动断开并停止重连
   clearSuggestions();
   push("note", "已退出 AI 对话，回到命令模式。输入 help 查看命令，或再次输入 agent 呼出 AI。");
 }
@@ -397,6 +454,8 @@ const statusText = computed(() => {
   switch (status.value) {
     case "connecting":
       return "连接中…";
+    case "reconnecting":
+      return "连接断开，正在重连…";
     case "open":
       return "已连接";
     case "error":
@@ -449,6 +508,7 @@ function startPetNudges() {
 }
 watch(showPet, visible => (visible ? startPetNudges() : stopPetNudges()), { immediate: true });
 onBeforeUnmount(stopPetNudges);
+onBeforeUnmount(disconnect);
 
 // 打开面板：进入 AI 模式时连 WS；并把焦点落到输入框，打开即可直接开始输入
 watch(

@@ -248,17 +248,7 @@ watch(
 </script>
 
 <template>
-  <button
-    v-if="available && !open"
-    class="teaching-launch"
-    type="button"
-    title="打开教学辅助"
-    @click="$emit('open')"
-  >
-    <iconify-icon icon="mdi:school-outline"></iconify-icon>
-    <span>教学辅助</span>
-  </button>
-
+  <!-- 启动入口已并入顶栏「帮助」菜单；此处仅渲染展开后的面板 -->
   <aside v-if="open" class="teaching-panel" aria-label="教学辅助面板">
     <header class="teaching-head">
       <div>

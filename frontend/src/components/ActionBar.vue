@@ -8,7 +8,7 @@ import {
   openCurrentTrainingMonitor,
 } from "../actions";
 import { isEditingContainer } from "../canvas";
-import { activeCanvas, clamp, getTrainingStatusLabel, isTrainingJobActive, showToast, ui } from "../store";
+import { activeCanvas, clamp, getTrainingStatusLabel, isTrainingJobActive, showToast, store, ui } from "../store";
 import DatasetSelector from "./DatasetSelector.vue";
 import DeviceSelector from "./DeviceSelector.vue";
 import InfoTip from "./InfoTip.vue";
@@ -17,9 +17,17 @@ import InfoTip from "./InfoTip.vue";
 const moreMenuOpen = ref(false);
 const moreRef = ref<HTMLElement | null>(null);
 
+// 「训练设置」弹层（收纳数据集/设备/轮次/超参数，底栏只留检查结构 + 开始训练）
+const trainConfigOpen = ref(false);
+const trainConfigRef = ref<HTMLElement | null>(null);
+
 function handleDocumentClick(event: MouseEvent) {
-  if (!moreRef.value?.contains(event.target as Node)) {
+  const target = event.target as Node;
+  if (!moreRef.value?.contains(target)) {
     moreMenuOpen.value = false;
+  }
+  if (!trainConfigRef.value?.contains(target)) {
+    trainConfigOpen.value = false;
   }
 }
 onMounted(() => document.addEventListener("click", handleDocumentClick));
@@ -127,20 +135,22 @@ const needsCheck = computed(
 <template>
   <footer class="actionbar">
     <div class="actionbar-left">
-      <div class="training-job-panel" :class="jobPanelClass" id="training-job-panel">
+      <div class="training-job-panel" :class="[jobPanelClass, { 'is-idle': !job }]" id="training-job-panel">
         <div class="training-job-icon"><iconify-icon icon="mdi:timer-outline"></iconify-icon></div>
         <div class="training-job-body">
           <div class="training-job-head">
             <strong id="training-job-id">{{ job ? (job.job_id || "未知任务") : "暂无训练任务" }}</strong>
-            <span id="training-job-status">{{ job ? getTrainingStatusLabel(job.status || "pending") : "待开始" }}</span>
+            <span v-if="job" id="training-job-status">{{ getTrainingStatusLabel(job.status || "pending") }}</span>
           </div>
-          <div class="training-job-track"><i id="training-job-progress" :style="{ width: `${jobPercentage}%` }"></i></div>
-          <p id="training-job-meta">{{ jobMeta }}</p>
+          <template v-if="job">
+            <div class="training-job-track"><i id="training-job-progress" :style="{ width: `${jobPercentage}%` }"></i></div>
+            <p id="training-job-meta">{{ jobMeta }}</p>
+          </template>
         </div>
         <button
+          v-if="job"
           class="icon-button"
           id="btn-view-training"
-          :disabled="!job"
           title="查看训练详情"
           @click="openCurrentTrainingMonitor"
         ><iconify-icon icon="mdi:chart-line"></iconify-icon></button>
@@ -191,30 +201,52 @@ const needsCheck = computed(
 
       <div class="action-divider"></div>
 
-      <!-- 训练区：一处集齐训练设置并启动 -->
+      <!-- 训练区：数据集/设备/轮次/超参数收进「训练设置」弹层，底栏只留设置入口 + 开始训练 -->
       <div class="action-group train-group">
-        <DatasetSelector />
-        <DeviceSelector />
-        <label class="epochs-field">
-          <span>轮次 <InfoTip text="Epoch（轮次）：把整个训练集完整过一遍算一轮。轮次越多学得越充分，但太多会过拟合、也更慢。新手可先设 1~5 轮。" /></span>
-          <input
-            id="epochs-input"
-            type="number"
-            min="1"
-            :max="MAX_EPOCHS"
-            :value="canvas.epochs"
-            @change="handleEpochsChange"
+        <div class="more-menu-wrap train-config-wrap" ref="trainConfigRef">
+          <button
+            class="secondary-button"
+            id="btn-train-config"
+            :class="{ active: trainConfigOpen }"
+            title="数据集 / 设备 / 轮次 / 超参数"
+            @click.stop="trainConfigOpen = !trainConfigOpen"
           >
-        </label>
-        <button
-          class="secondary-button"
-          id="btn-hyperparams"
-          title="训练超参数：批大小 / 学习率 / 优化器 / 损失函数"
-          @click="ui.trainSettingsOpen = true"
-        >
-          <iconify-icon icon="mdi:tune-variant"></iconify-icon>
-          超参数
-        </button>
+            <iconify-icon icon="mdi:tune-variant"></iconify-icon>
+            训练设置
+            <span class="train-config-summary">{{ store.dataset }} · {{ canvas.epochs }} 轮</span>
+            <iconify-icon icon="mdi:chevron-up" class="more-caret"></iconify-icon>
+          </button>
+          <div class="train-config-pop" :class="{ open: trainConfigOpen }">
+            <!-- 数据集 / 设备 选择器自带标签，直接整行放入即可 -->
+            <DatasetSelector />
+            <DeviceSelector />
+            <label class="dataset-pill tc-epochs">
+              <span class="dataset-label">轮次 <InfoTip text="Epoch（轮次）：把整个训练集完整过一遍算一轮。轮次越多学得越充分，但太多会过拟合、也更慢。新手可先设 1~5 轮。" /></span>
+              <input
+                id="epochs-input"
+                class="train-config-epochs"
+                type="number"
+                min="1"
+                :max="MAX_EPOCHS"
+                :value="canvas.epochs"
+                @change="handleEpochsChange"
+              >
+            </label>
+            <button
+              class="train-config-more"
+              id="btn-hyperparams"
+              title="批大小 / 学习率 / 优化器 / 损失函数"
+              @click="ui.trainSettingsOpen = true; trainConfigOpen = false"
+            >
+              <iconify-icon icon="mdi:cog-outline"></iconify-icon>
+              <span class="tc-more-text">
+                <b>更多超参数</b>
+                <i>批大小 / 学习率 / 优化器 / 损失函数</i>
+              </span>
+              <iconify-icon icon="mdi:chevron-right" class="tc-more-caret"></iconify-icon>
+            </button>
+          </div>
+        </div>
         <button
           class="success-button"
           id="btn-train"

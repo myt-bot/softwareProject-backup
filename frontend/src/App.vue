@@ -3,12 +3,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { loadProjectTemplates, loadProjectToCanvas } from "./actions";
 import { auth, initializeAuth, isLoggedIn } from "./auth";
 import { addCanvas, cancelPendingConnection, hideConnectionMenu, hideNodeMenu, redoGraphChange, undoGraphChange } from "./canvas";
-import { activeCanvas, closeHelpModal, CONTAINER_ID_SEP, getCurrentModelGraph, initializeBeginnerGuide, store, ui } from "./store";
+import { activeCanvas, closeHelpModal, confirmDialog, CONTAINER_ID_SEP, getCurrentModelGraph, initializeBeginnerGuide, resolveConfirm, store, ui, WORKSPACE_COACH_KEY } from "./store";
 import ActionBar from "./components/ActionBar.vue";
 import AgentModal from "./components/AgentModal.vue";
 import AssistantPanel from "./components/AssistantPanel.vue";
 import AuthPage from "./components/AuthPage.vue";
 import CanvasBoard from "./components/CanvasBoard.vue";
+import ConfirmDialog from "./components/ConfirmDialog.vue";
 import ContextMenus from "./components/ContextMenus.vue";
 import ExportModal from "./components/ExportModal.vue";
 import GuideStrip from "./components/GuideStrip.vue";
@@ -28,6 +29,7 @@ import ToastContainer from "./components/ToastContainer.vue";
 import TrainSettingsModal from "./components/TrainSettingsModal.vue";
 import TopBar from "./components/TopBar.vue";
 import TrainingMonitor from "./components/TrainingMonitor.vue";
+import WorkspaceCoach from "./components/WorkspaceCoach.vue";
 import type { ProjectMeta } from "./types";
 
 // 登录门槛：未登录只显示登录/注册页，登录成功后才挂载主界面
@@ -38,12 +40,37 @@ const currentPage = ref<"home" | "templates" | "projects" | "workspace">("home")
 // 用户是否已进入过工作台：只有从工作台返回后，首页各页才提供“回到工作台”按钮
 const enteredWorkspace = ref(false);
 
+// 首次进入工作台的聚光灯引导（E）
+const coachActive = ref(false);
+function coachDone() {
+  try { return !!localStorage.getItem(WORKSPACE_COACH_KEY); } catch { return false; }
+}
+function finishCoach() {
+  coachActive.value = false;
+  try { localStorage.setItem(WORKSPACE_COACH_KEY, "1"); } catch { /* ignore */ }
+}
+
+// 从顶栏「帮助」菜单打开教学辅助面板（与 AI 助手互斥，避免右侧面板重叠）
+function openTeaching() {
+  ui.assistantOpen = false;
+  teachingPanelOpen.value = true;
+}
+
 // 页面左右滑动过渡：按页面顺序判断方向（前进滑向左、后退滑向右）
 const PAGE_ORDER: Record<string, number> = { home: 0, templates: 1, projects: 2, workspace: 3 };
 const pageTransition = ref<"page-forward" | "page-back">("page-forward");
 watch(currentPage, (next, prev) => {
   pageTransition.value = (PAGE_ORDER[next] ?? 0) >= (PAGE_ORDER[prev] ?? 0) ? "page-forward" : "page-back";
-  if (next === "workspace") enteredWorkspace.value = true;
+  if (next === "workspace") {
+    enteredWorkspace.value = true;
+    // 首次进入工作台且有画布时，启动一次聚光灯引导（等 DOM 就绪再测量目标）
+    if (!coachDone() && store.canvases.length > 0) {
+      void nextTick(() => { coachActive.value = true; });
+    }
+  } else {
+    // 离开工作台时先收起引导（未完成则下次进入再触发）
+    coachActive.value = false;
+  }
 });
 const canvas = computed(() => activeCanvas());
 // 工作台是否还有画布：删到 0 个时进入“无画布”空态，隐藏组件库等，提示先新建
@@ -130,6 +157,11 @@ function handleDocumentClick() {
 
 function handleKeydown(event: KeyboardEvent) {
   if (event.key === "Escape") {
+    // 优先关闭确认弹窗（按取消处理）
+    if (confirmDialog.open) {
+      resolveConfirm(false);
+      return;
+    }
     cancelPendingConnection();
     hideConnectionMenu();
     hideNodeMenu();
@@ -236,7 +268,7 @@ onBeforeUnmount(() => {
 
       <!-- 工作台 -->
       <div v-else key="workspace" class="app-shell">
-        <TopBar @home="goHome" />
+        <TopBar @home="goHome" @open-teaching="openTeaching" />
 
         <!-- 有画布：正常工作台 -->
         <template v-if="hasCanvas">
@@ -301,6 +333,8 @@ onBeforeUnmount(() => {
     <TrainSettingsModal />
     <AssistantPanel />
     <TrainingMonitor />
+    <ConfirmDialog />
+    <WorkspaceCoach v-if="coachActive" @done="finishCoach" />
   </template>
 
   <ToastContainer />

@@ -34,9 +34,11 @@ import {
   makePortEndpoint,
   showToast,
   store,
+  ui,
 } from "../store";
 import type { GraphNode } from "../types";
 import CanvasTabs from "./CanvasTabs.vue";
+import PetMascot from "./PetMascot.vue";
 
 const canvasRef = ref<HTMLElement | null>(null);
 const svgRef = ref<SVGSVGElement | null>(null);
@@ -46,6 +48,15 @@ const gridRef = ref<HTMLElement | null>(null);
 const canvas = computed(() => activeCanvas());
 
 const zoomLabel = computed(() => `${Math.round(canvas.value.zoom * 100)}%`);
+
+// 画布功能栏：空闲一段时间自动淡出，鼠标在画布上移动时唤醒
+const toolbarActive = ref(true);
+let toolbarIdleTimer: ReturnType<typeof setTimeout> | undefined;
+function pokeToolbar() {
+  toolbarActive.value = true;
+  if (toolbarIdleTimer) clearTimeout(toolbarIdleTimer);
+  toolbarIdleTimer = setTimeout(() => { toolbarActive.value = false; }, 2600);
+}
 
 // 子画板编辑态：面包屑路径（主画布 / 容器名 / …）
 const editing = computed(() => isEditingContainer());
@@ -132,11 +143,13 @@ onMounted(() => {
   initializeCanvasView();
   document.addEventListener("mousemove", handleDocumentMouseMove);
   document.addEventListener("mouseup", handleDocumentMouseUp);
+  pokeToolbar();
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener("mousemove", handleDocumentMouseMove);
   document.removeEventListener("mouseup", handleDocumentMouseUp);
+  if (toolbarIdleTimer) clearTimeout(toolbarIdleTimer);
 });
 </script>
 
@@ -174,6 +187,7 @@ onBeforeUnmount(() => {
     :class="{ 'canvas-editing-container': editing }"
     id="canvas-container"
     @mousedown="handleCanvasMouseDown"
+    @mousemove="pokeToolbar"
     @click="handleCanvasClick"
     @dragover.prevent
     @drop="handleCanvasDrop"
@@ -188,35 +202,70 @@ onBeforeUnmount(() => {
       <iconify-icon icon="mdi:close-circle-outline"></iconify-icon>
       退出连线
     </button>
-    <div class="canvas-toolbar">
-      <!-- 缩放组 -->
-      <div class="toolbar-group zoom-control">
-        <button id="zoom-out" title="缩小画布" @click="handleZoomAction('zoom-out')"><iconify-icon icon="mdi:minus"></iconify-icon></button>
-        <span>{{ zoomLabel }}</span>
-        <button id="zoom-in" title="放大画布" @click="handleZoomAction('zoom-in')"><iconify-icon icon="mdi:plus"></iconify-icon></button>
+    <!-- 画布功能栏：空闲时收成"缩放"胶囊，悬停向右展开 视图/历史；空闲自动淡出 -->
+    <div class="canvas-toolbar" :class="{ 'is-faded': !toolbarActive }" @mouseenter="pokeToolbar">
+      <!-- 常驻：缩放 -->
+      <div class="ctb-section ctb-always">
+        <button class="ctb-btn" id="zoom-out" title="缩小" @click="handleZoomAction('zoom-out')"><iconify-icon icon="mdi:minus"></iconify-icon></button>
+        <button class="ctb-zoom" id="zoom-reset" title="点击恢复 100%" @click="handleZoomAction('reset')">{{ zoomLabel }}</button>
+        <button class="ctb-btn" id="zoom-in" title="放大" @click="handleZoomAction('zoom-in')"><iconify-icon icon="mdi:plus"></iconify-icon></button>
       </div>
-      <!-- 工具组：自动布局 / 居中 / 撤销 / 重做 -->
-      <div class="toolbar-group">
-        <button id="btn-auto-layout" title="自动布局：一键把节点排列整齐" @click="autoLayoutGraph"><iconify-icon icon="mdi:auto-fix"></iconify-icon></button>
-        <button id="zoom-fit" title="定位到节点并居中" @click="centerGraphInCanvas"><iconify-icon icon="mdi:image-filter-center-focus"></iconify-icon></button>
-        <i></i>
-        <button id="btn-undo" title="撤销 (Ctrl+Z)" @click="undoGraphChange"><iconify-icon icon="mdi:undo-variant"></iconify-icon></button>
-        <button id="btn-redo" title="重做 (Ctrl+Shift+Z / Ctrl+Y)" @click="redoGraphChange"><iconify-icon icon="mdi:redo-variant"></iconify-icon></button>
+      <iconify-icon icon="mdi:chevron-right" class="ctb-expand-caret" aria-hidden="true"></iconify-icon>
+      <!-- 悬停向右展开：视图 + 历史 -->
+      <div class="ctb-content">
+        <span class="ctb-divider"></span>
+        <div class="ctb-section">
+          <button class="ctb-btn" id="btn-auto-layout" title="自动布局：按数据流向整齐排列" @click="autoLayoutGraph"><iconify-icon icon="mdi:sitemap-outline"></iconify-icon></button>
+          <button class="ctb-btn" id="zoom-fit" title="适应视图：定位并居中所有节点" @click="centerGraphInCanvas"><iconify-icon icon="mdi:fit-to-screen-outline"></iconify-icon></button>
+        </div>
+        <span class="ctb-divider"></span>
+        <div class="ctb-section">
+          <button class="ctb-btn" id="btn-undo" title="撤销 (Ctrl+Z)" @click="undoGraphChange"><iconify-icon icon="mdi:undo-variant"></iconify-icon></button>
+          <button class="ctb-btn" id="btn-redo" title="重做 (Ctrl+Shift+Z / Ctrl+Y)" @click="redoGraphChange"><iconify-icon icon="mdi:redo-variant"></iconify-icon></button>
+        </div>
       </div>
     </div>
     <div ref="gridRef" class="canvas-grid connections-svg"></div>
     <svg ref="svgRef" class="connections-svg" id="connections-svg"></svg>
 
-    <!-- 空画布引导态：主画布与容器子画板给不同提示 -->
-    <div v-if="canvas.nodes.length === 0" class="canvas-empty-hint" id="canvas-empty-hint">
-      <iconify-icon icon="mdi:gesture-tap-hold"></iconify-icon>
+    <!-- 空画布引导态：主画布给强意符落点引导，容器子画板给文字提示 -->
+    <div
+      v-if="canvas.nodes.length === 0"
+      class="canvas-empty-hint"
+      :class="{ 'is-build': !editing }"
+      id="canvas-empty-hint"
+    >
       <template v-if="editing">
+        <iconify-icon icon="mdi:gesture-tap-hold"></iconify-icon>
         <h3>开始搭建容器内部</h3>
         <p>从左侧拖入 <b>Input</b> 作为输入端口、<b>Output</b> 作为输出端口，<br>中间放需要的层并连起来。多个 Input/Output 即多输入多输出。</p>
       </template>
       <template v-else>
-        <h3>从这里开始搭建你的模型</h3>
-        <p>👈 从左侧「组件库」拖一个 <b>Input</b> 层到这里<br>或点右上角 <b>⚡ 快速开始模板</b> 一键加载示例</p>
+        <p class="empty-title">开始搭建你的模型</p>
+        <!-- 落点框：虚线 drop zone + 脉冲，配左向箭头指向组件库 -->
+        <div class="empty-dropzone">
+          <span class="empty-dz-badge"><iconify-icon icon="mdi:tray-arrow-down"></iconify-icon></span>
+          <strong>把 <b>Input</b> 层拖到这里</strong>
+          <em><iconify-icon icon="mdi:arrow-left-thin"></iconify-icon> 从左侧「组件库」按住拖过来，松手即可放下</em>
+        </div>
+        <!-- 更快的两种方式：模板 / AI 助手 -->
+        <div class="empty-or"><span>或者用更快的方式</span></div>
+        <div class="empty-options">
+          <button class="empty-opt is-template" @click="ui.templateGalleryOpen = true">
+            <span class="empty-opt-ic"><iconify-icon icon="mdi:lightning-bolt"></iconify-icon></span>
+            <span class="empty-opt-tx">
+              <b>快速开始模板</b>
+              <i>一键加载经典网络（推荐新手）</i>
+            </span>
+          </button>
+          <button class="empty-opt is-ai" @click="ui.assistantOpen = true">
+            <span class="empty-opt-ic ai"><PetMascot :size="26" /></span>
+            <span class="empty-opt-tx">
+              <b>问 AI 助手</b>
+              <i>用一句话，让它帮你搭</i>
+            </span>
+          </button>
+        </div>
       </template>
     </div>
 

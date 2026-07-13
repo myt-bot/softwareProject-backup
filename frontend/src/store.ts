@@ -272,6 +272,23 @@ export function activeCanvas(): WorkCanvas {
   return placeholderCanvas;
 }
 
+// 工作台四步进度（供顶部进度条 / 空态引导 / 首次聚光灯引导共用）：
+// 1 拖入组件(有节点) → 2 连接与删除(有连线) → 3 检查结构(校验通过) → 4 开始训练(已发起训练)
+export function getWorkflowProgress(canvas: WorkCanvas): { step: number; done: boolean[] } {
+  const done = [
+    // 第一步“拖入组件”至少要两个节点，才谈得上下一步连线（只有一个节点时仍停在第一步）
+    canvas.nodes.length >= 2,
+    canvas.connections.length > 0,
+    canvas.validationStatus === "passing",
+    !!canvas.trainingJob,
+  ];
+  const firstTodo = done.findIndex(d => !d);
+  return { step: firstTodo === -1 ? 4 : firstTodo + 1, done };
+}
+
+// 首次进入工作台的聚光灯引导是否已完成
+export const WORKSPACE_COACH_KEY = "model-workshop-coach-done";
+
 // 当前（或指定）数据集对应的输入形状；未知数据集回退到 MNIST 形状。
 export function datasetInputShape(dataset: string = store.dataset): number[] {
   const shape = DATASET_INPUT_SHAPES[dataset];
@@ -426,6 +443,53 @@ export const ui = reactive({
 
 
 // —————————————————————————————————————————————
+// 确认弹窗（替代浏览器原生 window.confirm，风格与系统一致；Promise 化便于 await）
+// —————————————————————————————————————————————
+
+export const confirmDialog = reactive({
+  open: false,
+  title: "确认操作",
+  message: "",
+  confirmText: "确定",
+  cancelText: "取消",
+  danger: false,
+});
+
+let confirmResolver: ((ok: boolean) => void) | null = null;
+
+export function askConfirm(options: {
+  title?: string;
+  message: string;
+  confirmText?: string;
+  cancelText?: string;
+  danger?: boolean;
+}): Promise<boolean> {
+  // 若已有未决确认，先按取消结算，避免 resolver 丢失
+  if (confirmResolver) {
+    const prev = confirmResolver;
+    confirmResolver = null;
+    prev(false);
+  }
+  confirmDialog.title = options.title ?? "确认操作";
+  confirmDialog.message = options.message;
+  confirmDialog.confirmText = options.confirmText ?? "确定";
+  confirmDialog.cancelText = options.cancelText ?? "取消";
+  confirmDialog.danger = options.danger ?? false;
+  confirmDialog.open = true;
+  return new Promise<boolean>(resolve => {
+    confirmResolver = resolve;
+  });
+}
+
+export function resolveConfirm(ok: boolean) {
+  if (!confirmDialog.open) return;
+  confirmDialog.open = false;
+  const resolve = confirmResolver;
+  confirmResolver = null;
+  resolve?.(ok);
+}
+
+// —————————————————————————————————————————————
 // Toast
 // —————————————————————————————————————————————
 
@@ -451,14 +515,8 @@ export function showToast(type: ToastType, message: string) {
 // —————————————————————————————————————————————
 
 export function initializeBeginnerGuide() {
-  try {
-    // 第一次访问时自动打开新手指南
-    if (!localStorage.getItem(GUIDE_VISITED_KEY)) {
-      ui.helpModalOpen = true;
-    }
-  } catch {
-    // localStorage 不可用时静默降级
-  }
+  // 新手上手已改为“首次进入工作台的聚光灯引导”（见 WorkspaceCoach），
+  // 这里不再在首页自动弹出新手指南弹窗，避免重复引导。
 }
 
 export function openHelpModal() {

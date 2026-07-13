@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { nextTick, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { addCanvas, closeCanvas, switchCanvas } from "../canvas";
-import { isTrainingJobActive, store, ui } from "../store";
+import { activeCanvas, isTrainingJobActive, store, ui } from "../store";
 import type { WorkCanvas } from "../store";
+
+// 空画布时由画布中央的大 CTA 提供模板入口，这里的右上角按钮就不再重复出现
+const canvasHasNodes = computed(() => activeCanvas().nodes.length > 0);
 
 // 有进行中训练任务的标签显示脉冲圆点，便于并行训练时一眼看到状态
 function isTraining(canvas: WorkCanvas) {
@@ -72,8 +75,8 @@ function cancelRename() {
       <iconify-icon icon="mdi:plus"></iconify-icon>
     </button>
 
-    <!-- 快速开始模板入口（打开模板库弹窗，加载到当前画布） -->
-    <button class="template-gallery-button" id="btn-template-gallery" title="从经典网络模板快速开始" @click="ui.templateGalleryOpen = true">
+    <!-- 快速开始模板入口（画布非空时才显示，空态由中央大 CTA 承担，避免重复） -->
+    <button v-if="canvasHasNodes" class="template-gallery-button" id="btn-template-gallery" title="从经典网络模板快速开始" @click="ui.templateGalleryOpen = true">
       <iconify-icon icon="mdi:lightning-bolt"></iconify-icon>
       快速开始模板
     </button>

@@ -120,6 +120,15 @@ const graphLayout = computed(() => {
   return { nodes, edges, totalW, totalH };
 });
 
+// 分支结构：同一层（拓扑行）上的并列分支是并行关系，应同时点亮，而不是按索引从左到右逐个闪。
+// 由当前执行到的层索引，反查其所在行，点亮整行。
+const activeRow = computed(() => {
+  const idx = activeLayerIndex.value;
+  if (idx == null || idx < 0) return null;
+  const node = graphLayout.value.nodes.find(n => n.index === idx);
+  return node ? node.row : null;
+});
+
 // 超参数用中文 + 英文名标注，对新手更友好
 const hpRows = computed(() => [
   { label: "训练轮次 epochs", value: monitor.hyperparams.epochs },
@@ -324,7 +333,7 @@ function formatBytes(value: number) {
                 <div
                   v-for="n in graphLayout.nodes"
                   :key="n.id"
-                  :class="['tm-gnode', n.color, { 'running-layer': n.index === activeLayerIndex }]"
+                  :class="['tm-gnode', n.color, { 'running-layer': activeRow !== null && n.row === activeRow }]"
                   :style="{ left: n.x + 'px', top: n.y + 'px' }"
                   :title="n.type"
                 >{{ n.type }}</div>

@@ -4,6 +4,7 @@
 import { nextTick } from "vue";
 import {
   activeCanvas,
+  askConfirm,
   clamp,
   containerInputPorts,
   containerLibrary,
@@ -137,7 +138,7 @@ export function switchCanvas(id: number) {
 }
 
 
-export function closeCanvas(id: number) {
+export async function closeCanvas(id: number) {
   const index = store.canvases.findIndex(canvas => canvas.id === id);
   const canvas = store.canvases[index];
   if (!canvas) return;
@@ -145,9 +146,16 @@ export function closeCanvas(id: number) {
   const isTraining = isTrainingJobActive(canvas.trainingJob);
   if (canvas.nodes.length > 0 || isTraining) {
     const message = isTraining
-      ? `${canvas.name} 有训练任务进行中，关闭后将不再跟踪其进度。确定关闭？`
-      : `确定关闭 ${canvas.name}？画布上的模型将被丢弃。`;
-    if (!window.confirm(message)) return;
+      ? `${canvas.name} 有训练任务进行中，关闭后将不再跟踪其进度。确定关闭吗？`
+      : `确定关闭 ${canvas.name} 吗？画布上的模型将被丢弃，且无法撤销。`;
+    const ok = await askConfirm({
+      title: "关闭画布",
+      message,
+      confirmText: "关闭画布",
+      cancelText: "取消",
+      danger: true,
+    });
+    if (!ok) return;
   }
 
   store.canvases.splice(index, 1);
@@ -378,12 +386,23 @@ export function redoGraphChange() {
 
 export function autoLayoutGraph() {
   const canvas = activeCanvas();
-  const nodes = canvas.nodes;
-  if (nodes.length === 0) {
+  if (canvas.nodes.length === 0) {
     showToast("info", "画布上还没有节点。");
     return;
   }
   recordHistory();
+  layoutGraphNodes(canvas);
+  void redrawAfterDomUpdate();
+  centerGraphInCanvas();
+  showToast("success", "已按数据流向自动分层排列。");
+}
+
+
+// 按数据流向做拓扑分层布局（重心法减少交叉），仅重排 canvas.nodes 的坐标、无其它副作用。
+// 手动「自动布局」按钮与「加载模板/项目后自动布局」共用。
+function layoutGraphNodes(canvas: ReturnType<typeof activeCanvas>) {
+  const nodes = canvas.nodes;
+  if (nodes.length === 0) return;
 
   const ids = nodes.map(node => node.id);
   const preds: Record<string, string[]> = {};
@@ -464,10 +483,6 @@ export function autoLayoutGraph() {
       node.y = TOP + depth * V_GAP;
     });
   });
-
-  void redrawAfterDomUpdate();
-  centerGraphInCanvas();
-  showToast("success", "已按数据流向自动分层排列。");
 }
 
 
@@ -513,14 +528,16 @@ function buildBezierSegments(points: Partial<ConnectorPoints> & { start: Point; 
     return buildControlledBezierSegments(start, controlPoint, end);
   }
 
-  const nodeHeight = 150;
   const rawDeltaY = Math.abs(end.y - start.y);
   const yDistance = Math.max(24, rawDeltaY);
   const yDirection = end.y >= start.y ? 1 : -1;
-  const isLongConnection = rawDeltaY > nodeHeight * 1.5;
-  const bowX = isLongConnection ? rawDeltaY * 0.3 * getBezierBowDirection(points) : 0;
-  const verticalControl = isLongConnection
-    ? rawDeltaY * 0.4
+
+  // 节点感知绕行：若直线会穿过中间节点，则把连线整体侧弯到更近一侧的节点外缘之外
+  const bowX = computeAvoidanceBow(points);
+  const detour = Math.abs(bowX) > 1;
+  // 需要绕行时用更长的纵向控制点，让侧弯更圆润、在节点高度处更贴近目标 x
+  const verticalControl = detour
+    ? clamp(rawDeltaY * 0.32, 70, 240)
     : clamp(yDistance * 0.42, 42, 120);
 
   return [
@@ -537,6 +554,49 @@ function buildBezierSegments(points: Partial<ConnectorPoints> & { start: Point; 
       end,
     },
   ];
+}
+
+
+// 计算“绕开中间节点”所需的水平侧弯量（画布坐标系）。返回带符号的 bow：
+// >0 向右绕，<0 向左绕，0 表示直线没有被任何中间节点挡住、无需绕行。
+function computeAvoidanceBow(points: Partial<ConnectorPoints> & { start: Point; end: Point }): number {
+  // 仅对真实连线（有 from/to）绕行；连线预览（拖到光标）保持直，不参与
+  if (!points.from || !points.to) return 0;
+
+  const { start, end } = points;
+  const fromId = endpointBaseId(points.from);
+  const toId = endpointBaseId(points.to);
+  const yLo = Math.min(start.y, end.y);
+  const yHi = Math.max(start.y, end.y);
+  const dy = end.y - start.y || 1;
+
+  const blockers: Array<{ left: number; right: number }> = [];
+  for (const node of activeCanvas().nodes) {
+    if (node.id === fromId || node.id === toId) continue;
+    const rect = getNodeRect(node.id);
+    if (!rect) continue;
+    // 纵向需与连线区间有实质重叠（排除仅擦到端点的情况）
+    if (rect.bottom <= yLo + 12 || rect.top >= yHi - 12) continue;
+    // 直线在该节点中部高度处的 x 是否落在（略扩的）节点水平范围内 → 会穿过它
+    const midY = Math.min(Math.max((rect.top + rect.bottom) / 2, yLo), yHi);
+    const t = (midY - start.y) / dy;
+    const lineX = start.x + (end.x - start.x) * t;
+    if (lineX > rect.left - 26 && lineX < rect.right + 26) {
+      blockers.push({ left: rect.left, right: rect.right });
+    }
+  }
+  if (!blockers.length) return 0;
+
+  const minLeft = Math.min(...blockers.map(b => b.left));
+  const maxRight = Math.max(...blockers.map(b => b.right));
+  const midX = (start.x + end.x) / 2;
+  const MARGIN = 42;
+  const targetRight = maxRight + MARGIN;
+  const targetLeft = minLeft - MARGIN;
+  // 选更近的一侧绕行
+  const targetX = targetRight - midX <= midX - targetLeft ? targetRight : targetLeft;
+  // 三次贝塞尔中点 x ≈ midX + 0.75 * bow → 解出所需 bow
+  return (targetX - midX) / 0.75;
 }
 
 
@@ -565,17 +625,6 @@ function buildBezierSegment(start: Point, end: Point): BezierSegment {
     },
     end,
   };
-}
-
-
-function getBezierBowDirection(points: { start: Point; end: Point }) {
-  const deltaX = points.end.x - points.start.x;
-
-  if (Math.abs(deltaX) > 4) {
-    return deltaX > 0 ? 1 : -1;
-  }
-
-  return 1;
 }
 
 
@@ -1576,10 +1625,12 @@ export function enterContainerFromMenu(event: Event) {
 }
 
 
-export function handleZoomAction(actionId: "zoom-out" | "zoom-in") {
+export function handleZoomAction(actionId: "zoom-out" | "zoom-in" | "reset") {
   const newZoom = actionId === "zoom-in"
     ? Math.min(1.5, Number((activeCanvas().zoom + 0.1).toFixed(2)))
-    : Math.max(0.6, Number((activeCanvas().zoom - 0.1).toFixed(2)));
+    : actionId === "zoom-out"
+      ? Math.max(0.6, Number((activeCanvas().zoom - 0.1).toFixed(2)))
+      : 1;
 
   setZoomAroundViewportCenter(newZoom);
 }
@@ -1675,6 +1726,8 @@ export function applyTemplateGraph(modelGraph: ModelGraph) {
   activeCanvas().edgeControls = {};
   activeCanvas().selectedConnectionKey = null;
   activeCanvas().hasCenteredInitialGraph = true;
+  // 加载模板/项目后自动按数据流向分层布局，避免分支模型堆成一列、连线交叉
+  layoutGraphNodes(activeCanvas());
   void redrawAfterDomUpdate().then(centerGraphHorizontally);
   resetValidationAfterGraphChange();
 }

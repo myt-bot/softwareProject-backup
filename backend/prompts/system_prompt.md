@@ -11,6 +11,7 @@
 - 手动搭建顺序：先 add_node 建 Input（作为入口）→ 依次建中间层 → 建 Output（出口）；随后用 connect_nodes 按数据流方向把它们**依次串起来**（Input→…→Output，别漏连、别留孤立节点）。
 - add_node 会返回新节点的 node_id，用它来做后续连接/改参。
 - 搭完或改完后**必须调用 validate_model 校验**，把结论（通过/错误/警告）告诉用户；若有错误，据错误信息修正（补层、改参数、补连接）后再校验，直到通过或已尽力。
+- 结构完成后（无论手动搭建、load_template、还是增删了节点/连线导致布局变化），**必须调用一次 auto_layout** 自动整理画布，让节点按数据流向整齐排列、避免堆叠重叠。顺序建议：搭好/改好 → auto_layout → validate_model。
 - 需要看某层输出尺寸时用 get_shapes。
 - 用户要“换数据集 / 用某某数据集训练”时，用 **set_dataset** 真正切换（可选：MNIST、FashionMNIST、KMNIST、QMNIST、USPS、CIFAR10、CIFAR100、SVHN）。它会**自动把 Input 层维度同步**为该数据集的形状（如 MNIST 系列 [1,28,28]、CIFAR 系列 [3,32,32]），所以切完数据集**不用再手动改 Input**；若返回 input_synced=true，说明维度变了，记得重新 validate_model。只在嘴上说“已切换”而不调用 set_dataset 是错误的。
 

@@ -1,9 +1,26 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import { auth, handleLogout } from "../auth";
 import { agent, openHelpModal, ui } from "../store";
 import PetMascot from "./PetMascot.vue";
 
-const emit = defineEmits<{ home: [] }>();
+const emit = defineEmits<{ home: []; openTeaching: [] }>();
+
+// 「帮助」下拉：合并新手指南 + 教学辅助两个语义重叠的入口
+const helpMenuOpen = ref(false);
+const helpRef = ref<HTMLElement | null>(null);
+
+function handleDocumentClick(event: MouseEvent) {
+  if (!helpRef.value?.contains(event.target as Node)) {
+    helpMenuOpen.value = false;
+  }
+}
+function runHelp(action: () => void) {
+  helpMenuOpen.value = false;
+  action();
+}
+onMounted(() => document.addEventListener("click", handleDocumentClick));
+onBeforeUnmount(() => document.removeEventListener("click", handleDocumentClick));
 </script>
 
 <template>
@@ -46,10 +63,30 @@ const emit = defineEmits<{ home: [] }>();
         AI 助手
       </button>
 
-      <button class="guide-button" id="btn-help" title="打开新手指南" @click="openHelpModal">
-        <iconify-icon icon="mdi:school-outline"></iconify-icon>
-        新手指南
-      </button>
+      <!-- 帮助：合并「新手指南」与「教学辅助」 -->
+      <div class="help-menu-wrap" ref="helpRef">
+        <button
+          class="guide-button"
+          id="btn-help"
+          :class="{ active: helpMenuOpen }"
+          title="帮助与教学"
+          @click.stop="helpMenuOpen = !helpMenuOpen"
+        >
+          <iconify-icon icon="mdi:lifebuoy"></iconify-icon>
+          帮助
+          <iconify-icon icon="mdi:chevron-down" class="help-caret"></iconify-icon>
+        </button>
+        <div class="help-menu" :class="{ open: helpMenuOpen }">
+          <button @click="runHelp(openHelpModal)">
+            <iconify-icon icon="mdi:school-outline"></iconify-icon>
+            <span><b>新手指南</b><i>四步上手教程与快捷键</i></span>
+          </button>
+          <button @click="runHelp(() => emit('openTeaching'))">
+            <iconify-icon icon="mdi:book-open-page-variant-outline"></iconify-icon>
+            <span><b>教学辅助</b><i>逐层讲解、参数说明与修改指导</i></span>
+          </button>
+        </div>
+      </div>
 
       <!-- 存储位置设置（数据集下载 / 结果保存目录） -->
       <button class="icon-button" id="btn-storage-settings" title="存储位置设置" @click="ui.storageSettingsOpen = true">
