@@ -11,7 +11,7 @@
 
 import { reactive } from "vue";
 import { showToast } from "./store";
-import type { CancelTrainingResponse, DatasetProgress, EpochMetrics, MonitorLayer, TrainingModelSummary, TrainingResult, TrainingStatus } from "./types";
+import type { CancelTrainingResponse, DatasetProgress, EpochMetrics, MonitorEdge, MonitorLayer, TrainingModelSummary, TrainingResult, TrainingStatus } from "./types";
 
 // 预设指标曲线（mock），趋势合理：loss 下降、acc 上升、val 略低但接近。
 export const MOCK = {
@@ -86,6 +86,7 @@ export interface OpenMonitorOptions {
   onRerun?: () => Promise<{ jobId?: string } | undefined>;
   hyperparams?: Partial<MonitorHyperparams>;
   layers?: MonitorLayer[];
+  edges?: MonitorEdge[];
   paramCount?: number;
   modelSummary?: Partial<TrainingModelSummary>;
 }
@@ -103,6 +104,7 @@ export const monitor = reactive({
   jobId: null as string | null,
   hyperparams: { ...DEFAULT_HYPERPARAMS } as MonitorHyperparams,
   layers: DEFAULT_LAYERS as MonitorLayer[],
+  edges: [] as MonitorEdge[],
   modelSummary: { ...DEFAULT_MODEL_SUMMARY } as TrainingModelSummary,
   paramCount: 0,
   pollAttempt: 0,
@@ -129,6 +131,7 @@ export function openTrainingMonitor(options: OpenMonitorOptions = {}) {
   monitor.stopping = false;
   monitor.hyperparams = { ...DEFAULT_HYPERPARAMS, ...(options.hyperparams || {}) };
   monitor.layers = options.layers?.length ? options.layers : DEFAULT_LAYERS;
+  monitor.edges = options.edges || [];
   monitor.modelSummary = { ...DEFAULT_MODEL_SUMMARY, ...(options.modelSummary || {}) };
   monitor.paramCount = options.paramCount ?? monitor.modelSummary.paramCount ?? 0;
 

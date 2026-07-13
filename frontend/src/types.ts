@@ -425,6 +425,13 @@ export interface MonitorLayer {
   id?: string;
   type: string;
   color: string;
+  row?: number; // 拓扑层（阶段，纵向）
+  col?: number; // 层内列（并行分支，横向）
+}
+
+export interface MonitorEdge {
+  source: string; // 源节点 id
+  target: string; // 目标节点 id
 }
 
 export interface TrainingModelSummary {

@@ -1305,29 +1305,37 @@ export function connectFromMenuNode(event: Event) {
 }
 
 
-export function deleteMenuNode(event: Event) {
-  event.stopPropagation();
-  const nodeId = store.menuNodeId;
-  if (!nodeId) return;
+// 按 id 删除节点及其连线（UI 右键删除与 AI 助手 delete_node 共用，保证行为一致：
+// 记录历史、清理边控制点与挂起连线、重置校验状态并重绘）。返回是否删除成功。
+export function deleteNodeById(nodeId: string): boolean {
+  const canvas = activeCanvas();
+  if (!canvas.nodes.some(node => node.id === nodeId)) return false;
 
   recordHistory();
-  activeCanvas().nodes = activeCanvas().nodes.filter(node => node.id !== nodeId);
+  canvas.nodes = canvas.nodes.filter(node => node.id !== nodeId);
   // 端点可能是容器端口（容器id::端口层id），按基节点 id 过滤，删除该节点相关的所有连线
-  activeCanvas().connections = activeCanvas().connections.filter(
+  canvas.connections = canvas.connections.filter(
     ([source, target]) => endpointBaseId(source) !== nodeId && endpointBaseId(target) !== nodeId
   );
   removeEdgeControlsForNode(nodeId);
-  if (activeCanvas().selectedNodeId === nodeId) {
-    activeCanvas().selectedNodeId = null;
+  if (canvas.selectedNodeId === nodeId) {
+    canvas.selectedNodeId = null;
   }
   if (store.connectSourceId && endpointBaseId(store.connectSourceId) === nodeId) {
     cancelPendingConnection();
   }
-  store.menuNodeId = null;
-  hideNodeMenu();
   void redrawAfterDomUpdate();
   resetValidationAfterGraphChange();
-  showToast("success", "节点已删除。");
+  return true;
+}
+
+export function deleteMenuNode(event: Event) {
+  event.stopPropagation();
+  const nodeId = store.menuNodeId;
+  if (!nodeId) return;
+  store.menuNodeId = null;
+  hideNodeMenu();
+  if (deleteNodeById(nodeId)) showToast("success", "节点已删除。");
 }
 
 

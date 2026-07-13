@@ -23,7 +23,7 @@ import {
   CONTAINER_ID_SEP,
   getCurrentModelGraph,
   getTrainConfig,
-  getTrainingLayers,
+  getTrainingGraph,
   getTrainingSummary,
   isTrainingJobActive,
   setTrainingJob,
@@ -93,22 +93,31 @@ export async function loadTemplateToCanvas(templateKey: string, templateName?: s
 // 结构校验（按画布并行）
 // —————————————————————————————————————————————
 
-export async function handleValidateModel() {
+// 返回本次校验结果（供 AI 助手的 validate_model 命令复用同一套 UI 更新并把结论喂回模型）；
+// 正在校验中或出错时返回 null。ActionBar 按钮以 void 方式调用，忽略返回值即可。
+export async function handleValidateModel(): Promise<ValidationResult | null> {
   const canvas = activeCanvas();
-  if (canvas.validating) return;
+  if (canvas.validating) return null;
 
   // 结构校验与维度推导在云端完成，无需本地 Agent（训练才需要 Agent）
   const modelSnapshot = getCurrentModelGraph(canvas);
   const serializedSnapshot = JSON.stringify(modelSnapshot);
   canvas.validating = true;
+
   try {
     const result = await validateModelStructure(modelSnapshot);
-    if (JSON.stringify(getCurrentModelGraph(canvas)) !== serializedSnapshot) return;
+
+    if (JSON.stringify(getCurrentModelGraph(canvas)) !== serializedSnapshot) {
+      return null;
+    }
+
     applyValidationResult(canvas, result);
+    return result;
   } catch (error) {
     showToast("error", (error as Error)?.message || "结构校验失败。");
     canvas.validationStatus = "unvalidated";
     canvas.lastValidationResult = null;
+    return null;
   } finally {
     canvas.validating = false;
     // 重绘连线：校验通过则显示数据流向动画，否则清除
@@ -426,6 +435,7 @@ function openTrainingMonitorForCanvas(canvas: WorkCanvas) {
     return;
   }
 
+  const trainingGraph = getTrainingGraph(canvas);
   openTrainingMonitor({
     live: true,
     jobId: canvas.trainingJob.job_id,
@@ -436,7 +446,8 @@ function openTrainingMonitorForCanvas(canvas: WorkCanvas) {
     },
     cancelJob: (jobId: string) => cancelTraining(jobId, auth.user!.id!),
     hyperparams: canvas.trainingJob.trainConfig || getTrainConfig(canvas),
-    layers: getTrainingLayers(canvas),
+    layers: trainingGraph.layers,
+    edges: trainingGraph.edges,
     modelSummary: canvas.trainingJob.modelSummary || getTrainingSummary(canvas),
     onRerun: async () => {
       const { jobId, trainConfig, result } = await submitTrainingJob(canvas);
