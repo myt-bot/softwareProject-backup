@@ -27,7 +27,7 @@ function saveSettings() {
 
 // —— 会话状态 ——
 type Mode = "command" | "ai";
-const mode = ref<Mode>("command"); // 默认命令模式；输入 agent 进入 AI
+const mode = ref<Mode>("ai"); // 默认 AI 对话；点「退出」进入命令行，命令行里输入 agent 再回 AI
 
 // AI 回合内按时序穿插的片段：一段文本（Markdown）或一次工具调用
 type AssistantStep = { kind: "text"; text: string } | { kind: "tool"; command: string };
@@ -450,11 +450,13 @@ function startPetNudges() {
 watch(showPet, visible => (visible ? startPetNudges() : stopPetNudges()), { immediate: true });
 onBeforeUnmount(stopPetNudges);
 
-// 打开面板不自动连 WS；进入 AI 模式时才连（对话历史保留在后端会话里）
+// 打开面板：进入 AI 模式时连 WS；并把焦点落到输入框，打开即可直接开始输入
 watch(
   () => ui.assistantOpen,
   open => {
-    if (open && mode.value === "ai") void connect().catch(() => {});
+    if (!open) return;
+    if (mode.value === "ai") void connect().catch(() => {});
+    void nextTick(() => inputRef.value?.focus({ preventScroll: true }));
   }
 );
 </script>
@@ -538,7 +540,7 @@ watch(
           <PetMascot :size="150" :live="true" :greet="!!petBubble" />
         </div>
       </Transition>
-      <div v-if="!messages.length" class="assistant-empty">
+      <div v-if="mode === 'command' && !messages.length" class="assistant-empty">
         <iconify-icon icon="mdi:console-line"></iconify-icon>
         <p>命令模式。直接敲命令，例如：</p>
         <ul>

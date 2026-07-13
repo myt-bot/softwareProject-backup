@@ -5,6 +5,17 @@ import { containerLibrary, layerGroups } from "../store";
 
 const searchQuery = ref("");
 
+// —— 手风琴：一次展开一组；搜索时全部展开以免漏掉匹配项 ——
+const CONTAINER_TITLE = "自定义容器 / Container";
+const openGroup = ref<string>(layerGroups[0]?.title ?? CONTAINER_TITLE); // 默认展开第一组
+const searchActive = computed(() => searchQuery.value.trim().length > 0);
+function toggleGroup(title: string) {
+  openGroup.value = openGroup.value === title ? "" : title;
+}
+function isOpen(title: string) {
+  return searchActive.value || openGroup.value === title;
+}
+
 function handleNewContainerDragStart(event: DragEvent) {
   event.dataTransfer?.setData("text/plain", NEW_CONTAINER_PAYLOAD);
   if (event.dataTransfer) {
@@ -16,6 +27,15 @@ function handleNewContainerDragStart(event: DragEvent) {
 const filteredContainers = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
   return containerLibrary.items.filter(def => !query || def.name.toLowerCase().includes(query));
+});
+
+// 自定义容器文件夹的“露头”：空白容器 + 已保存容器，按实际数量取前 3（只有空白容器时就 1 片）
+const containerPeeks = computed(() => {
+  const peeks = [
+    { icon: "mdi:package-variant-closed", color: "teal" },
+    ...containerLibrary.items.map(def => ({ icon: "mdi:package-variant", color: def.color })),
+  ];
+  return peeks.slice(0, 3);
 });
 
 function handleContainerDragStart(event: DragEvent, defId: string) {
@@ -45,6 +65,23 @@ function showTip(event: MouseEvent, layer: LayerLike) {
 function hideTip() {
   hovered.value = null;
 }
+
+// 文件夹悬停介绍卡：列出该组包含的层
+const hoveredGroup = ref<{ title: string; layers: LayerLike[]; top: number; left: number } | null>(null);
+function showGroupTip(event: MouseEvent, title: string, layers: LayerLike[]) {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  const height = Math.min(360, 70 + layers.length * 30);
+  const top = Math.max(12, Math.min(rect.top - 4, window.innerHeight - height));
+  hoveredGroup.value = { title, layers, top, left: rect.right + 12 };
+}
+function hideGroupTip() {
+  hoveredGroup.value = null;
+}
+// 自定义容器组的“包含层”：空白容器 + 已保存容器
+const containerTipLayers = computed<LayerLike[]>(() => [
+  blankContainerLayer,
+  ...containerLibrary.items.map(def => ({ type: def.name, desc: "已保存容器", icon: "mdi:package-variant", color: def.color })),
+]);
 
 // 按搜索词过滤组件库（与原实现一致：匹配名称或描述）
 const filteredGroups = computed(() => {
@@ -80,9 +117,26 @@ function handleDragStart(event: DragEvent, layerType: string) {
     </div>
     <div class="layer-list" id="layer-palette">
       <!-- 自定义容器：拖入空白容器，双击进入子画板搭建内部 -->
-      <section class="layer-group">
-        <h3>自定义容器 / Container</h3>
-        <div class="layer-items">
+      <section class="layer-group" :class="{ collapsed: !isOpen(CONTAINER_TITLE) }">
+        <div class="folder-back" aria-hidden="true"></div>
+        <div class="folder-peeks" aria-hidden="true">
+          <span
+            v-for="(pk, i) in containerPeeks"
+            :key="i"
+            :class="`folder-peek p${i} ${pk.color}`"
+          ><iconify-icon :icon="pk.icon"></iconify-icon></span>
+        </div>
+        <div class="folder-front">
+        <h3
+          @click="toggleGroup(CONTAINER_TITLE)"
+          @mouseenter="showGroupTip($event, '自定义容器 / Container', containerTipLayers)"
+          @mouseleave="hideGroupTip"
+        >
+          <span>自定义容器 / Container</span>
+          <iconify-icon class="layer-group-chevron" icon="mdi:chevron-down"></iconify-icon>
+        </h3>
+        <div class="layer-group-body">
+          <div class="layer-items">
           <article
             class="layer-item layer-item-container"
             draggable="true"
@@ -109,6 +163,8 @@ function handleDragStart(event: DragEvent, layerType: string) {
               <span>已保存容器</span>
             </div>
           </article>
+          </div>
+        </div>
         </div>
       </section>
 
@@ -116,10 +172,28 @@ function handleDragStart(event: DragEvent, layerType: string) {
         v-for="group in filteredGroups"
         :key="group.title"
         class="layer-group"
+        :class="{ collapsed: !isOpen(group.title) }"
         v-show="group.layers.some(layer => layer.matched)"
       >
-        <h3>{{ group.title }}</h3>
-        <div class="layer-items">
+        <div class="folder-back" aria-hidden="true"></div>
+        <div class="folder-peeks" aria-hidden="true">
+          <span
+            v-for="(layer, i) in group.layers.slice(0, 3)"
+            :key="i"
+            :class="`folder-peek p${i} ${layer.color}`"
+          ><iconify-icon :icon="layer.icon"></iconify-icon></span>
+        </div>
+        <div class="folder-front">
+        <h3
+          @click="toggleGroup(group.title)"
+          @mouseenter="showGroupTip($event, group.title, group.layers)"
+          @mouseleave="hideGroupTip"
+        >
+          <span>{{ group.title }}</span>
+          <iconify-icon class="layer-group-chevron" icon="mdi:chevron-down"></iconify-icon>
+        </h3>
+        <div class="layer-group-body">
+          <div class="layer-items">
           <article
             v-for="layer in group.layers"
             :key="layer.type"
@@ -137,6 +211,8 @@ function handleDragStart(event: DragEvent, layerType: string) {
               <span>{{ layer.desc }}</span>
             </div>
           </article>
+          </div>
+        </div>
         </div>
       </section>
     </div>
@@ -163,6 +239,27 @@ function handleDragStart(event: DragEvent, layerType: string) {
       <div class="layer-tip-foot">
         <iconify-icon icon="mdi:gesture-tap-hold"></iconify-icon>
         按住拖到中间画布即可添加
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- 文件夹悬停介绍卡：列出该组包含的层 -->
+  <Teleport to="body">
+    <div
+      v-if="hoveredGroup"
+      class="layer-tip-card group-tip-card"
+      :style="{ top: `${hoveredGroup.top}px`, left: `${hoveredGroup.left}px` }"
+    >
+      <div class="group-tip-title">
+        <iconify-icon icon="mdi:folder-outline"></iconify-icon>
+        <strong>{{ hoveredGroup.title }}</strong>
+        <em>{{ hoveredGroup.layers.length }} 个层</em>
+      </div>
+      <div class="group-tip-list">
+        <div v-for="l in hoveredGroup.layers" :key="l.type" class="group-tip-item">
+          <span :class="`layer-icon ${l.color}`"><iconify-icon :icon="l.icon"></iconify-icon></span>
+          <span class="group-tip-name">{{ l.type }}</span>
+        </div>
       </div>
     </div>
   </Teleport>

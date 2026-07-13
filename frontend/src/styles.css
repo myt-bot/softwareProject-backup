@@ -1521,20 +1521,143 @@ button:disabled {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 16px 16px;
+  padding: 24px 16px 16px; /* 顶部留足空间，别裁掉第一个文件夹露出的文件头 */
+  scrollbar-width: none; /* Firefox：隐藏滚动条（保留滚动） */
+  -ms-overflow-style: none;
 }
+.layer-list::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
+/* 每个分组 = 一个文件夹：后板 + 彩色“文件头”露出堆叠 + 封面/内页，三者是一个整体。
+   .layer-group 只作定位容器；上方留出较大间距，避免本文件夹的露头贴到上一个文件夹。 */
 .layer-group {
-  margin-bottom: 22px;
+  position: relative;
+  margin: 38px 0 8px; /* 上方留大间距，两组之间清晰分隔、不混淆 */
+}
+.layer-group:first-child { margin-top: 6px; }
+
+/* 文件夹后板：从封面上沿升起，让露头明确“属于本文件夹”，并与封面连成一体 */
+.folder-back {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -21px;
+  height: 34px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 12px 12px 0 0;
+  z-index: 0;
+  transition: border-color 0.2s ease;
+}
+.layer-group:not(.collapsed) .folder-back { border-color: rgba(99, 102, 241, 0.42); }
+
+/* 露出的“文件”：层叠错开的小卡，各在左上角露出该层的图标 + 配色，像探出头的文件 */
+.folder-peeks {
+  position: absolute;
+  left: 13px;
+  right: 13px;
+  top: -20px;
+  height: 24px;
+  pointer-events: none;
+  z-index: 1;
+}
+.folder-peek {
+  position: absolute;
+  height: 20px;
+  box-sizing: border-box;
+  border-radius: 7px 7px 0 0;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  background: #fbfcff; /* 统一浅纸底，避免多色堆叠显得花哨 */
+  display: flex;
+  align-items: flex-start;
+  padding: 2px 0 0 6px;
+  transition: transform 0.28s ease, opacity 0.28s ease;
+}
+.folder-peek iconify-icon { font-size: 12px; }
+/* 从左到右逐渐变低（左高右低）：左侧最高、右侧最低，图标在各自左上角错开露出 */
+.folder-peek.p0 { left: 2%; right: 30%; top: 0; z-index: 1; }
+.folder-peek.p1 { left: 16%; right: 16%; top: 6px; z-index: 2; }
+.folder-peek.p2 { left: 30%; right: 2%; top: 12px; z-index: 3; }
+/* 打开文件夹：露出的文件向下滑出并淡出，配合内页展开（“把文件抽出来”） */
+.layer-group:not(.collapsed) .folder-peek { transform: translateY(16px); opacity: 0; }
+/* 露头统一浅底，仅图标带各层色（点缀，不铺大面积色块，避免一眼太花） */
+.folder-peek.emerald { color: #059669; }
+.folder-peek.blue { color: #2563eb; }
+.folder-peek.orange { color: #ea580c; }
+.folder-peek.purple { color: #9333ea; }
+.folder-peek.cyan { color: #0891b2; }
+.folder-peek.indigo { color: #4f46e5; }
+.folder-peek.teal { color: #0d9488; }
+.folder-peek.rose { color: #e11d48; }
+.folder-peek.amber { color: #d97706; }
+
+/* 文件夹本体（封面 + 内页），盖住露头下半截 */
+.folder-front {
+  position: relative;
+  z-index: 5;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 3px 8px -4px rgba(35, 48, 74, 0.16);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.layer-group:not(.collapsed) .folder-front {
+  border-color: rgba(99, 102, 241, 0.42);
+  box-shadow: 0 10px 22px -10px rgba(79, 70, 229, 0.3);
 }
 
-.layer-group h3 {
-  margin: 0 0 10px;
-  padding: 0 4px;
-  color: var(--faint);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+/* 文件夹封面标题：加黑加粗、整行可点、右侧展开箭头（展开转主题色 + 淡蓝底） */
+.folder-front h3 {
+  margin: 0;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  cursor: pointer;
+  user-select: none;
+  background: var(--panel-2);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.folder-front h3:hover { background: rgba(35, 48, 74, 0.05); }
+.layer-group:not(.collapsed) .folder-front h3 {
+  color: var(--indigo-strong);
+  background: rgba(99, 102, 241, 0.08);
+  border-bottom: 1px solid var(--border);
+}
+.layer-group-chevron {
+  flex: 0 0 auto;
+  font-size: 18px;
+  color: var(--muted);
+  transition: transform 0.25s ease;
+}
+.layer-group:not(.collapsed) .layer-group-chevron { color: var(--indigo-strong); }
+.layer-group.collapsed .layer-group-chevron { transform: rotate(-90deg); }
+
+/* 手风琴展开动画：grid-template-rows 0fr↔1fr 平滑到内容真实高度 */
+.layer-group-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.28s ease;
+}
+.layer-group.collapsed .layer-group-body { grid-template-rows: 0fr; }
+.layer-group-body > .layer-items {
+  overflow: hidden;
+  min-height: 0;
+  padding: 10px;
+  transition: padding 0.28s ease;
+}
+/* 折叠时连内边距一起收干净，避免残留一条（如空白容器的虚线边） */
+.layer-group.collapsed .layer-group-body > .layer-items {
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .layer-items {
@@ -5628,3 +5751,22 @@ body.is-connecting .node-port {
 .tm-gnode.indigo { color: #0284c7; border-color: #bae6fd; background: #eef2ff; }
 .tm-gnode.cyan { color: #0e7490; border-color: #a5f3fc; background: #ecfeff; }
 .tm-gnode.amber { color: #b45309; border-color: #fde68a; background: #fffbeb; }
+
+/* 组件库 · 文件夹悬停介绍卡：列出该组包含的层 */
+.group-tip-card { width: 236px; padding: 12px 13px 11px; }
+.group-tip-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--border);
+}
+.group-tip-title iconify-icon { font-size: 16px; color: var(--indigo-strong); flex: 0 0 auto; }
+.group-tip-title strong { flex: 1; font-size: 13px; font-weight: 800; color: var(--text); }
+.group-tip-title em { font-style: normal; font-size: 11px; color: var(--faint); }
+.group-tip-list { display: grid; gap: 6px; }
+.group-tip-item { display: flex; align-items: center; gap: 9px; }
+.group-tip-item .layer-icon { width: 26px; height: 26px; border-radius: 8px; flex: 0 0 auto; }
+.group-tip-item .layer-icon iconify-icon { font-size: 15px; }
+.group-tip-name { font-size: 12.5px; font-weight: 700; color: var(--text); }
