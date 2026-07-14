@@ -2,9 +2,11 @@
 // 连线层（SVG）涉及大量测量与逐帧重绘，保持命令式实现；节点卡片由 Vue 响应式渲染。
 
 import { nextTick } from "vue";
+import { isLoggedIn } from "./auth";
 import {
   activeCanvas,
   askConfirm,
+  askConfirmChoice,
   clamp,
   containerInputPorts,
   containerLibrary,
@@ -23,6 +25,7 @@ import {
   isTrainingJobActive,
   isKnownLayerType,
   nextCanvasName,
+  openSaveModalAndWait,
   pokeMinimap,
   resetValidationAfterGraphChange,
   showToast,
@@ -153,18 +156,35 @@ export async function closeCanvas(id: number) {
   if (!canvas) return;
 
   const isTraining = isTrainingJobActive(canvas.trainingJob);
-  if (canvas.nodes.length > 0 || isTraining) {
-    const message = isTraining
-      ? `${canvas.name} 有训练任务进行中，关闭后将不再跟踪其进度。确定关闭吗？`
-      : `确定关闭 ${canvas.name} 吗？画布上的模型将被丢弃，且无法撤销。`;
+  if (isTraining) {
     const ok = await askConfirm({
       title: "关闭画布",
-      message,
+      message: `${canvas.name} 有训练任务进行中，关闭后将不再跟踪其进度。确定关闭吗？`,
       confirmText: "关闭画布",
       cancelText: "取消",
       danger: true,
     });
     if (!ok) return;
+  } else if (canvas.nodes.length > 0) {
+    // Word 式关闭询问：保存 / 不保存 / 取消（快捷键 S / N / Esc，Enter 也视为保存）
+    const choice = await askConfirmChoice({
+      title: "关闭画布",
+      message: `是否保存对 ${canvas.name} 的更改？`,
+      confirmText: "保存",
+      denyText: "不保存",
+      cancelText: "取消",
+    });
+    if (choice === "cancel") return;
+    if (choice === "confirm") {
+      if (!isLoggedIn()) {
+        showToast("warning", "登录状态已失效，请重新登录后再保存。");
+        return;
+      }
+      // 保存的是"被关闭的这块画布"：先切换过去，保证保存弹窗作用于它
+      if (store.activeCanvasId !== id) activateCanvas(id);
+      const saved = await openSaveModalAndWait();
+      if (!saved) return; // 在保存弹窗中取消 → 中止关闭
+    }
   }
 
   store.canvases.splice(index, 1);

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from "vue";
 import { saveProject } from "../actions";
-import { activeCanvas, showToast, ui } from "../store";
+import { activeCanvas, closeSaveModal, showToast, ui } from "../store";
 
 const form = reactive({ name: "", description: "" });
 const saving = ref(false);
@@ -19,7 +19,8 @@ watch(
 );
 
 function close() {
-  ui.saveModalOpen = false;
+  // 统一走 closeSaveModal：若有"关闭画布→先保存"流程在等待结果，取消保存要通知它中止关闭
+  closeSaveModal(false);
 }
 
 async function submit() {
@@ -31,7 +32,7 @@ async function submit() {
   saving.value = true;
   const ok = await saveProject(name, form.description.trim());
   saving.value = false;
-  if (ok) close();
+  if (ok) closeSaveModal(true);
 }
 </script>
 

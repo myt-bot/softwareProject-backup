@@ -151,27 +151,13 @@ def _handle_agent_request(command: dict[str, Any]) -> dict[str, Any]:
             if not code:
                 return fail("本机训练运行时暂未实现代码导出。")
             suffix = "ipynb" if export_format == "ipynb" else "py"
-            filename = f"{class_name}.{suffix}"
-            requirements = generate_requirements(export_format)
-
-            # 将代码文件与依赖清单打包成 zip，base64 编码后交给前端下载
-            import base64
-            import io
-            import zipfile
-
-            buffer = io.BytesIO()
-            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-                archive.writestr(filename, code)
-                archive.writestr("requirements.txt", requirements)
-            archive_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
-
+            # 依赖清单一并返回；由前端把代码与 requirements.txt 打包成 zip 下载，
+            # 这样无需重新分发本机 Agent 即可生效。
             return ok({
                 "code": code,
                 "format": suffix,
-                "filename": filename,
-                "requirements": requirements,
-                "archive": archive_b64,
-                "archive_filename": f"{class_name}.zip",
+                "filename": f"{class_name}.{suffix}",
+                "requirements": generate_requirements(export_format),
             })
 
         if action == "list_dir":

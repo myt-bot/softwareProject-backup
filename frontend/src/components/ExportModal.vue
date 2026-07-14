@@ -16,7 +16,7 @@ const canvas = computed(() => activeCanvas());
           <iconify-icon icon="mdi:file-code-outline"></iconify-icon>
           <div>
             <h2>导出 PyTorch 代码</h2>
-            <p>把画布上的模型打包成可直接运行的代码与依赖清单（zip 内含 requirements.txt）</p>
+            <p>打包成 zip：代码、requirements.txt 以及一键配置环境脚本（setup_env.sh / .bat）</p>
           </div>
         </div>
         <button class="icon-button" id="btn-close-modal" @click="closeExportModal"><iconify-icon icon="mdi:close"></iconify-icon></button>
@@ -71,7 +71,7 @@ const canvas = computed(() => activeCanvas());
         <button class="text-button" id="btn-cancel-modal" @click="closeExportModal">取消</button>
         <button class="primary-button" id="btn-download-code" @click="downloadExportCode">
           <iconify-icon icon="mdi:download"></iconify-icon>
-          下载 .zip（含 {{ canvas.exportFormat === "ipynb" ? ".ipynb" : ".py" }} + requirements.txt）
+          下载 .zip（含 {{ canvas.exportFormat === "ipynb" ? ".ipynb" : ".py" }} + requirements.txt + 环境脚本）
         </button>
       </div>
     </div>

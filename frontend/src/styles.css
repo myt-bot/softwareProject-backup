@@ -4005,6 +4005,30 @@ body.is-connecting .node-port {
   color: var(--text);
 }
 .confirm-cancel:hover { background: var(--panel-2); }
+/* 三键弹窗（保存 / 不保存 / 取消）中的"不保存"按钮 */
+.confirm-deny {
+  border: 1px solid var(--border-2);
+  background: var(--panel);
+  color: var(--text);
+}
+.confirm-deny:hover { background: var(--panel-2); }
+/* 按钮内的快捷键角标（Word 式：保存 S / 不保存 N / 取消 Esc） */
+.confirm-actions .confirm-key {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border-2);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+.confirm-actions .confirm-key.on-primary {
+  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
 .confirm-ok {
   border: 0;
   color: #fff;

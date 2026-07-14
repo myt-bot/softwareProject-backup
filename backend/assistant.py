@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Optional
@@ -55,6 +56,13 @@ TOOL_CALL_TIMEOUT_SECONDS = 30
 # 一轮对话内允许的最大工具调用轮数（防止模型陷入死循环，超出即中止并给出提示）。
 # 复杂建模/多画布/反复校验修正会消耗不少轮次，故给得宽松些，适配更“深”的模型。
 MAX_TOOL_ITERATIONS = 80
+
+# 状态轮询类命令（等待训练完成时反复调 get_training_result、等待 Agent 上线时反复调
+# get_system_status）。模型在"等待"期间会紧凑地连续轮询，若不加间隔，几分钟的训练就能
+# 把 MAX_TOOL_ITERATIONS 的额度耗尽。因此同一轮对话内连续调用这些命令时，服务端强制
+# 拉开最小间隔（首次调用不受影响）：80 次 × 15 秒 ≈ 20 分钟等待额度。
+POLLING_COMMANDS = {"get_training_result", "get_system_status"}
+POLL_MIN_INTERVAL_SECONDS = 15.0
 
 
 # —————————————————————————————————————————————
@@ -632,6 +640,8 @@ async def run_assistant_turn(
     final_text = ""
 
     tools = build_command_tools()
+    # 各轮询类命令上次真正执行的时刻（monotonic 秒），用于连续轮询时的服务端限速
+    last_poll_at: dict[str, float] = {}
     for _ in range(MAX_TOOL_ITERATIONS + 1):
         content, tool_calls = await _stream_model_round(connection, client, model, messages, tools)
 
@@ -661,6 +671,14 @@ async def run_assistant_turn(
             break
 
         for call in tool_calls:
+            # 等待期间的轮询限速：同一轮对话内连续调用轮询类命令时，
+            # 距上次执行不足最小间隔就先睡到间隔期满，再真正执行
+            if call["name"] in POLLING_COMMANDS:
+                elapsed = time.monotonic() - last_poll_at.get(call["name"], float("-inf"))
+                remaining = POLL_MIN_INTERVAL_SECONDS - elapsed
+                if remaining > 0:
+                    await asyncio.sleep(remaining)
+                last_poll_at[call["name"]] = time.monotonic()
             try:
                 parsed = json.loads(call["arguments"] or "{}")
                 if not isinstance(parsed, dict):

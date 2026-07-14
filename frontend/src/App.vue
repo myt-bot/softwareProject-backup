@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { loadProjectTemplates, loadProjectToCanvas } from "./actions";
 import { auth, initializeAuth, isLoggedIn } from "./auth";
 import { addCanvas, cancelPendingConnection, hideConnectionMenu, hideNodeMenu, redoGraphChange, undoGraphChange } from "./canvas";
-import { activeCanvas, closeHelpModal, confirmDialog, CONTAINER_ID_SEP, getCurrentModelGraph, initializeBeginnerGuide, resolveConfirm, store, ui, WORKSPACE_COACH_KEY } from "./store";
+import { activeCanvas, closeHelpModal, closeSaveModal, confirmDialog, CONTAINER_ID_SEP, getCurrentModelGraph, initializeBeginnerGuide, resolveConfirm, store, ui, WORKSPACE_COACH_KEY } from "./store";
 import ActionBar from "./components/ActionBar.vue";
 import AgentModal from "./components/AgentModal.vue";
 import AssistantPanel from "./components/AssistantPanel.vue";
@@ -89,7 +89,7 @@ function closeWorkspaceOverlays() {
   ui.projectsModalOpen = false;
   ui.storageSettingsOpen = false;
   ui.agentModalOpen = false;
-  ui.saveModalOpen = false;
+  closeSaveModal();
   ui.trainSettingsOpen = false;
   ui.assistantOpen = false;
   teachingPanelOpen.value = false;
@@ -156,12 +156,25 @@ function handleDocumentClick() {
 }
 
 function handleKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape") {
-    // 优先关闭确认弹窗（按取消处理）
-    if (confirmDialog.open) {
-      resolveConfirm(false);
-      return;
+  // 确认弹窗打开时优先处理其快捷键：Esc=取消；三键弹窗（如保存/不保存/取消）另支持 Enter、S=确认，N=否定
+  if (confirmDialog.open) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      resolveConfirm("cancel");
+    } else if (confirmDialog.denyText && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const key = event.key.toLowerCase();
+      if (event.key === "Enter" || key === "s") {
+        event.preventDefault();
+        resolveConfirm("confirm");
+      } else if (key === "n") {
+        event.preventDefault();
+        resolveConfirm("deny");
+      }
     }
+    return;
+  }
+
+  if (event.key === "Escape") {
     cancelPendingConnection();
     hideConnectionMenu();
     hideNodeMenu();
@@ -169,7 +182,7 @@ function handleKeydown(event: KeyboardEvent) {
     ui.templateGalleryOpen = false;
     ui.storageSettingsOpen = false;
     ui.agentModalOpen = false;
-    ui.saveModalOpen = false;
+    closeSaveModal();
     ui.projectsModalOpen = false;
     ui.trainSettingsOpen = false;
     teachingPanelOpen.value = false;

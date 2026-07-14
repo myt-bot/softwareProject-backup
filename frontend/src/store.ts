@@ -187,8 +187,7 @@ export interface WorkCanvas {
   exportCodeDisplay: string;
   exportFormat: ExportCodeFormat;
   exportFilename: string;
-  exportArchive: string;
-  exportArchiveName: string;
+  exportRequirements: string;
   // 视口
   zoom: number;
   panX: number;
@@ -227,8 +226,7 @@ export function createCanvas(
     exportCodeDisplay: "点击“导出代码”后会从后端生成 PyTorch 代码。",
     exportFormat: "py",
     exportFilename: "GeneratedModel.py",
-    exportArchive: "",
-    exportArchiveName: "GeneratedModel.zip",
+    exportRequirements: "",
     zoom: 1,
     panX: 0,
     panY: 0,
@@ -466,16 +464,47 @@ export function pokeMinimap() {
 // 确认弹窗（替代浏览器原生 window.confirm，风格与系统一致；Promise 化便于 await）
 // —————————————————————————————————————————————
 
+// 三选一结果：confirm=主操作（如"保存"）、deny=否定操作（如"不保存"）、cancel=取消
+export type ConfirmChoice = "confirm" | "deny" | "cancel";
+
 export const confirmDialog = reactive({
   open: false,
   title: "确认操作",
   message: "",
   confirmText: "确定",
+  // 非空时显示第三个"否定"按钮（如"不保存"），构成 Word 式 保存/不保存/取消 三选一
+  denyText: "",
   cancelText: "取消",
   danger: false,
 });
 
-let confirmResolver: ((ok: boolean) => void) | null = null;
+let confirmResolver: ((choice: ConfirmChoice) => void) | null = null;
+
+export function askConfirmChoice(options: {
+  title?: string;
+  message: string;
+  confirmText?: string;
+  denyText?: string;
+  cancelText?: string;
+  danger?: boolean;
+}): Promise<ConfirmChoice> {
+  // 若已有未决确认，先按取消结算，避免 resolver 丢失
+  if (confirmResolver) {
+    const prev = confirmResolver;
+    confirmResolver = null;
+    prev("cancel");
+  }
+  confirmDialog.title = options.title ?? "确认操作";
+  confirmDialog.message = options.message;
+  confirmDialog.confirmText = options.confirmText ?? "确定";
+  confirmDialog.denyText = options.denyText ?? "";
+  confirmDialog.cancelText = options.cancelText ?? "取消";
+  confirmDialog.danger = options.danger ?? false;
+  confirmDialog.open = true;
+  return new Promise<ConfirmChoice>(resolve => {
+    confirmResolver = resolve;
+  });
+}
 
 export function askConfirm(options: {
   title?: string;
@@ -484,29 +513,42 @@ export function askConfirm(options: {
   cancelText?: string;
   danger?: boolean;
 }): Promise<boolean> {
-  // 若已有未决确认，先按取消结算，避免 resolver 丢失
-  if (confirmResolver) {
-    const prev = confirmResolver;
-    confirmResolver = null;
-    prev(false);
-  }
-  confirmDialog.title = options.title ?? "确认操作";
-  confirmDialog.message = options.message;
-  confirmDialog.confirmText = options.confirmText ?? "确定";
-  confirmDialog.cancelText = options.cancelText ?? "取消";
-  confirmDialog.danger = options.danger ?? false;
-  confirmDialog.open = true;
-  return new Promise<boolean>(resolve => {
-    confirmResolver = resolve;
-  });
+  return askConfirmChoice(options).then(choice => choice === "confirm");
 }
 
-export function resolveConfirm(ok: boolean) {
+export function resolveConfirm(choice: ConfirmChoice) {
   if (!confirmDialog.open) return;
   confirmDialog.open = false;
   const resolve = confirmResolver;
   confirmResolver = null;
-  resolve?.(ok);
+  resolve?.(choice);
+}
+
+// —————————————————————————————————————————————
+// 保存弹窗的 Promise 化出口（供"关闭画布 → 先保存"等流程等待保存结果）
+// —————————————————————————————————————————————
+
+let saveModalResolver: ((saved: boolean) => void) | null = null;
+
+// 打开「保存模型」弹窗并等待结果：保存成功 → true，取消/关闭 → false
+export function openSaveModalAndWait(): Promise<boolean> {
+  if (saveModalResolver) {
+    const prev = saveModalResolver;
+    saveModalResolver = null;
+    prev(false);
+  }
+  ui.saveModalOpen = true;
+  return new Promise<boolean>(resolve => {
+    saveModalResolver = resolve;
+  });
+}
+
+// 保存弹窗的统一关闭入口：无论从哪里关闭都要走这里，结算可能存在的等待者
+export function closeSaveModal(saved = false) {
+  ui.saveModalOpen = false;
+  const resolve = saveModalResolver;
+  saveModalResolver = null;
+  resolve?.(saved);
 }
 
 // —————————————————————————————————————————————

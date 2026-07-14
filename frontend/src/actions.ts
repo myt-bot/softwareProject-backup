@@ -36,6 +36,7 @@ import {
 import type { WorkCanvas } from "./store";
 import type { ProjectMeta, TrainConfig, TrainStartResponse, ValidationResult } from "./types";
 import { requestAgent } from "./ws";
+import { createZip } from "./zip";
 
 type ExportCodeFormat = "py" | "ipynb";
 type ExportAgentResult = {
@@ -43,8 +44,6 @@ type ExportAgentResult = {
   format?: ExportCodeFormat;
   filename?: string;
   requirements?: string;
-  archive?: string;
-  archive_filename?: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -367,15 +366,14 @@ export async function handleExportCode(format?: ExportCodeFormat) {
     canvas.lastExportCode = typeof code === "string" ? code : JSON.stringify(result, null, 2);
     canvas.exportCodeDisplay = canvas.lastExportCode;
     canvas.exportFilename = result?.filename || `GeneratedModel.${canvas.exportFormat}`;
-    canvas.exportArchive = result?.archive || "";
-    canvas.exportArchiveName = result?.archive_filename || "GeneratedModel.zip";
+    canvas.exportRequirements = result?.requirements || "";
     if (result?.format === "py" || result?.format === "ipynb") {
       canvas.exportFormat = result.format;
     }
     showToast("success", `${canvas.name} 的 ${canvas.exportFormat === "ipynb" ? "Notebook" : "PyTorch 代码"} 已导出。`);
   } catch (error) {
     canvas.lastExportCode = "";
-    canvas.exportArchive = "";
+    canvas.exportRequirements = "";
     canvas.exportCodeDisplay = (error as Error)?.message || "代码导出失败。";
     showToast("error", canvas.exportCodeDisplay);
   }
@@ -416,15 +414,6 @@ export async function copyExportCode() {
 }
 
 
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
 function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -434,28 +423,110 @@ function triggerDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+// 兜底的依赖清单：当本机 Agent 版本较旧、未随代码返回 requirements 时使用
+function defaultRequirements(format: ExportCodeFormat): string {
+  const lines = [
+    "# 运行本导出代码所需的 Python 依赖（建议 Python 3.9+）。",
+    "# 若需 GPU 加速，请前往 https://pytorch.org 按你的 CUDA 版本选择",
+    "# 对应的 torch / torchvision 安装命令后再安装其余依赖。",
+    "torch>=2.0",
+    "torchvision>=0.15",
+  ];
+  if (format === "ipynb") {
+    lines.push("# 运行 Notebook 需要 Jupyter 环境");
+    lines.push("notebook>=7.0");
+  }
+  return lines.join("\n") + "\n";
+}
+
+// 环境名：run-<模型名>，并过滤掉不适合作为环境名/shell 变量的字符
+function envNameFromBase(baseName: string): string {
+  const safe = baseName.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^[-_.]+|[-_.]+$/g, "");
+  return `run-${safe || "model"}`;
+}
+
+// Linux / macOS 环境配置脚本：优先用 conda 创建命名环境，缺失时回退到 venv
+function setupScriptSh(envName: string): string {
+  return [
+    "#!/usr/bin/env bash",
+    "# 自动化环境配置脚本 —— 读取 requirements.txt 创建并安装运行环境。",
+    `# 环境名称：${envName}`,
+    "set -e",
+    `ENV_NAME="${envName}"`,
+    'cd "$(dirname "$0")"',
+    "",
+    'if command -v conda >/dev/null 2>&1; then',
+    '  echo "检测到 conda，创建环境 ${ENV_NAME} ..."',
+    '  conda create -y -n "${ENV_NAME}" python=3.10',
+    '  conda run -n "${ENV_NAME}" python -m pip install --upgrade pip',
+    '  conda run -n "${ENV_NAME}" python -m pip install -r requirements.txt',
+    '  echo ""',
+    '  echo "环境已就绪。使用前请执行： conda activate ${ENV_NAME}"',
+    "else",
+    '  echo "未检测到 conda，改用 venv 在当前目录创建 ${ENV_NAME} ..."',
+    '  python3 -m venv "${ENV_NAME}"',
+    '  "${ENV_NAME}/bin/python" -m pip install --upgrade pip',
+    '  "${ENV_NAME}/bin/python" -m pip install -r requirements.txt',
+    '  echo ""',
+    '  echo "环境已就绪。使用前请执行： source ${ENV_NAME}/bin/activate"',
+    "fi",
+    "",
+  ].join("\n");
+}
+
+// Windows 环境配置脚本（CRLF 换行 + UTF-8 代码页，避免中文乱码）
+function setupScriptBat(envName: string): string {
+  return [
+    "@echo off",
+    "chcp 65001 >nul",
+    "setlocal",
+    "REM 自动化环境配置脚本 —— 读取 requirements.txt 创建并安装运行环境。",
+    `REM 环境名称：${envName}`,
+    `set "ENV_NAME=${envName}"`,
+    'cd /d "%~dp0"',
+    "",
+    "where conda >nul 2>nul",
+    "if %ERRORLEVEL%==0 (",
+    "  echo 检测到 conda，创建环境 %ENV_NAME% ...",
+    "  call conda create -y -n %ENV_NAME% python=3.10",
+    "  call conda run -n %ENV_NAME% python -m pip install --upgrade pip",
+    "  call conda run -n %ENV_NAME% python -m pip install -r requirements.txt",
+    "  echo.",
+    "  echo 环境已就绪。使用前请执行： conda activate %ENV_NAME%",
+    ") else (",
+    "  echo 未检测到 conda，改用 venv 创建 %ENV_NAME% ...",
+    "  python -m venv %ENV_NAME%",
+    '  call "%ENV_NAME%\\Scripts\\python.exe" -m pip install --upgrade pip',
+    '  call "%ENV_NAME%\\Scripts\\python.exe" -m pip install -r requirements.txt',
+    "  echo.",
+    "  echo 环境已就绪。使用前请执行： %ENV_NAME%\\Scripts\\activate",
+    ")",
+    "endlocal",
+    "",
+  ].join("\r\n");
+}
+
 export function downloadExportCode() {
   const canvas = activeCanvas();
-
-  // 优先下载后端打包好的 zip（含代码文件与 requirements.txt）
-  if (canvas.exportArchive) {
-    const bytes = base64ToBytes(canvas.exportArchive);
-    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/zip" });
-    triggerDownload(blob, canvas.exportArchiveName || "GeneratedModel.zip");
-    return;
-  }
-
   if (!canvas.lastExportCode) {
     showToast("warning", "暂无可下载代码。");
     return;
   }
 
-  // 回退：旧版 Agent 未返回 zip 时，仍下载单个代码文件
-  const type = canvas.exportFormat === "ipynb"
-    ? "application/x-ipynb+json;charset=utf-8"
-    : "text/x-python;charset=utf-8";
-  const blob = new Blob([canvas.lastExportCode], { type });
-  triggerDownload(blob, canvas.exportFilename || `GeneratedModel.${canvas.exportFormat}`);
+  // 在浏览器端把代码文件、requirements.txt 与环境配置脚本打包成 zip 下载。
+  // 这样无需重装本机 Agent，导出 .py / .ipynb 都会得到一个 zip。
+  const codeName = canvas.exportFilename || `GeneratedModel.${canvas.exportFormat}`;
+  const baseName = codeName.replace(/\.[^./\\]+$/, "") || "GeneratedModel";
+  const requirements = canvas.exportRequirements || defaultRequirements(canvas.exportFormat);
+  const envName = envNameFromBase(baseName);
+  const archive = createZip([
+    { name: codeName, content: canvas.lastExportCode },
+    { name: "requirements.txt", content: requirements },
+    { name: "setup_env.sh", content: setupScriptSh(envName), mode: 0o755 },
+    { name: "setup_env.bat", content: setupScriptBat(envName) },
+  ]);
+  const blob = new Blob([archive.buffer as ArrayBuffer], { type: "application/zip" });
+  triggerDownload(blob, `${baseName}.zip`);
 }
 
 
