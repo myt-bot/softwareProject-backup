@@ -3,13 +3,14 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { loadProjectTemplates, loadProjectToCanvas } from "./actions";
 import { auth, initializeAuth, isLoggedIn } from "./auth";
 import { addCanvas, cancelPendingConnection, hideConnectionMenu, hideNodeMenu, redoGraphChange, undoGraphChange } from "./canvas";
-import { activeCanvas, closeHelpModal, closeSaveModal, confirmDialog, CONTAINER_ID_SEP, getCurrentModelGraph, initializeBeginnerGuide, resolveConfirm, store, ui, WORKSPACE_COACH_KEY } from "./store";
+import { activeCanvas, closeHelpModal, closeSaveModal, confirmDialog, CONTAINER_ID_SEP, containerCoach, getCurrentModelGraph, initializeBeginnerGuide, mergeCoach, resolveConfirm, store, ui, WORKSPACE_COACH_KEY } from "./store";
 import ActionBar from "./components/ActionBar.vue";
 import AgentModal from "./components/AgentModal.vue";
 import AssistantPanel from "./components/AssistantPanel.vue";
 import AuthPage from "./components/AuthPage.vue";
 import CanvasBoard from "./components/CanvasBoard.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
+import ContainerCoach from "./components/ContainerCoach.vue";
 import ContextMenus from "./components/ContextMenus.vue";
 import ExportModal from "./components/ExportModal.vue";
 import GuideStrip from "./components/GuideStrip.vue";
@@ -25,6 +26,7 @@ import StorageSettings from "./components/StorageSettings.vue";
 import TemplateGallery from "./components/TemplateGallery.vue";
 import TemplatesPage from "./components/TemplatesPage.vue";
 import TeachingPanel from "./components/TeachingPanel.vue";
+import MergeCoach from "./components/MergeCoach.vue";
 import ToastContainer from "./components/ToastContainer.vue";
 import TrainSettingsModal from "./components/TrainSettingsModal.vue";
 import TopBar from "./components/TopBar.vue";
@@ -70,6 +72,8 @@ watch(currentPage, (next, prev) => {
   } else {
     // 离开工作台时先收起引导（未完成则下次进入再触发）
     coachActive.value = false;
+    containerCoach.active = false;
+    mergeCoach.active = false;
   }
 });
 const canvas = computed(() => activeCanvas());
@@ -349,6 +353,8 @@ onBeforeUnmount(() => {
     <AssistantPanel />
     <TrainingMonitor />
     <ConfirmDialog />
+    <ContainerCoach v-if="containerCoach.active" />
+    <MergeCoach v-if="mergeCoach.active" />
     <WorkspaceCoach v-if="coachActive" @done="finishCoach" />
   </template>
 

@@ -26,6 +26,8 @@ import {
   isKnownLayerType,
   nextCanvasName,
   openSaveModalAndWait,
+  startContainerCoach,
+  startMergeCoach,
   pokeMinimap,
   resetValidationAfterGraphChange,
   showToast,
@@ -1493,7 +1495,7 @@ export function handleCanvasDrop(event: DragEvent) {
     void redrawAfterDomUpdate();
     selectNode(node.id);
     resetValidationAfterGraphChange();
-    showToast("info", "已放入空白容器：双击它进入子画板，像搭模型一样拖入层，用 Input/Output 定义输入输出端口。");
+    startContainerCoach(node.id);
     return;
   }
 
@@ -1508,12 +1510,17 @@ export function handleCanvasDrop(event: DragEvent) {
     selectNode(node.id);
     resetValidationAfterGraphChange();
     showToast("success", `已添加容器 ${def.name}。`);
+    startContainerCoach(node.id);
     return;
   }
 
   // 只接受组件库拖来的已知层类型；忽略浏览器原生拖拽（选中文本、文件等）
   if (!isKnownLayerType(payload)) return;
-  addNodeFromLayer(payload, point.x - 112, point.y - 70);
+  const node = addNodeFromLayer(payload, point.x - 112, point.y - 70);
+  // Merge 是"合并分支"的进阶概念：拖入时自动播放聚光引导（可勾选不再自动播放）
+  if (node.type === "Merge") {
+    startMergeCoach(node.id);
+  }
 }
 
 
@@ -1697,7 +1704,7 @@ function setZoomAroundViewportCenter(newZoom: number) {
 // 节点增删 / 模板加载
 // —————————————————————————————————————————————
 
-export function addNodeFromLayer(layerType: string, x: number, y: number) {
+export function addNodeFromLayer(layerType: string, x: number, y: number): GraphNode {
   recordHistory();
   const node = createNodeConfig(layerType, x, y);
   activeCanvas().nodes.push(node);
@@ -1705,6 +1712,7 @@ export function addNodeFromLayer(layerType: string, x: number, y: number) {
   selectNode(node.id);
   resetValidationAfterGraphChange();
   showToast("success", `已添加 ${node.badge} 节点。`);
+  return node;
 }
 
 

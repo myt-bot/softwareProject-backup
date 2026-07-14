@@ -552,6 +552,64 @@ export function closeSaveModal(saved = false) {
 }
 
 // —————————————————————————————————————————————
+// 进阶组件教程（容器 / Merge）：拖入画布时自动播放聚光灯逐步引导
+// （高亮真实元素、跟随用户实际操作自动前进），见 ContainerCoach.vue / MergeCoach.vue。
+// 勾选"不再自动播放"后按类型持久化关闭。
+// —————————————————————————————————————————————
+
+const TUTORIAL_OFF_PREFIX = "model-workshop-tutorial-off-";
+
+function tutorialDisabled(kind: string): boolean {
+  try {
+    return !!localStorage.getItem(TUTORIAL_OFF_PREFIX + kind);
+  } catch {
+    return false; // localStorage 不可用时照常引导
+  }
+}
+
+function disableTutorial(kind: string) {
+  try {
+    localStorage.setItem(TUTORIAL_OFF_PREFIX + kind, "1");
+  } catch {
+    // 忽略存储失败：本次会话内依然关闭
+  }
+}
+
+export const containerCoach = reactive({
+  active: false,
+  // 刚拖入的容器节点 id：引导第一步/最后一步聚光它
+  nodeId: "",
+});
+
+export function startContainerCoach(nodeId: string) {
+  if (tutorialDisabled("container")) return;
+  containerCoach.nodeId = nodeId;
+  containerCoach.active = true;
+}
+
+export function stopContainerCoach(disableAutoPlay: boolean) {
+  if (disableAutoPlay) disableTutorial("container");
+  containerCoach.active = false;
+}
+
+export const mergeCoach = reactive({
+  active: false,
+  // 刚拖入的 Merge 节点 id
+  nodeId: "",
+});
+
+export function startMergeCoach(nodeId: string) {
+  if (tutorialDisabled("merge")) return;
+  mergeCoach.nodeId = nodeId;
+  mergeCoach.active = true;
+}
+
+export function stopMergeCoach(disableAutoPlay: boolean) {
+  if (disableAutoPlay) disableTutorial("merge");
+  mergeCoach.active = false;
+}
+
+// —————————————————————————————————————————————
 // Toast
 // —————————————————————————————————————————————
 
