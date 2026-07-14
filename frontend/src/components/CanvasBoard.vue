@@ -129,6 +129,16 @@ function onPortMouseDown(event: MouseEvent, endpoint: string) {
   beginConnectionDrag(endpoint, event.clientX, event.clientY);
 }
 
+// 点击式连线模式下点中容器输入端口 → 精确连到该端口
+// （不拦截会冒泡到卡片的 onNodeClick，把连线错误地挂到容器本体上）
+function onInPortClick(event: MouseEvent, endpoint: string) {
+  if (!store.isConnecting) return;
+  event.preventDefault();
+  event.stopPropagation();
+  completeConnection(endpoint);
+  cancelPendingConnection();
+}
+
 function exitConnectMode() {
   cancelPendingConnection();
   showToast("info", "已退出连线模式。");
@@ -300,9 +310,11 @@ onBeforeUnmount(() => {
               v-for="port in containerInputPorts(node)"
               :key="port.id"
               class="cport cport-in"
+              :class="{ 'cport-target': store.connectTargetId === portEndpoint(node.id, port.id) }"
               :data-endpoint="portEndpoint(node.id, port.id)"
               data-port-kind="in"
               :title="`输入端口 · ${port.title}`"
+              @click="onInPortClick($event, portEndpoint(node.id, port.id))"
             >
               <span class="cport-dot"></span>
               <span class="cport-meta"><span class="cport-label">{{ port.title }}</span><span class="cport-shape">{{ portShapeText(port) }}</span></span>

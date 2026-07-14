@@ -1606,6 +1606,10 @@ export function exitContainer() {
   canvas.panX = frame.panX;
   canvas.panY = frame.panY;
   canvas.hasCenteredInitialGraph = frame.hasCenteredInitialGraph;
+  // 立刻把恢复的平移/缩放应用到 DOM。否则 DOM 上还是子画板的变换，
+  // 随后 drawLines 用 getBoundingClientRect 测量容器端口锚点时会把
+  // "旧变换下的屏幕坐标"用"新 pan/zoom"换算，导致连线落点偏离容器端口。
+  applyTransform();
   clearHistory(canvas.id);
 
   const container = canvas.nodes.find(item => item.id === frame.containerId);

@@ -2154,6 +2154,19 @@ button:disabled {
 }
 .cport-out { cursor: crosshair; }
 .cport-out:hover { background: #ccfbf1; border-color: #2dd4bf; }
+/* 连线模式下：输入端口是合法落点，悬停即给出反馈，指明会连到哪个端口 */
+body.is-connecting .cport-in { cursor: crosshair; }
+body.is-connecting .cport-in:hover { background: #d1fae5; border-color: #34d399; }
+/* 拖线/点选命中的目标输入端口：强高亮（与 .connection-target 同为翠绿主题） */
+.cport-in.cport-target {
+  background: #d1fae5;
+  border-color: #059669;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.24);
+}
+.cport-in.cport-target .cport-dot {
+  background: #059669;
+  box-shadow: 0 0 0 2px #a7f3d0;
+}
 .cport-dot {
   width: 9px;
   height: 9px;
