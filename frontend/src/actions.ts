@@ -42,6 +42,9 @@ type ExportAgentResult = {
   code?: string;
   format?: ExportCodeFormat;
   filename?: string;
+  requirements?: string;
+  archive?: string;
+  archive_filename?: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -364,12 +367,15 @@ export async function handleExportCode(format?: ExportCodeFormat) {
     canvas.lastExportCode = typeof code === "string" ? code : JSON.stringify(result, null, 2);
     canvas.exportCodeDisplay = canvas.lastExportCode;
     canvas.exportFilename = result?.filename || `GeneratedModel.${canvas.exportFormat}`;
+    canvas.exportArchive = result?.archive || "";
+    canvas.exportArchiveName = result?.archive_filename || "GeneratedModel.zip";
     if (result?.format === "py" || result?.format === "ipynb") {
       canvas.exportFormat = result.format;
     }
     showToast("success", `${canvas.name} 的 ${canvas.exportFormat === "ipynb" ? "Notebook" : "PyTorch 代码"} 已导出。`);
   } catch (error) {
     canvas.lastExportCode = "";
+    canvas.exportArchive = "";
     canvas.exportCodeDisplay = (error as Error)?.message || "代码导出失败。";
     showToast("error", canvas.exportCodeDisplay);
   }
@@ -410,23 +416,46 @@ export async function copyExportCode() {
 }
 
 
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export function downloadExportCode() {
   const canvas = activeCanvas();
+
+  // 优先下载后端打包好的 zip（含代码文件与 requirements.txt）
+  if (canvas.exportArchive) {
+    const bytes = base64ToBytes(canvas.exportArchive);
+    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/zip" });
+    triggerDownload(blob, canvas.exportArchiveName || "GeneratedModel.zip");
+    return;
+  }
+
   if (!canvas.lastExportCode) {
     showToast("warning", "暂无可下载代码。");
     return;
   }
 
+  // 回退：旧版 Agent 未返回 zip 时，仍下载单个代码文件
   const type = canvas.exportFormat === "ipynb"
     ? "application/x-ipynb+json;charset=utf-8"
     : "text/x-python;charset=utf-8";
   const blob = new Blob([canvas.lastExportCode], { type });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = canvas.exportFilename || `GeneratedModel.${canvas.exportFormat}`;
-  link.click();
-  URL.revokeObjectURL(url);
+  triggerDownload(blob, canvas.exportFilename || `GeneratedModel.${canvas.exportFormat}`);
 }
 
 

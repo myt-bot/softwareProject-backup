@@ -187,6 +187,8 @@ export interface WorkCanvas {
   exportCodeDisplay: string;
   exportFormat: ExportCodeFormat;
   exportFilename: string;
+  exportArchive: string;
+  exportArchiveName: string;
   // 视口
   zoom: number;
   panX: number;
@@ -225,6 +227,8 @@ export function createCanvas(
     exportCodeDisplay: "点击“导出代码”后会从后端生成 PyTorch 代码。",
     exportFormat: "py",
     exportFilename: "GeneratedModel.py",
+    exportArchive: "",
+    exportArchiveName: "GeneratedModel.zip",
     zoom: 1,
     panX: 0,
     panY: 0,

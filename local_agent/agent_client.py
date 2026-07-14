@@ -139,7 +139,7 @@ def _handle_agent_request(command: dict[str, Any]) -> dict[str, Any]:
             return ok(get_device_summary())
 
         if action == "export":
-            from .runtime.code_exporter import export_model_code
+            from .runtime.code_exporter import export_model_code, generate_requirements
             export_format = (payload.get("format", "py") or "py").lower()
             class_name = payload.get("class_name", "GeneratedModel")
             code = export_model_code(
@@ -151,7 +151,28 @@ def _handle_agent_request(command: dict[str, Any]) -> dict[str, Any]:
             if not code:
                 return fail("本机训练运行时暂未实现代码导出。")
             suffix = "ipynb" if export_format == "ipynb" else "py"
-            return ok({"code": code, "format": suffix, "filename": f"{class_name}.{suffix}"})
+            filename = f"{class_name}.{suffix}"
+            requirements = generate_requirements(export_format)
+
+            # 将代码文件与依赖清单打包成 zip，base64 编码后交给前端下载
+            import base64
+            import io
+            import zipfile
+
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(filename, code)
+                archive.writestr("requirements.txt", requirements)
+            archive_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+
+            return ok({
+                "code": code,
+                "format": suffix,
+                "filename": filename,
+                "requirements": requirements,
+                "archive": archive_b64,
+                "archive_filename": f"{class_name}.zip",
+            })
 
         if action == "list_dir":
             return ok(_list_directory(payload.get("path")))

@@ -372,7 +372,7 @@ export async function executeAssistantCommand(
 
       case "stop_training":
         await handleStopTraining();
-        return { ok: true, result: "已请求停止训练（若当前没有进行中的任务会自动忽略）" };
+        return { ok: true, result: "已请求终止训练（若当前没有进行中的任务会自动忽略）" };
 
       case "auto_layout":
         autoLayoutGraph();

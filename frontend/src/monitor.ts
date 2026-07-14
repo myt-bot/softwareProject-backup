@@ -293,13 +293,13 @@ export async function handleStopTraining() {
   try {
     const result = await cancelJobFn(monitor.jobId);
     if (result?.cancelled) {
-      showToast("warning", "已请求停止训练。");
+      showToast("warning", "已请求终止训练。");
     } else {
       showToast("info", `任务已处于「${result?.status || "未知"}」状态，无需停止。`);
       monitor.stopping = false;
     }
   } catch (error) {
-    showToast("error", (error as Error)?.message || "停止训练失败");
+    showToast("error", (error as Error)?.message || "终止训练失败");
     monitor.stopping = false;
   }
 }

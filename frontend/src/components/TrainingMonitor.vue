@@ -171,8 +171,8 @@ const datasetFileLabel = computed(() => datasetProgress.value?.file_name || data
 
 const heroTitle = computed(() => {
   if (monitor.error) return "训练失败";
-  if (monitor.stopping) return "正在停止训练";
-  if (isCancelled.value) return "训练已停止";
+  if (monitor.stopping) return "正在终止训练";
+  if (isCancelled.value) return "训练已终止";
   if (datasetStageActive.value) {
     if (datasetStatus.value === "downloading") return `正在下载 ${datasetFileLabel.value} · ${datasetPercentText.value}`;
     return `正在准备 ${datasetLabel.value} 数据集`;
@@ -234,7 +234,7 @@ const logLines = computed(() => {
       lines.push(`> 正在训练 Epoch ${Math.min(count + 1, total)}/${total} ...`);
     }
   } else if (isCancelled.value) {
-    lines.push(`> 训练已停止，已保留 ${count}/${total} 轮指标。`);
+    lines.push(`> 训练已终止，已保留 ${count}/${total} 轮指标。`);
   } else {
     lines.push(`> 训练完成，模型权重已保存。`);
   }
@@ -291,7 +291,7 @@ function formatBytes(value: number) {
           </div>
         </div>
         <div class="tm-topbar-right">
-          <!-- 状态切换：训练中显示"停止训练"，已结束显示"重新训练" -->
+          <!-- 状态切换：训练中显示"终止训练"，已结束显示"重新训练" -->
           <button
             v-if="monitor.live && isRunning"
             class="danger-button"
@@ -301,7 +301,7 @@ function formatBytes(value: number) {
           >
             <iconify-icon v-if="monitor.stopping" icon="mdi:loading" class="spin"></iconify-icon>
             <iconify-icon v-else icon="mdi:stop-circle-outline"></iconify-icon>
-            {{ monitor.stopping ? "正在停止..." : "停止训练 Stop" }}
+            {{ monitor.stopping ? "正在终止..." : "终止训练 Stop" }}
           </button>
           <button v-else class="primary-button" id="tm-rerun" @click="handleRerun">
             <iconify-icon icon="mdi:restart"></iconify-icon>

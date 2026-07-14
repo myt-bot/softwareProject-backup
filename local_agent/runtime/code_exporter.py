@@ -33,11 +33,13 @@ def export_model_code(model_graph, class_name="GeneratedModel", export_format="p
 
     source_code = format_python_code(
         "\n\n".join([
+            generate_module_docstring(normalized_graph, class_name),
             generate_imports(),
             generate_helper_layers(),
             generate_model_class(normalized_graph, class_name),
             generate_training_config(export_train_config),
             generate_model_metadata(normalized_graph),
+            generate_model_documentation(normalized_graph),
             generate_dataset_helpers(),
             generate_training_helpers(),
             generate_smoke_test(normalized_graph, class_name),
@@ -60,6 +62,108 @@ def generate_imports():
         "import torch.utils.data",
         "import torchvision",
     ])
+
+
+def generate_requirements(export_format="py"):
+    """生成随导出代码一起打包的 requirements.txt 内容。"""
+    export_format = (export_format or "py").lower()
+    lines = [
+        "# 运行本导出代码所需的 Python 依赖（建议 Python 3.9+）。",
+        "# 若需 GPU 加速，请前往 https://pytorch.org 按你的 CUDA 版本选择",
+        "# 对应的 torch / torchvision 安装命令后再安装其余依赖。",
+        "torch>=2.0",
+        "torchvision>=0.15",
+    ]
+    if export_format == "ipynb":
+        lines.append("# 运行 Notebook 需要 Jupyter 环境")
+        lines.append("notebook>=7.0")
+    return "\n".join(lines) + "\n"
+
+
+def generate_module_docstring(model_graph, class_name):
+    """生成导出 .py 文件顶部的模块 docstring：模型概览与逐层功能说明。"""
+    normalized_graph = _normalize_graph(model_graph)
+    _ensure_valid_graph(normalized_graph)
+    class_name = _safe_class_name(class_name)
+    ordered_layers = topological_sort_layers(normalized_graph)
+    shape_info = infer_all_shapes(normalized_graph).get("layers", {})
+
+    input_shapes = [
+        layer_shape.get("output_shape")
+        for layer_shape in shape_info.values()
+        if layer_shape.get("layer_type") == "Input"
+    ]
+    output_shapes = [
+        layer_shape.get("output_shape")
+        for layer_shape in shape_info.values()
+        if layer_shape.get("layer_type") == "Output"
+    ]
+
+    lines = [
+        '"""',
+        f"{class_name} —— 由可视化模型图自动生成的 PyTorch 训练脚本。",
+        "",
+        "本脚本包含三部分能力：",
+        "  1. 模型定义与训练/评估流程（run_training / evaluate）；",
+        "  2. 训练过程信息展示：run_training 会打印训练配置、每轮 loss/accuracy 以及最终总结；",
+        "  3. 模型结构讲解：运行时调用 print_model_overview() 查看每一层的功能与维度。",
+        "",
+        "命令行用法：",
+        "  python <this_file>.py              # 打印模型讲解并做一次前向试运行",
+        "  python <this_file>.py --overview   # 仅打印模型结构与逐层讲解",
+        "  python <this_file>.py --train      # 使用 TRAIN_CONFIG 指定的数据集进行训练",
+        "",
+        "模型概览：",
+        f"  - 层数量：{len(normalized_graph.get('layers', []))}",
+        f"  - 连接数量：{len(normalized_graph.get('connections', []))}",
+        f"  - 输入维度：{input_shapes}",
+        f"  - 输出维度：{output_shapes}",
+        "",
+        "逐层说明：",
+    ]
+    for index, layer_config in enumerate(ordered_layers, start=1):
+        layer_id = layer_config.get("id")
+        layer_type = layer_config.get("type")
+        description = _layer_function_description(layer_config)
+        lines.append(f"  {index}. {layer_id} ({layer_type})：{description}")
+    lines.append('"""')
+    return "\n".join(lines)
+
+
+def generate_model_documentation(model_graph):
+    """生成导出 .py 中的逐层讲解常量与 print_model_overview() 函数。"""
+    normalized_graph = _normalize_graph(model_graph)
+    ordered_layers = topological_sort_layers(normalized_graph)
+    shape_info = infer_all_shapes(normalized_graph).get("layers", {})
+
+    docs = []
+    for layer_config in ordered_layers:
+        layer_id = layer_config["id"]
+        layer_shape = shape_info.get(layer_id, {})
+        docs.append({
+            "id": layer_id,
+            "type": layer_config.get("type"),
+            "input_shape": layer_shape.get("input_shape"),
+            "output_shape": layer_shape.get("output_shape"),
+            "params": layer_config.get("params", {}),
+            "note": _layer_function_description(layer_config),
+        })
+
+    return (
+        f"LAYER_DOCS = {_repr(docs)}\n\n\n"
+        "def print_model_overview():\n"
+        '    """打印模型结构与每一层的功能讲解，便于理解导出的网络。"""\n'
+        "    print(\"=\" * 68)\n"
+        "    print(\"模型结构与逐层讲解\")\n"
+        "    print(\"=\" * 68)\n"
+        "    for index, item in enumerate(LAYER_DOCS, start=1):\n"
+        "        print(f\"{index}. {item['id']} ({item['type']})\")\n"
+        "        print(f\"   功能  : {item['note']}\")\n"
+        "        print(f\"   输入  : {item['input_shape']}\")\n"
+        "        print(f\"   输出  : {item['output_shape']}\")\n"
+        "        print(f\"   参数  : {item['params']}\")\n"
+        "    print(\"=\" * 68)\n"
+    )
 
 
 def generate_helper_layers():
@@ -582,6 +686,7 @@ def run_training(model, config=None):
     config = dict(TRAIN_CONFIG if config is None else config)
     requested_device = config.get("device", "cpu")
     if requested_device == "cuda" and not torch.cuda.is_available():
+        print("[提示] 未检测到可用的 CUDA 设备，自动回退到 CPU 训练。")
         requested_device = "cpu"
     device = torch.device(requested_device)
 
@@ -591,19 +696,43 @@ def run_training(model, config=None):
     optimizer = build_optimizer(model, config)
     epochs = int(config.get("epochs", 1))
 
+    print("=" * 68)
+    print("开始训练")
+    print("=" * 68)
+    print(f"数据集    : {config.get('dataset_name', 'MNIST')}")
+    print(f"设备      : {device}")
+    print(f"训练轮数  : {epochs}")
+    print(f"批大小    : {config.get('batch_size', 64)}")
+    print(f"学习率    : {config.get('rate', 0.001)}")
+    print(f"优化器    : {config.get('optimizer', 'sgd')}")
+    print(f"损失函数  : {config.get('loss_fn', 'cross_entropy')}")
+    print(f"训练批次数: {len(train_loader)} | 测试批次数: {len(test_loader)}")
+    print("-" * 68)
+
     history = []
+    best_eval_acc = 0.0
     for epoch in range(1, epochs + 1):
         train_metrics = train_one_epoch(model, train_loader, optimizer, loss_fn, device)
         eval_metrics = evaluate(model, test_loader, loss_fn, device)
         item = {"epoch": epoch, "train": train_metrics, "eval": eval_metrics}
         history.append(item)
+        best_eval_acc = max(best_eval_acc, eval_metrics["accuracy"])
         print(
-            f"epoch={epoch} "
+            f"[{epoch:>3}/{epochs}] "
             f"train_loss={train_metrics['loss']:.4f} "
-            f"train_acc={train_metrics['accuracy']:.4f} "
+            f"train_acc={train_metrics['accuracy']:.4f} | "
             f"eval_loss={eval_metrics['loss']:.4f} "
             f"eval_acc={eval_metrics['accuracy']:.4f}"
         )
+
+    print("-" * 68)
+    if history:
+        final_metrics = history[-1]["eval"]
+        print(
+            f"训练完成：最终 eval_acc={final_metrics['accuracy']:.4f} | "
+            f"最佳 eval_acc={best_eval_acc:.4f}"
+        )
+    print("=" * 68)
     return history
 '''.strip()
 
@@ -615,21 +744,26 @@ def generate_smoke_test(model_graph, class_name):
 
     lines = [
         "if __name__ == \"__main__\":",
-        "    parser = argparse.ArgumentParser()",
-        "    parser.add_argument('--train', action='store_true', help='Train the exported model with TRAIN_CONFIG dataset settings.')",
+        "    parser = argparse.ArgumentParser(description='导出的 PyTorch 模型：训练 / 结构讲解 / 前向试运行。')",
+        "    parser.add_argument('--train', action='store_true', help='使用 TRAIN_CONFIG 指定的数据集训练导出的模型。')",
+        "    parser.add_argument('--overview', action='store_true', help='仅打印模型结构与逐层讲解后退出。')",
         "    args = parser.parse_args()",
         f"    model = {class_name}()",
+        "    print_model_overview()",
+        "    if args.overview:",
+        "        raise SystemExit(0)",
         "    if args.train:",
         "        run_training(model, TRAIN_CONFIG)",
         "    else:",
         "        sample_input = build_sample_input_from_dataset(TRAIN_CONFIG, MODEL_INPUTS)",
         "        output = model(sample_input)",
+        "        print('模型对象：')",
         "        print(model)",
-        "        print('dataset:', TRAIN_CONFIG.get('dataset_name', 'MNIST'))",
+        "        print('数据集：', TRAIN_CONFIG.get('dataset_name', 'MNIST'))",
         "        if isinstance(output, dict):",
-        "            print({key: tuple(value.shape) for key, value in output.items()})",
+        "            print('前向输出维度：', {key: tuple(value.shape) for key, value in output.items()})",
         "        else:",
-        "            print(tuple(output.shape))",
+        "            print('前向输出维度：', tuple(output.shape))",
     ]
     return "\n".join(lines)
 
