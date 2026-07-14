@@ -53,7 +53,8 @@ class ExecutableGraphModel(nn.Module):
             #将所有前置节点的输出合并成该节点的输入
             node_input = self._collect_node_input(layer_id, outputs)
 
-            if layer_type == "Output":
+            # Output / Merge 都是结构性节点：不含子模块，直接输出（已合并的）输入张量
+            if layer_type in ("Output", "Merge"):
                 outputs[layer_id] = node_input
                 continue
 
@@ -126,17 +127,24 @@ def _merge_tensors(layer_config, tensors):
 
     目标节点可通过 params.merge 指定合并方式：
         concat：按 params.dim 或 params.concat_dim 指定维度拼接，默认 dim=1；
-        add/sum：逐元素相加。
+        add/sum：逐元素相加；
+        matmul：按前驱顺序（params.order 已重排）依次做矩阵乘法 ((A@B)@C…)。
+    未识别或未设置模式时按 concat 兜底，避免返回 None 导致后续崩溃。
     """
     params = layer_config.get("params", {})
     merge_mode = params.get("merge", "concat")
-
-    if merge_mode == "concat":
-        concat_dim = params.get("dim", params.get("concat_dim", 1))
-        return torch.cat(tensors, dim=concat_dim)
 
     if merge_mode in ("add", "sum"):
         merged = tensors[0]
         for tensor in tensors[1:]:
             merged = merged + tensor
         return merged
+
+    if merge_mode == "matmul":
+        merged = tensors[0]
+        for tensor in tensors[1:]:
+            merged = torch.matmul(merged, tensor)
+        return merged
+
+    concat_dim = params.get("dim", params.get("concat_dim", 1))
+    return torch.cat(tensors, dim=concat_dim)

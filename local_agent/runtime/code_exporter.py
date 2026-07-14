@@ -283,7 +283,8 @@ def generate_model_class(model_graph, class_name):
     module_lines = []
     for layer_config in ordered_layers:
         layer_type = layer_config.get("type")
-        if layer_type in ("Input", "Output"):
+        # Input / Output / Merge 都是结构性节点，不生成可训练子模块
+        if layer_type in ("Input", "Output", "Merge"):
             continue
 
         layer_id = layer_config["id"]
@@ -431,7 +432,8 @@ def generate_forward_method(model_graph):
         predecessor_ids = predecessors.get(layer_id, [])
         input_expr = _input_expression(layer_config, predecessor_ids)
 
-        if layer_type == "Output":
+        if layer_type in ("Output", "Merge"):
+            # Merge 直接输出合并后的张量（合并表达式已由 _input_expression 生成）
             lines.append(f"        {output_var} = {input_expr}")
         else:
             lines.append(f"        {output_var} = self.{_module_name(layer_id)}({input_expr})")
@@ -1022,8 +1024,23 @@ def _layer_function_description(layer_config):
     }
 
     merge_mode = params.get("merge")
+
+    # 合并运算模块：节点本身就是合并操作，直接描述合并方式
+    if layer_type == "Merge":
+        if merge_mode in ("add", "sum"):
+            return "合并模块（逐元素相加）：把多路输入按相同位置逐元素相加成一路。要求各输入形状一致。"
+        if merge_mode == "matmul":
+            return "合并模块（矩阵乘法）：按设定顺序把多路输入依次做矩阵乘法（((A@B)@C)…）。矩阵乘法对顺序敏感。"
+        if merge_mode == "concat":
+            dim = params.get("dim", params.get("concat_dim", 1))
+            return f"合并模块（拼接）：把多路输入沿 dim={dim} 维拼接成一路。除拼接维外其它维度需一致。"
+        return "合并模块：把多路分支合并成一路（可选 add / concat / matmul，尚未选择模式）。"
+
+    # 普通层带 merge 参数（历史遗留）：先合并多个输入，再进入本层
     if merge_mode in ("add", "sum"):
         return descriptions.get(layer_type, "执行该模型层的张量变换。") + " 多个输入会先逐元素相加再进入本层。"
+    if merge_mode == "matmul":
+        return descriptions.get(layer_type, "执行该模型层的张量变换。") + " 多个输入会先按顺序做矩阵乘法再进入本层。"
     if merge_mode == "concat":
         dim = params.get("dim", params.get("concat_dim", 1))
         return descriptions.get(layer_type, "执行该模型层的张量变换。") + f" 多个输入会先沿 dim={dim} 拼接再进入本层。"
@@ -1120,6 +1137,13 @@ def _input_expression(layer_config, predecessor_ids):
     if merge_mode in ("add", "sum"):
         expression = f"[{tensors}]"
         return f"sum({expression}[1:], {expression}[0])"
+
+    if merge_mode == "matmul":
+        # 链式左折叠：((A@B)@C)…，顺序由 predecessor_ids（params.order 已重排）决定
+        expression = f"outputs[{_repr(predecessor_ids[0])}]"
+        for predecessor_id in predecessor_ids[1:]:
+            expression = f"torch.matmul({expression}, outputs[{_repr(predecessor_id)}])"
+        return expression
 
     concat_dim = params.get("dim", params.get("concat_dim", 1))
     return f"torch.cat([{tensors}], dim={concat_dim})"

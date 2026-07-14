@@ -59,6 +59,19 @@ def validate_model_graph(model_graph):
             "message": errors[0],
         }
 
+    # 纯结构图剔除：展平后若只剩输入/输出/Add/直通端口等结构性节点、没有任何可学习的
+    # 网络层，就不是一个机器学习模型。直接给出明确原因并返回，避免下游再抛出让人困惑的
+    # merge / 维度报错（例如 Add 之外的输出端口被误判为"需要设置 merge"）。
+    if layers and _has_no_learnable_layer(layers):
+        errors.append(build_error_message("NO_LEARNABLE_LAYER"))
+        return {
+            "valid": False,
+            "errors": errors,
+            "warnings": warnings,
+            "shapes": shapes,
+            "message": errors[0],
+        }
+
     for node_type in validate_required_nodes(model_graph):
         errors.append(build_error_message(
             "MISSING_REQUIRED_NODE",
@@ -251,7 +264,23 @@ def validate_connections(model_graph):
         if layer_type != "Output" and not adjacency[layer_id]:
             errors.append(f"层 {layer_id} 没有输出连接，必须最终连接到 Output")
         if len(predecessors[layer_id]) > 1 and not _has_explicit_merge(layer):
-            errors.append(f"层 {layer_id} 收到了多个输入，但没有声明合并方式，请设置 merge 参数")
+            if layer_type == "Merge":
+                # 合并模块已放上画布但还没选模式：引导用户在右侧参数面板点选
+                errors.append(
+                    f"合并模块 {layer_id} 收到了多个输入，但还没有选择合并模式，"
+                    f"请在右侧参数面板选择 add、concat 或 matmul。"
+                )
+            elif layer_type in ("Output", "Identity"):
+                # 输出端口 / 容器直通端口没有 merge 参数，"设置 merge"对它们无意义
+                errors.append(
+                    f"节点 {layer_id} 收到了多个输入，但输入/输出端口只能连接一路；"
+                    f"若要合并多个分支，请先用「合并运算」模块合并后再连接。"
+                )
+            else:
+                errors.append(
+                    f"层 {layer_id} 收到了多个输入，但没有声明合并方式，"
+                    f"请改用「合并运算」模块合并这些分支后再连接。"
+                )
     
     isolated_nodes = [
         layer_id
@@ -302,7 +331,21 @@ def validate_connections(model_graph):
 def _has_explicit_merge(layer_config):
     """多输入节点必须显式声明合并方式，避免误把错误连接当 concat。"""
     params = layer_config.get("params", {})
-    return params.get("merge") in ("concat", "add", "sum")
+    return params.get("merge") in ("concat", "add", "sum", "matmul")
+
+
+# 纯结构/直通节点：本身不含可训练参数，也不构成"机器学习"。
+# Identity 为容器 Input/Output 端口展平后的直通层（见 graph_utils._inline_container）。
+# Merge 为合并模块（add/concat/matmul），本身不含可训练参数，只合并多路输入。
+_STRUCTURAL_LAYER_TYPES = {"Input", "Output", "Add", "Merge", "Identity"}
+
+
+def _has_no_learnable_layer(layers):
+    """展平后的图里是否完全没有可学习的网络层（只剩输入/输出/Add/直通端口）。"""
+    for layer in layers:
+        if isinstance(layer, dict) and layer.get("type") not in _STRUCTURAL_LAYER_TYPES:
+            return False
+    return True
 
 
 def _collect_reachable(start_ids, adjacency):
@@ -446,6 +489,12 @@ def validate_layer_params(layer_config):
     elif layer_type in ("ReLU", "Flatten", "Output", "Identity"):
         pass
 
+    elif layer_type == "Merge":
+        # 合并模块：模式必须是 add / concat / matmul 之一（初始为空时由连接校验提示选择）
+        merge_mode = params.get("merge")
+        if merge_mode not in (None, "", "add", "sum", "concat", "matmul"):
+            add_error("INVALID_MERGE_MODE", {"merge": merge_mode})
+
     else:
         add_error("UNSUPPORTED_LAYER_TYPE")
 
@@ -519,11 +568,19 @@ def _merge_shapes(layer_config, shapes):
     """根据节点合并方式推导多个前驱 shape 合并后的 shape。"""
     params = layer_config.get("params", {})
     merge_mode = params.get("merge")
+    layer_id = layer_config.get("id")
 
-    if merge_mode not in ("concat", "add", "sum"):
+    if merge_mode not in ("concat", "add", "sum", "matmul"):
         raise ValueError(
-            f"层 {layer_config.get('id')}: 多输入节点必须通过 params.merge 声明 concat、add 或 sum 合并方式"
+            f"层 {layer_id}: 多输入节点必须通过 params.merge 声明 add、concat 或 matmul 合并方式"
         )
+
+    if merge_mode == "matmul":
+        # 链式左折叠：((A@B)@C)…，顺序由 params.order（前端 ⬅/➡ 控制）决定
+        result = list(shapes[0])
+        for shape in shapes[1:]:
+            result = _matmul_shapes(result, list(shape), layer_id)
+        return result
 
     if merge_mode in ("add", "sum"):
         normalized_shapes = [
@@ -566,6 +623,66 @@ def _merge_shapes(layer_config, shapes):
     return merged_shape
 
 
+def _matmul_shapes(shape_a, shape_b, layer_id):
+    """推导两个（不含 batch 维的）张量做 torch.matmul 后的 shape。
+
+    规则与 torch.matmul 一致：
+    - 1D @ 1D → 标量（[]）；
+    - 1D @ ND → 去掉倒数第二维；ND @ 1D → 去掉最后一维；
+    - 均 ≥2D → 最后两维做矩阵乘（要求 a[-1] == b[-2]），其余前置维按广播对齐。
+    """
+    shape_a = [int(value) for value in shape_a]
+    shape_b = [int(value) for value in shape_b]
+
+    if not shape_a or not shape_b:
+        raise ValueError(f"层 {layer_id}: matmul 合并的输入不能是标量（0 维）")
+
+    if len(shape_a) == 1 and len(shape_b) == 1:
+        if shape_a[0] != shape_b[0]:
+            raise ValueError(
+                f"层 {layer_id}: matmul 要求两个向量长度一致，当前为 {shape_a} 与 {shape_b}"
+            )
+        return []
+
+    if len(shape_a) == 1:
+        if shape_b[-2] != shape_a[0]:
+            raise ValueError(
+                f"层 {layer_id}: matmul 维度不匹配，前一输入 {shape_a} 的长度需等于后一输入 {shape_b} 的倒数第二维"
+            )
+        return shape_b[:-2] + [shape_b[-1]]
+
+    if len(shape_b) == 1:
+        if shape_a[-1] != shape_b[0]:
+            raise ValueError(
+                f"层 {layer_id}: matmul 维度不匹配，前一输入 {shape_a} 的最后一维需等于后一输入向量 {shape_b} 的长度"
+            )
+        return shape_a[:-1]
+
+    if shape_a[-1] != shape_b[-2]:
+        raise ValueError(
+            f"层 {layer_id}: matmul 维度不匹配，前一输入 {shape_a} 的最后一维({shape_a[-1]})"
+            f"必须等于后一输入 {shape_b} 的倒数第二维({shape_b[-2]})"
+        )
+    batch = _broadcast_shapes(shape_a[:-2], shape_b[:-2], layer_id)
+    return batch + [shape_a[-2], shape_b[-1]]
+
+
+def _broadcast_shapes(shape_a, shape_b, layer_id):
+    """按 numpy/torch 广播规则对齐两个前置维（batch）shape。"""
+    result = []
+    length = max(len(shape_a), len(shape_b))
+    padded_a = [1] * (length - len(shape_a)) + list(shape_a)
+    padded_b = [1] * (length - len(shape_b)) + list(shape_b)
+    for dim_a, dim_b in zip(padded_a, padded_b):
+        if dim_a == dim_b or dim_a == 1 or dim_b == 1:
+            result.append(max(dim_a, dim_b))
+        else:
+            raise ValueError(
+                f"层 {layer_id}: matmul 的 batch 维无法广播对齐（{shape_a} 与 {shape_b}）"
+            )
+    return result
+
+
 def infer_layer_shape(layer_config, input_shape):
     """根据输入维度和层参数推导某一层的输出维度。
 
@@ -597,7 +714,8 @@ def infer_layer_shape(layer_config, input_shape):
     if layer_type == "Flatten":
         return infer_flatten_shape(input_shape)
 
-    if layer_type in ("ReLU", "Dropout", "Output", "Identity"):
+    if layer_type in ("ReLU", "Dropout", "Output", "Identity", "Merge"):
+        # Merge 本身不改变已合并的输入张量（合并结果由 _merge_shapes 给出）
         return input_shape
 
     if layer_type == "Linear":
@@ -832,6 +950,11 @@ def build_error_message(error_code, context=None):
         "INVALID_MODEL_LAYERS": "模型图的 layers 字段必须是列表",
         "INVALID_MODEL_CONNECTIONS": "模型图的 connections 字段必须是列表",
         "MISSING_REQUIRED_NODE": f"模型缺少必要节点: {context.get('node_type')}",
+        "NO_LEARNABLE_LAYER": (
+            "模型里只有 输入/输出/Add 等结构性节点，没有任何可学习的网络层"
+            "（如 Conv2D、Linear、LSTM 等），不能作为机器学习模型训练。"
+            "请至少加入一个可学习的网络层。"
+        ),
         "SHAPE_INFERENCE_FAILED": f"模型维度推导失败: {context.get('reason')}",
         "UNKNOWN_LAYER_SHAPE": f"层 {layer_id}: 无法推导输出维度",
         "INVALID_LAYER_CONFIG": "层配置必须是字典结构",
@@ -845,6 +968,7 @@ def build_error_message(error_code, context=None):
         "INVALID_BOOL": f"{prefix}: {param} 必须是布尔值 true 或 false",
         "INVALID_ATTENTION_HEADS": f"{prefix}: 注意力维度必须能被 num_heads 整除",
         "UNSUPPORTED_LAYER_TYPE": f"{prefix}: 暂不支持该层类型",
+        "INVALID_MERGE_MODE": f"{prefix}: 合并模块的模式必须是 add、concat 或 matmul，当前为 {context.get('merge')!r}",
         "CONTAINER_FLATTEN_FAILED": f"自定义容器展开失败: {context.get('reason')}",
         "LINEAR_IN_FEATURES_MISMATCH": (
             f"{prefix}: Linear 输入维度与 in_features 不匹配，"

@@ -80,7 +80,7 @@ export const layerGroups: LayerGroup[] = [
     layers: [
       { type: "Input", desc: "输入张量定义", icon: "mdi:login-variant", color: "emerald", hint: "模型的入口。在这里声明输入数据的形状（通道数、高、宽），后续每一层都据此推导自己的输出尺寸。任何模型都必须从它开始，一张图里通常只有一个入口。" },
       { type: "Output", desc: "分类输出节点", icon: "mdi:logout-variant", color: "rose", hint: "模型的出口，标记整张网络最终结果的汇聚位置。数据流经所有层后在这里输出，训练时以此处的输出与标准答案比对来计算误差。每个模型都以它结尾。" },
-      { type: "Add", desc: "多分支逐元素相加", icon: "mdi:plus-circle-outline", color: "cyan", hint: "把两条或多条分支的输出按相同位置逐元素相加，合并成一条继续往下传。要求参与相加的分支形状完全一致，常用来搭建跳跃连接，让较深的网络更容易训练。" },
+      { type: "Merge", desc: "多分支合并（add / concat / matmul）", icon: "mdi:call-merge", color: "cyan", hint: "把两条或多条分支合并成一条继续往下传。支持三种模式：逐元素相加(add)、拼接(concat)、矩阵乘法(matmul)。放到画布后初始未选择模式，请在右侧参数面板点选；矩阵乘法对输入先后顺序敏感，可在面板里点选 input 并用 ⬅ / ➡ 调整顺序。" },
     ],
   },
   {
@@ -633,6 +633,16 @@ const LAYER_CONFIGS: Record<string, LayerConfig> = {
     color: "rose",
     params: {},
   },
+  // 合并运算模块：add / concat / matmul 三合一，初始未选择模式（order 记录 matmul 的输入顺序）
+  Merge: {
+    type: "Merge",
+    title: "合并运算",
+    badge: "Merge",
+    color: "cyan",
+    note: "未选择模式",
+    params: { merge: "", order: [] },
+  },
+  // Add 仅为向后兼容保留（不再出现在左侧面板），旧项目里的 Add 节点仍可正常加载/导出
   Add: {
     type: "Add",
     title: "Add",
@@ -752,6 +762,18 @@ export function resetValidationAfterGraphChange(canvas: WorkCanvas = activeCanva
 }
 
 
+// 合并运算模块的三种模式及其展示信息（面板与节点说明共用）
+export const MERGE_MODES = [
+  { value: "add", label: "逐元素相加", en: "add", op: "＋", desc: "把各路输入按相同位置逐元素相加。要求所有输入形状完全一致；与顺序无关。" },
+  { value: "concat", label: "拼接", en: "concat", op: "⊕", desc: "把各路输入沿指定维度首尾拼接成更大的张量。除拼接维外其它维度需一致。" },
+  { value: "matmul", label: "矩阵乘法", en: "matmul", op: "×", desc: "按顺序把各路输入依次做矩阵乘法（((A×B)×C)…）。对输入顺序敏感，请用 ⬅ / ➡ 调整。" },
+] as const;
+
+export function mergeModeLabel(mode: string): string {
+  const found = MERGE_MODES.find(item => item.value === mode);
+  return found ? `${found.label} ${found.en}` : "未选择模式";
+}
+
 export function updateNodeDisplay(node: GraphNode) {
   if (node.type === "Input" && Array.isArray(node.params.shape)) {
     node.hint = node.params.shape.join("x");
@@ -776,6 +798,11 @@ export function updateNodeDisplay(node: GraphNode) {
   // 序列与高级层：用参数摘要作为节点说明
   if (["LSTM", "Seq2Seq", "TransformerEncoder", "SelfAttention", "VAE", "GraphConv"].includes(node.type)) {
     node.note = formatLayerNote({ params: node.params });
+  }
+
+  // 合并运算模块：用当前模式作为节点说明
+  if (node.type === "Merge") {
+    node.note = mergeModeLabel(typeof node.params.merge === "string" ? node.params.merge : "");
   }
 
   // 自定义容器：用内部层数量（不含端口）作为节点说明
@@ -1015,6 +1042,27 @@ function getExportParams(
   addTargetIds: Set<string>
 ): Record<string, unknown> {
   const params = { ...node.params };
+
+  // 合并运算模块：保留用户选择的模式(merge)与输入顺序(order)，交给后端按序合并。
+  // 只保留仍然连接着的输入顺序，去掉已断开的失效 id。
+  if (node.type === "Merge") {
+    const connectedSources = new Set(
+      exportConnections.filter(connection => connection.target === node.id).map(connection => connection.source)
+    );
+    const order = Array.isArray(node.params.order)
+      ? (node.params.order as string[]).filter(id => connectedSources.has(id))
+      : [];
+    if (order.length) {
+      params.order = order;
+    } else {
+      delete params.order;
+    }
+    if (params.merge === "concat" && params.dim === undefined) {
+      params.dim = 1;
+    }
+    return params;
+  }
+
   delete params.merge;
   delete params.dim;
   delete params.concat_dim;
@@ -1323,9 +1371,24 @@ function countModelParams(canvas: WorkCanvas, initialShape: number[] | null): nu
 
 
 function incomingShapes(canvas: WorkCanvas, nodeId: string, shapeByNode: Map<string, number[]>): number[][] {
-  return canvas.connections
+  const node = canvas.nodes.find(item => item.id === nodeId);
+  const order = node && Array.isArray(node.params.order) ? (node.params.order as string[]) : null;
+
+  let sources = canvas.connections
     .filter(([, target]) => endpointBaseId(target) === nodeId)
-    .map(([source]) => shapeByNode.get(endpointBaseId(source)))
+    .map(([source]) => endpointBaseId(source));
+
+  // 合并运算模块按 params.order 排序（matmul 顺序敏感）；未声明顺序时保持连线顺序
+  if (order && order.length) {
+    const rank = new Map(order.map((id, index) => [id, index]));
+    sources = sources
+      .map((id, index) => ({ id, index }))
+      .sort((a, b) => (rank.get(a.id) ?? order.length + a.index) - (rank.get(b.id) ?? order.length + b.index))
+      .map(item => item.id);
+  }
+
+  return sources
+    .map(sourceId => shapeByNode.get(sourceId))
     .filter((shape): shape is number[] => Array.isArray(shape));
 }
 
@@ -1388,7 +1451,60 @@ function inferNodeParamAndShape(
     return { params: 0, shape: inputShapes[0]! };
   }
 
+  if (node.type === "Merge" && inputShapes.length > 0) {
+    return { params: 0, shape: mergeShapePreview(node, inputShapes) };
+  }
+
   return { params: 0, shape: primaryInput };
+}
+
+
+// 合并运算模块的前端维度预览（近似值；权威维度以后端结构检查为准）
+function mergeShapePreview(node: GraphNode, inputShapes: number[][]): number[] | null {
+  const mode = typeof node.params.merge === "string" ? node.params.merge : "";
+
+  if (mode === "add" || mode === "sum") {
+    return inputShapes[0]!;
+  }
+
+  if (mode === "concat") {
+    const dim = positiveNumber(node.params.dim) ?? 1;
+    const merged = [...inputShapes[0]!];
+    let index = dim > 0 ? dim - 1 : dim;
+    if (index < 0) index += merged.length;
+    if (index < 0 || index >= merged.length) return merged;
+    if (!inputShapes.every(shape => shape.length === merged.length)) return merged;
+    merged[index] = inputShapes.reduce((sum, shape) => sum + shape[index]!, 0);
+    return merged;
+  }
+
+  if (mode === "matmul") {
+    return matmulFoldShapes(inputShapes);
+  }
+
+  // 尚未选择模式：先按第一路输入显示
+  return inputShapes[0]!;
+}
+
+function matmulFoldShapes(shapes: number[][]): number[] | null {
+  let result: number[] | null = shapes[0]!;
+  for (let i = 1; i < shapes.length; i++) {
+    result = result ? matmulTwoShapes(result, shapes[i]!) : null;
+    if (!result) return null;
+  }
+  return result;
+}
+
+function matmulTwoShapes(a: number[], b: number[]): number[] | null {
+  if (!a.length || !b.length) return null;
+  if (a.length === 1 && b.length === 1) return a[0] === b[0] ? [] : null;
+  if (a.length === 1) return b[b.length - 2] === a[0] ? [...b.slice(0, -2), b[b.length - 1]!] : null;
+  if (b.length === 1) return a[a.length - 1] === b[0] ? a.slice(0, -1) : null;
+  if (a[a.length - 1] !== b[b.length - 2]) return null;
+  const batchA = a.slice(0, -2);
+  const batchB = b.slice(0, -2);
+  const batch = batchA.length >= batchB.length ? batchA : batchB;
+  return [...batch, a[a.length - 2]!, b[b.length - 1]!];
 }
 
 

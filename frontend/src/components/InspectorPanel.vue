@@ -7,8 +7,10 @@ import {
   containerInputPorts,
   containerLayerCount,
   containerOutputPorts,
+  endpointBaseId,
   getCurrentModelGraph,
   layerGroups,
+  MERGE_MODES,
   saveContainerToLibrary,
   showToast,
   ui,
@@ -103,6 +105,83 @@ function setParam(key: string, value: number | boolean) {
   // 改参数后刷新实时形状预览
   refreshShapes();
 }
+
+// —————————————————————————————————————————————
+// 合并运算模块（add / concat / matmul）参数交互
+// —————————————————————————————————————————————
+
+const mergeMode = computed(() =>
+  selectedNode.value && typeof selectedNode.value.params.merge === "string"
+    ? (selectedNode.value.params.merge as string)
+    : ""
+);
+const currentMerge = computed(() => MERGE_MODES.find(item => item.value === mergeMode.value) || null);
+
+// 已选中、准备用 ⬅ / ➡ 调整顺序的输入 id
+const selectedMergeInputId = ref<string | null>(null);
+
+// 合并模块的有序输入列表：按 params.order 排序，自动补齐新连线、剔除失效连线
+const mergeInputs = computed(() => {
+  const node = selectedNode.value;
+  if (!node || node.type !== "Merge") return [];
+  const graph = canvas.value;
+
+  const sources: string[] = [];
+  for (const [source, target] of graph.connections) {
+    if (endpointBaseId(target) !== node.id) continue;
+    const sourceId = endpointBaseId(source);
+    if (!sources.includes(sourceId)) sources.push(sourceId);
+  }
+
+  const order = Array.isArray(node.params.order) ? (node.params.order as string[]) : [];
+  const rank = new Map(order.map((id, index) => [id, index]));
+  const ordered = sources
+    .map((id, index) => ({ id, index }))
+    .sort((a, b) => (rank.get(a.id) ?? order.length + a.index) - (rank.get(b.id) ?? order.length + b.index))
+    .map(item => item.id);
+
+  return ordered.map((id, index) => {
+    const source = graph.nodes.find(item => item.id === id);
+    return { id, position: index, title: source?.title || source?.badge || id };
+  });
+});
+
+const selectedMergeIndex = computed(() => mergeInputs.value.findIndex(item => item.id === selectedMergeInputId.value));
+const canMoveMergeLeft = computed(() => selectedMergeIndex.value > 0);
+const canMoveMergeRight = computed(() =>
+  selectedMergeIndex.value >= 0 && selectedMergeIndex.value < mergeInputs.value.length - 1
+);
+
+function setMergeMode(mode: string) {
+  const node = selectedNode.value;
+  if (!node) return;
+  recordHistory();
+  updateNodeParam(node.id, "merge", mode);
+  void redrawAfterDomUpdate();
+  refreshShapes();
+}
+
+function selectMergeInput(id: string) {
+  selectedMergeInputId.value = selectedMergeInputId.value === id ? null : id;
+}
+
+function moveMergeInput(direction: -1 | 1) {
+  const node = selectedNode.value;
+  const from = selectedMergeIndex.value;
+  const to = from + direction;
+  if (!node || from < 0 || to < 0 || to >= mergeInputs.value.length) return;
+  const ids = mergeInputs.value.map(item => item.id);
+  [ids[from], ids[to]] = [ids[to]!, ids[from]!];
+  recordHistory();
+  updateNodeParam(node.id, "order", ids);
+  void redrawAfterDomUpdate();
+  refreshShapes();
+}
+
+// 切换选中节点时清空合并输入的选中态
+watch(() => selectedNode.value?.id, () => {
+  selectedMergeInputId.value = null;
+});
 
 // 序列与高级层的参数编辑配置（与后端 model_builder 支持的参数一致）
 interface AdvancedField {
@@ -418,14 +497,86 @@ const inputShapeValue = computed(() => {
       </section>
     </div>
 
-    <!-- Add -->
+    <!-- 合并运算模块：add / concat / matmul 三合一 -->
+    <div v-else-if="selectedNode.type === 'Merge'" class="inspector-scroll">
+      <div class="inspector-title">
+        <iconify-icon class="text-cyan" icon="mdi:call-merge"></iconify-icon>
+        <h2>合并运算</h2>
+      </div>
+
+      <section class="info-card">
+        <p>把两条或多条分支合并成一条：先选择合并模式，矩阵乘法还可调整输入顺序。</p>
+      </section>
+
+      <!-- 模式选择：初始为空，点选后高亮 -->
+      <div class="merge-section">
+        <span class="merge-section-label">合并模式</span>
+        <div class="merge-mode-toggle" role="group" aria-label="合并模式">
+          <button
+            v-for="m in MERGE_MODES"
+            :key="m.value"
+            type="button"
+            :class="{ active: mergeMode === m.value }"
+            @click="setMergeMode(m.value)"
+          >
+            <span class="merge-mode-op">{{ m.op }}</span>
+            <span class="merge-mode-name">{{ m.label }}</span>
+            <span class="merge-mode-en">{{ m.en }}</span>
+          </button>
+        </div>
+        <small v-if="!mergeMode" class="merge-warn">尚未选择模式，请点选 add / concat / matmul。</small>
+        <small v-else class="merge-desc">{{ currentMerge?.desc }}</small>
+      </div>
+
+      <!-- 计算过程可视化 + 顺序控制 -->
+      <div class="merge-section">
+        <span class="merge-section-label">
+          计算过程
+          <em v-if="mergeMode === 'matmul'">（顺序影响结果）</em>
+        </span>
+
+        <div v-if="mergeInputs.length === 0" class="merge-empty">
+          还没有输入连线。请从其它节点连线到本模块（支持两个及以上输入）。
+        </div>
+
+        <template v-else>
+          <div class="merge-flow">
+            <template v-for="(item, i) in mergeInputs" :key="item.id">
+              <button
+                type="button"
+                class="merge-chip"
+                :class="{ active: selectedMergeInputId === item.id }"
+                :title="item.title"
+                @click="selectMergeInput(item.id)"
+              >
+                <span class="merge-chip-tag">input{{ i + 1 }}</span>
+                <span class="merge-chip-name">{{ item.title }}</span>
+              </button>
+              <span v-if="i < mergeInputs.length - 1" class="merge-op">{{ currentMerge?.op || "·" }}</span>
+            </template>
+            <span class="merge-eq">=</span>
+            <span class="merge-out">输出</span>
+          </div>
+
+          <div class="merge-order-bar">
+            <button type="button" class="merge-arrow" :disabled="!canMoveMergeLeft" title="向前移动" @click="moveMergeInput(-1)">⬅</button>
+            <button type="button" class="merge-arrow" :disabled="!canMoveMergeRight" title="向后移动" @click="moveMergeInput(1)">➡</button>
+            <span class="merge-order-hint">
+              {{ selectedMergeInputId ? "已选中输入，可用 ⬅ / ➡ 调整顺序" : "点选上方某个 input，再用 ⬅ / ➡ 调整顺序" }}
+            </span>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Add（旧版本模块，保留兼容） -->
     <div v-else-if="selectedNode.type === 'Add'" class="inspector-scroll">
       <div class="inspector-title">
         <iconify-icon class="text-cyan" icon="mdi:plus-circle-outline"></iconify-icon>
-        <h2>Add 节点</h2>
+        <h2>Add 节点（旧版）</h2>
       </div>
       <section class="info-card">
-        <p>Add 节点会在导出给后端时折叠为目标节点的 add 合并方式。</p>
+        <p>这是旧版的相加合并节点，仅为兼容历史项目保留。新建模型请改用「合并运算」模块（支持 add / concat / matmul）。</p>
       </section>
     </div>
 

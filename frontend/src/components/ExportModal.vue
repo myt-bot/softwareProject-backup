@@ -55,7 +55,7 @@ const canvas = computed(() => activeCanvas());
             <i></i>
             <div>
               <strong>{{ canvas.connections.length }} 条连线</strong>
-              <span>分支会按节点参数执行 concat 或 add</span>
+              <span>多分支由「合并运算」模块按 add / concat / matmul 合并</span>
             </div>
           </div>
         </div>

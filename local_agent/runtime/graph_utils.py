@@ -231,9 +231,14 @@ def topological_sort_layers(model_graph):
 
 
 def build_predecessor_map(model_graph):
-    """根据 connections 生成每个节点的前驱节点列表。用于知道该节点的输入节点，后续可进行输入合并"""
+    """根据 connections 生成每个节点的前驱节点列表。用于知道该节点的输入节点，后续可进行输入合并。
+
+    对于声明了 params.order 的节点（如合并模块 Merge），会按该顺序重排前驱列表：
+    add / concat 顺序无关，但 matmul 对输入顺序敏感，需要一个稳定且用户可控的顺序。
+    """
     model_graph = normalize_model_graph(model_graph)
     layers = model_graph.get("layers", [])
+    layer_by_id = {layer["id"]: layer for layer in layers if isinstance(layer, dict) and "id" in layer}
     predecessors = {
         layer["id"]: []
         for layer in layers
@@ -244,7 +249,29 @@ def build_predecessor_map(model_graph):
         target = connection["target"]
         predecessors[target].append(source)
 
+    for layer_id, predecessor_ids in predecessors.items():
+        predecessors[layer_id] = _apply_input_order(layer_by_id.get(layer_id), predecessor_ids)
+
     return predecessors
+
+
+def _apply_input_order(layer, predecessor_ids):
+    """按节点 params.order 声明的顺序稳定重排前驱 id 列表。
+
+    order 中列出的前驱按其声明顺序排在前面；未列出的前驱保持原有相对顺序排在其后。
+    order 里已失效（不再连接）的 id 会被自动忽略。
+    """
+    if not isinstance(layer, dict):
+        return predecessor_ids
+    order = (layer.get("params") or {}).get("order")
+    if not isinstance(order, list) or not order:
+        return predecessor_ids
+
+    rank = {}
+    for index, source_id in enumerate(order):
+        rank.setdefault(source_id, index)
+    fallback = len(order)
+    return sorted(predecessor_ids, key=lambda source_id: rank.get(source_id, fallback))
 
 
 def build_successor_map(model_graph):

@@ -6378,3 +6378,137 @@ body.is-connecting .node-port {
 .help-menu button span { display: flex; flex-direction: column; }
 .help-menu button b { font-size: 13px; font-weight: 800; color: var(--text); }
 .help-menu button i { font-style: normal; font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+/* —————————————————————————————————————————————
+   合并运算模块（Merge）参数面板
+   ————————————————————————————————————————————— */
+.merge-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.merge-section-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text);
+}
+.merge-section-label em { font-style: normal; color: var(--muted); font-weight: 600; }
+
+.merge-mode-toggle {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.merge-mode-toggle button {
+  min-width: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  cursor: pointer;
+}
+.merge-mode-toggle button:hover { color: var(--text); background: var(--panel-2); }
+.merge-mode-toggle button.active {
+  color: var(--indigo);
+  background: #e0f2fe;
+  box-shadow: var(--shadow-sm);
+}
+.merge-mode-op { font-size: 18px; font-weight: 800; line-height: 1; }
+.merge-mode-name { font-size: 12px; font-weight: 800; }
+.merge-mode-en { font-size: 10px; opacity: 0.75; }
+
+.merge-warn { color: var(--amber, #b45309); font-weight: 700; }
+.merge-desc { color: var(--muted); line-height: 1.5; }
+
+.merge-empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 12px;
+  border: 1px dashed var(--border-2);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+
+.merge-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+
+.merge-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  max-width: 130px;
+}
+.merge-chip:hover { border-color: var(--indigo); }
+.merge-chip.active {
+  border-color: var(--indigo);
+  background: #e0f2fe;
+  box-shadow: var(--shadow-sm);
+}
+.merge-chip-tag { font-size: 10px; font-weight: 800; color: var(--indigo); }
+.merge-chip-name {
+  font-size: 12px;
+  font-weight: 700;
+  max-width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merge-op { font-size: 18px; font-weight: 800; color: var(--muted); }
+.merge-eq { font-size: 16px; font-weight: 800; color: var(--muted); }
+.merge-out {
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: var(--cyan);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.merge-order-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.merge-arrow {
+  width: 40px;
+  height: 34px;
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.merge-arrow:hover:not(:disabled) { border-color: var(--indigo); color: var(--indigo); background: var(--panel-2); }
+.merge-arrow:disabled { opacity: 0.4; cursor: not-allowed; }
+.merge-order-hint { font-size: 11px; color: var(--muted); }
