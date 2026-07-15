@@ -64,11 +64,10 @@ const hasActiveJob = computed(() => isTrainingJobActive(job.value));
 const jobPanelClass = computed(() => {
   if (!job.value) return "is-empty";
   const status = job.value.status || "pending";
-  return status === "completed"
-    ? "is-completed"
-    : status === "failed" || status === "cancelled"
-      ? "is-failed"
-      : "is-running";
+  if (status === "completed") return "is-completed";
+  if (status === "failed") return "is-failed";
+  if (status === "cancelled") return "is-cancelled";
+  return "is-running";
 });
 
 const jobPercentage = computed(() => {

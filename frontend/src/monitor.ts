@@ -11,7 +11,7 @@
 
 import { reactive } from "vue";
 import { showToast } from "./store";
-import type { CancelTrainingResponse, DatasetProgress, EpochMetrics, MonitorEdge, MonitorLayer, TrainingModelSummary, TrainingResult, TrainingStatus } from "./types";
+import type { CancelTrainingResponse, DatasetProgress, EpochMetrics, MonitorEdge, MonitorLayer, TrainingJobStatus, TrainingModelSummary, TrainingResult, TrainingStatus } from "./types";
 
 // 预设指标曲线（mock），趋势合理：loss 下降、acc 上升、val 略低但接近。
 export const MOCK = {
@@ -96,9 +96,28 @@ let cancelJobFn: OpenMonitorOptions["cancelJob"] = undefined;
 let onBackToBuilderFn: OpenMonitorOptions["onBackToBuilder"] = undefined;
 let onRerunFn: OpenMonitorOptions["onRerun"] = undefined;
 
+export type MonitorState = Extract<TrainingJobStatus, "running" | "cancelling" | "completed" | "failed" | "cancelled">;
+
+const FINAL_TRAINING_STATUSES = new Set<TrainingJobStatus>(["completed", "failed", "cancelled"]);
+
+function isFinalTrainingStatus(status: TrainingJobStatus | undefined): status is "completed" | "failed" | "cancelled" {
+  return FINAL_TRAINING_STATUSES.has(status as TrainingJobStatus);
+}
+
+function statusToMonitorState(status: TrainingJobStatus | undefined): MonitorState {
+  if (status === "cancelling") return "cancelling";
+  if (isFinalTrainingStatus(status)) return status;
+  return "running";
+}
+
+function resultToMonitorState(result: TrainingResult): MonitorState {
+  if (isFinalTrainingStatus(result.status)) return result.status;
+  return result.error ? "failed" : "completed";
+}
+
 export const monitor = reactive({
   visible: false,
-  state: "running" as "running" | "completed",
+  state: "running" as MonitorState,
   visibleEpochs: 3, // demo running 状态曲线画到第几轮
   live: false,
   jobId: null as string | null,
@@ -289,6 +308,7 @@ export function handleBack() {
 export async function handleStopTraining() {
   if (!monitor.jobId || !cancelJobFn || monitor.stopping) return;
   monitor.stopping = true;
+  monitor.state = "cancelling";
 
   try {
     const result = await cancelJobFn(monitor.jobId);
@@ -297,10 +317,12 @@ export async function handleStopTraining() {
     } else {
       showToast("info", `任务已处于「${result?.status || "未知"}」状态，无需停止。`);
       monitor.stopping = false;
+      monitor.state = result?.status ? statusToMonitorState(result.status) : "running";
     }
   } catch (error) {
     showToast("error", (error as Error)?.message || "终止训练失败");
     monitor.stopping = false;
+    monitor.state = "running";
   }
 }
 
@@ -380,9 +402,9 @@ export function applyStatusMessage(status: TrainingStatus) {
   if (isDatasetPreparationStatus(status)) {
     clearActiveLayer();
   }
-  monitor.state = "running";
-  monitor.stopping = status?.status === "cancelling" || monitor.stopping;
   monitor.error = status?.error ? TRAIN_FAILED_MESSAGE : null;
+  monitor.state = monitor.error ? "failed" : statusToMonitorState(status?.status);
+  monitor.stopping = monitor.state === "cancelling";
 }
 
 
@@ -417,8 +439,7 @@ const TRAIN_FAILED_MESSAGE =
 
 
 function restoreInitialStatus(status: TrainingStatus) {
-  const finalStatuses = new Set(["completed", "failed", "cancelled"]);
-  if (finalStatuses.has(status.status || "")) {
+  if (isFinalTrainingStatus(status.status)) {
     applyResultMessage(status);
     return;
   }
@@ -428,18 +449,20 @@ function restoreInitialStatus(status: TrainingStatus) {
 
 
 export function applyResultMessage(result: TrainingResult) {
-  monitor.stopping = false;
   monitor.result = result;
   ingestMetrics(result?.metrics, result?.total_epochs || monitor.hyperparams.epochs);
   if (result?.dataset_progress !== undefined) {
     monitor.datasetProgress = result.dataset_progress;
   }
-  monitor.state = "completed";
-  monitor.progress = 1;
+  monitor.state = resultToMonitorState(result);
+  monitor.stopping = monitor.state === "cancelling";
+  monitor.progress = monitor.state === "running" || monitor.state === "cancelling"
+    ? Math.min(Math.max(result?.progress ?? monitor.progress, 0), 1)
+    : 1;
   monitor.currentEpoch = monitor.series.loss.length || monitor.hyperparams.epochs;
   monitor.activeLayerId = null;
   monitor.activeLayerIndex = -1;
-  monitor.error = result?.status === "failed" ? TRAIN_FAILED_MESSAGE : null;
+  monitor.error = monitor.state === "failed" ? TRAIN_FAILED_MESSAGE : null;
   if (result?.device) {
     monitor.hyperparams.device = String(result.device).toUpperCase();
   }

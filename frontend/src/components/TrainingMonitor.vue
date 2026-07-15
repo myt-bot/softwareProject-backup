@@ -21,7 +21,11 @@ import { showToast } from "../store";
 import TmChart from "./TmChart.vue";
 
 const isRunning = computed(() => monitor.state === "running");
-const isCancelled = computed(() => monitor.result?.status === "cancelled");
+const isCancelling = computed(() => monitor.state === "cancelling");
+const isActive = computed(() => isRunning.value || isCancelling.value);
+const isCompleted = computed(() => monitor.state === "completed");
+const isFailed = computed(() => monitor.state === "failed");
+const isCancelled = computed(() => monitor.state === "cancelled");
 
 // 训练产物保存位置：从回传的 artifacts.model_path 取出所在文件夹，方便用户直接找到
 const savedPath = computed(() => {
@@ -145,7 +149,7 @@ const numClassesText = computed(() => monitor.modelSummary.numClasses ?? "--");
 
 // —— 进度总览（新手友好的主视觉区）——
 const overallPercent = computed(() =>
-  Math.round((isRunning.value ? monitor.progress : 1) * 100)
+  Math.round((isActive.value ? monitor.progress : 1) * 100)
 );
 
 const datasetProgress = computed(() => monitor.datasetProgress);
@@ -164,32 +168,33 @@ const datasetBytesText = computed(() => {
   return `${formatBytes(downloaded)} / ${formatBytes(total)}`;
 });
 const datasetStageActive = computed(() =>
-  isRunning.value && ["pending", "checking", "downloading"].includes(datasetStatus.value)
+  isActive.value && ["pending", "checking", "downloading"].includes(datasetStatus.value)
 );
 const datasetLabel = computed(() => datasetProgress.value?.dataset_name || "数据集");
 const datasetFileLabel = computed(() => datasetProgress.value?.file_name || datasetLabel.value);
 
 const heroTitle = computed(() => {
-  if (monitor.error) return "训练失败";
-  if (monitor.stopping) return "正在终止训练";
+  if (isFailed.value) return "训练失败";
+  if (isCancelling.value) return "正在终止训练";
   if (isCancelled.value) return "训练已终止";
   if (datasetStageActive.value) {
     if (datasetStatus.value === "downloading") return `正在下载 ${datasetFileLabel.value} · ${datasetPercentText.value}`;
     return `正在准备 ${datasetLabel.value} 数据集`;
   }
   if (isRunning.value) return `正在进行第 ${displayEpoch.value}/${totalEpochs.value} 轮训练`;
-  return "训练完成 🎉";
+  if (isCompleted.value) return "训练完成 🎉";
+  return "训练状态未知";
 });
 
 const heroSubtitle = computed(() => {
-  if (monitor.error) return monitor.error;
-  if (monitor.stopping) {
+  if (isFailed.value) return monitor.error || "训练失败，请点「检查结构」排查模型与数据集是否匹配。";
+  if (isCancelling.value) {
     return "停止请求已发送。数据集准备 / 下载阶段会尽快中断；训练批次进行中时会在可中断点安全停止。";
   }
   if (isCancelled.value) {
     return "训练已按请求停止，曲线保留了停止前已完成轮次的真实指标。";
   }
-  if (isRunning.value) {
+  if (isActive.value) {
     return monitor.live && monitor.currentStep === 0 && monitor.currentEpoch === 0
       ? "正在准备数据集并启动训练，稍等片刻..."
       : "模型正在逐批学习训练数据：损失（loss）越来越低、准确率（accuracy）越来越高，说明学习有效。";
@@ -199,7 +204,7 @@ const heroSubtitle = computed(() => {
 });
 
 // 完成态的四张结果卡
-const results = computed(() => (isRunning.value ? null : computeResults()));
+const results = computed(() => (isActive.value ? null : computeResults()));
 
 const resultCards = computed(() => {
   const val = (key: "finalAcc" | "bestVal" | "finalLoss" | "gap") =>
@@ -225,7 +230,7 @@ const logLines = computed(() => {
     );
   }
 
-  if (isRunning.value) {
+  if (isActive.value) {
     if (monitor.stopping) {
       lines.push(`> 已请求停止，等待当前轮完成后写入本轮指标 ...`);
     } else if (monitor.live && count === 0) {
@@ -235,7 +240,9 @@ const logLines = computed(() => {
     }
   } else if (isCancelled.value) {
     lines.push(`> 训练已终止，已保留 ${count}/${total} 轮指标。`);
-  } else {
+  } else if (isFailed.value) {
+    lines.push(`> 训练失败，已保留 ${count}/${total} 轮指标。`);
+  } else if (isCompleted.value) {
     lines.push(`> 训练完成，模型权重已保存。`);
   }
 
@@ -279,12 +286,13 @@ function formatBytes(value: number) {
           </nav>
         </div>
         <div class="tm-topbar-center">
-          <span v-if="monitor.stopping" class="tm-badge stopping"><span class="tm-dot"></span>Stopping</span>
+          <span v-if="isCancelling" class="tm-badge stopping"><span class="tm-dot"></span>Stopping</span>
           <span v-else-if="isRunning" class="tm-badge running"><span class="tm-dot"></span>Running</span>
+          <span v-else-if="isFailed" class="tm-badge failed"><iconify-icon icon="mdi:alert-circle-outline"></iconify-icon>Failed</span>
           <span v-else-if="isCancelled" class="tm-badge cancelled"><iconify-icon icon="mdi:stop-circle-outline"></iconify-icon>Stopped</span>
-          <span v-else class="tm-badge completed"><iconify-icon icon="mdi:check-circle"></iconify-icon>Completed</span>
+          <span v-else-if="isCompleted" class="tm-badge completed"><iconify-icon icon="mdi:check-circle"></iconify-icon>Completed</span>
           <!-- 轮次内进度条：每个 batch 实时推进 -->
-          <div v-if="isRunning && monitor.live" class="tm-epoch-progress" title="当前轮次内的训练进度">
+          <div v-if="isActive && monitor.live" class="tm-epoch-progress" title="当前轮次内的训练进度">
             <span class="tm-ep-label">Epoch {{ displayEpoch }}/{{ totalEpochs }}</span>
             <div class="tm-ep-track"><i :style="{ width: `${epochPercent}%` }"></i></div>
             <span class="tm-ep-value">{{ epochPercent }}%</span>
@@ -293,7 +301,7 @@ function formatBytes(value: number) {
         <div class="tm-topbar-right">
           <!-- 状态切换：训练中显示"终止训练"，已结束显示"重新训练" -->
           <button
-            v-if="monitor.live && isRunning"
+            v-if="monitor.live && isActive"
             class="danger-button"
             id="tm-stop"
             :disabled="monitor.stopping"
@@ -356,17 +364,17 @@ function formatBytes(value: number) {
 
         <main class="tm-main">
           <!-- 训练进度总览：状态一目了然，无需滚动 -->
-          <section class="tm-card tm-progress-hero" :class="{ done: !isRunning, failed: Boolean(monitor.error) }">
+          <section class="tm-card tm-progress-hero" :class="{ done: isCompleted, cancelling: isCancelling, failed: isFailed, cancelled: isCancelled }">
             <div class="tm-hero-head">
               <div class="tm-hero-icon">
-                <iconify-icon :icon="monitor.error ? 'mdi:alert-circle-outline' : isRunning ? 'mdi:run-fast' : 'mdi:flag-checkered'"></iconify-icon>
+                <iconify-icon :icon="isFailed ? 'mdi:alert-circle-outline' : isCancelling ? 'mdi:loading' : isCancelled ? 'mdi:stop-circle-outline' : isRunning ? 'mdi:run-fast' : 'mdi:flag-checkered'" :class="{ spin: isCancelling }"></iconify-icon>
               </div>
               <div class="tm-hero-text">
                 <strong>{{ heroTitle }}</strong>
                 <span>{{ heroSubtitle }}</span>
               </div>
             </div>
-            <div v-if="isRunning" class="tm-hero-bars">
+            <div v-if="isActive" class="tm-hero-bars">
               <div class="tm-hero-bar dataset">
                 <span class="tm-hero-bar-label">数据集下载</span>
                 <div class="tm-ep-track big dataset"><i :style="{ width: `${datasetPercent}%` }"></i></div>
@@ -425,7 +433,7 @@ function formatBytes(value: number) {
             </div>
           </div>
 
-          <section v-if="!isRunning && savedPath" class="tm-saved">
+          <section v-if="isCompleted && savedPath" class="tm-saved">
             <iconify-icon icon="mdi:folder-check-outline"></iconify-icon>
             <div class="tm-saved-body">
               <strong>训练结果已保存到本机</strong>
@@ -438,7 +446,7 @@ function formatBytes(value: number) {
             </button>
           </section>
 
-          <section v-if="!isRunning" class="tm-teaching-tip">
+          <section v-if="isCompleted" class="tm-teaching-tip">
             <iconify-icon icon="mdi:lightbulb-on-outline"></iconify-icon>
             <div>
               <strong>教学提示 Teaching Tip</strong>
@@ -455,7 +463,7 @@ function formatBytes(value: number) {
               </button>
             </div>
             <div class="tm-logs-body" id="tm-logs-body">
-              <div v-if="monitor.error" class="tm-log-line" style="color: var(--rose);">✗ 训练失败：{{ monitor.error }}</div>
+              <div v-if="isFailed" class="tm-log-line" style="color: var(--rose);">✗ 训练失败：{{ monitor.error }}</div>
               <template v-else>
                 <div
                   v-for="(line, index) in logLines"

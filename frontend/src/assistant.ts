@@ -81,8 +81,8 @@ function summarizeTraining() {
         val_acc: s.valAcc[i] ?? null,
       }));
 
-  const running = job ? isTrainingJobActive(job) : (m.state === "running" && m.result == null && !m.error);
-  const status = job?.status || (m.error ? "failed" : m.result?.status || (running ? "running" : "completed"));
+  const running = job ? isTrainingJobActive(job) : (m.state === "running" || m.state === "cancelling");
+  const status = job?.status || m.result?.status || m.state;
   const totalEpochs = job?.total_epochs || s.totalEpochs || m.hyperparams.epochs;
   const currentEpoch = job?.current_epoch ?? metricsPerEpoch.length;
   const progressRaw = job?.progress ?? (m.result ? 1 : m.progress);

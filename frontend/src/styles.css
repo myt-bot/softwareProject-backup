@@ -3557,6 +3557,11 @@ body.is-connecting .node-port {
   color: #be123c;
 }
 
+.training-job-panel.is-cancelled .training-job-head span {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
 .footer-actions {
   gap: 14px;
   flex: 0 0 auto;
@@ -4799,6 +4804,7 @@ body.is-connecting .node-port {
 .tm-badge.stopping { border-color: #fed7aa; background: #fff7ed; color: var(--orange); }
 .tm-badge.completed { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
 .tm-badge.cancelled { border-color: #fed7aa; background: #fff7ed; color: var(--orange); }
+.tm-badge.failed { border-color: #fecdd3; background: #fff1f2; color: #be123c; }
 
 .tm-dot { width: 8px; height: 8px; border-radius: 999px; background: currentColor; animation: pulse-dot 1.4s ease-in-out infinite; }
 @keyframes pulse-dot { 0%, 100% { opacity: 0.45; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.1); } }
@@ -4855,6 +4861,16 @@ body.is-connecting .node-port {
   border-color: #fecdd3;
 }
 
+.tm-progress-hero.cancelled {
+  background: linear-gradient(120deg, #fff7ed 0%, #fffaf5 100%);
+  border-color: #fed7aa;
+}
+
+.tm-progress-hero.cancelling {
+  background: linear-gradient(120deg, #fff7ed 0%, #fefce8 100%);
+  border-color: #fde68a;
+}
+
 .tm-hero-head {
   display: flex;
   align-items: center;
@@ -4877,6 +4893,8 @@ body.is-connecting .node-port {
 
 .tm-progress-hero.done .tm-hero-icon { color: var(--emerald); }
 .tm-progress-hero.failed .tm-hero-icon { color: var(--rose); }
+.tm-progress-hero.cancelled .tm-hero-icon { color: var(--orange); }
+.tm-progress-hero.cancelling .tm-hero-icon { color: var(--orange); }
 
 .tm-hero-text {
   display: flex;

@@ -214,9 +214,20 @@ export interface DatasetProgress {
   message?: string;
 }
 
+export type TrainingJobStatus =
+  | "dispatched"
+  | "pending_agent"
+  | "no_agent"
+  | "pending"
+  | "running"
+  | "cancelling"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
 export interface TrainingStatus {
   job_id?: string;
-  status?: string;
+  status?: TrainingJobStatus;
   current_epoch?: number;
   total_epochs?: number;
   current_step?: number;
@@ -236,7 +247,7 @@ export interface TrainingResult extends TrainingStatus {
 }
 
 export interface TrainStartResponse extends TrainingStatus {
-  job_status?: string;
+  job_status?: TrainingJobStatus;
   // 云端中转架构：任务下发的 Agent 在线状态
   agent_status?: "online" | "offline";
   agent_id?: string;
@@ -268,7 +279,7 @@ export interface AgentStatus {
 export interface WsMessage {
   type: string;
   job_id?: string;
-  status?: string;
+  status?: TrainingJobStatus;
   layer_id?: string;
   layer_type?: string;
   layer_index?: number;
@@ -303,7 +314,7 @@ export interface WsMessage {
 export interface CancelTrainingResponse {
   job_id?: string;
   cancelled?: boolean;
-  status?: string;
+  status?: TrainingJobStatus;
 }
 
 // —————————————————————————————————————————————
