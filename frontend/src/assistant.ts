@@ -10,6 +10,7 @@ import {
   datasetInputShape,
   getCurrentModelGraph,
   getTrainConfig,
+  isTrainingJobActive,
   resetValidationAfterGraphChange,
   setDataset,
   storagePaths,
@@ -21,6 +22,7 @@ import {
   addNodeFromLayer,
   applyTemplateGraph,
   autoLayoutGraph,
+  clearActiveCanvas,
   deleteNodeById,
   drawLines,
   recordHistory,
@@ -44,56 +46,92 @@ export interface AssistantCommandResult {
 const OPTIMIZERS = ["sgd", "adam", "adamw", "rmsprop", "adagrad", "adadelta"];
 const LOSSES = ["cross_entropy", "nll", "mse", "l1", "smooth_l1"];
 
-// 把训练监控（monitor）的状态压成一份结构化结果，供 AI 就训练结果答疑。
-// 只反映真实训练（live / 有 result / 已有逐轮数据）；未真正训练时明确告知，避免编造。
+// 把训练状态压成一份结构化结果，供 AI 就训练结果答疑。
+// 权威数据源是 canvas.trainingJob——它由 WebSocket 无条件写回（见 ws.routeTrainingMessage），
+// 与用户在底部任务面板看到的完全一致；monitor 只在监控页可见时才更新、可能滞后，仅用于富化
+// （模型概览、参数量、设备、产物路径等 job 里没有的字段）。
 function summarizeTraining() {
   const m = monitor;
   const s = m.series;
-  const n = Math.max(s.loss.length, s.valLoss.length, s.trainAcc.length, s.valAcc.length);
-  const started = m.live || m.result != null || n > 0;
+  const monN = Math.max(s.loss.length, s.valLoss.length, s.trainAcc.length, s.valAcc.length);
+  const job = activeCanvas().trainingJob;
+  const started = job != null || m.live || m.result != null || monN > 0;
   if (!started) {
     return {
       started: false,
       note: "本会话尚未进行真实训练。请先在页面点「开始训练」，或用 start_training 发起（需本机 Agent 在线）。",
     };
   }
-  const metricsPerEpoch = [];
-  for (let i = 0; i < n; i++) {
-    metricsPerEpoch.push({
-      epoch: i + 1,
-      loss: s.loss[i] ?? null,
-      val_loss: s.valLoss[i] ?? null,
-      train_acc: s.trainAcc[i] ?? null,
-      val_acc: s.valAcc[i] ?? null,
-    });
-  }
-  const status = m.error ? "failed" : m.result?.status || (m.state === "completed" ? "completed" : "running");
+
+  // 逐轮指标：优先用 job.metrics（每条 WS 消息都会写回、且是累计全量），否则回退到 monitor 序列
+  const jobMetrics = job?.metrics && Array.isArray(job.metrics) ? job.metrics : [];
+  const metricsPerEpoch = jobMetrics.length
+    ? jobMetrics.map((item, i) => ({
+        epoch: item.epoch ?? i + 1,
+        loss: item.train?.loss ?? null,
+        val_loss: item.eval?.loss ?? null,
+        train_acc: item.train?.accuracy ?? null,
+        val_acc: item.eval?.accuracy ?? null,
+      }))
+    : Array.from({ length: monN }, (_, i) => ({
+        epoch: i + 1,
+        loss: s.loss[i] ?? null,
+        val_loss: s.valLoss[i] ?? null,
+        train_acc: s.trainAcc[i] ?? null,
+        val_acc: s.valAcc[i] ?? null,
+      }));
+
+  const running = job ? isTrainingJobActive(job) : (m.state === "running" && m.result == null && !m.error);
+  const status = job?.status || (m.error ? "failed" : m.result?.status || (running ? "running" : "completed"));
+  const totalEpochs = job?.total_epochs || s.totalEpochs || m.hyperparams.epochs;
+  const currentEpoch = job?.current_epoch ?? metricsPerEpoch.length;
+  const progressRaw = job?.progress ?? (m.result ? 1 : m.progress);
+  const progress = Math.round((typeof progressRaw === "number" ? progressRaw : 0) * 100) / 100;
+
+  // 准确率一律从权威逐轮指标推导，避免与监控页/任务面板不一致
+  const last = metricsPerEpoch[metricsPerEpoch.length - 1];
+  const finalTrainAcc = last?.train_acc ?? m.result?.accuracy ?? null;
+  const finalValAcc = last?.val_acc ?? null;
+  const bestValAcc = metricsPerEpoch.reduce<number | null>(
+    (best, e) => (e.val_acc != null && (best == null || e.val_acc > best) ? e.val_acc : best),
+    null,
+  );
+  const finalLoss = last?.loss ?? m.result?.loss ?? null;
+  // 训练进行中且卡在数据集下载阶段时，附带下载进度，方便 AI 如实告知用户仍在准备数据
+  const datasetProgress = m.datasetProgress || job?.dataset_progress || null;
   return {
     started: true,
     live: m.live,
     status,
-    running: m.state === "running" && m.result == null && !m.error,
-    progress: Math.round((m.result ? 1 : m.progress) * 100) / 100,
-    current_epoch: m.currentEpoch,
-    total_epochs: s.totalEpochs || m.hyperparams.epochs,
-    final_accuracy: m.result?.accuracy ?? (s.valAcc.length ? s.valAcc[s.valAcc.length - 1] : null),
-    final_loss: m.result?.loss ?? (s.loss.length ? s.loss[s.loss.length - 1] : null),
+    running,
+    progress,
+    current_epoch: currentEpoch,
+    total_epochs: totalEpochs,
+    final_accuracy: finalTrainAcc,       // 最后一轮训练集准确率（与监控页“最终训练准确率”一致）
+    final_train_accuracy: finalTrainAcc,
+    final_val_accuracy: finalValAcc,     // 最后一轮验证集准确率
+    best_val_accuracy: bestValAcc,       // 各轮中最好的验证集准确率
+    final_loss: finalLoss,
     device: m.result?.device ?? m.hyperparams.device,
     dataset: store.dataset,
+    dataset_progress: datasetProgress,
     hyperparams: m.hyperparams,
     model_summary: m.modelSummary,
     param_count: m.paramCount,
     metrics_per_epoch: metricsPerEpoch,
-    error: m.error || m.result?.error || null,
+    error: job?.error || m.error || m.result?.error || null,
     artifacts: m.result?.artifacts || null,
   };
 }
 
-// 等待训练最终结果。训练状态由独立 WebSocket 推送写入 monitor，watch 只在状态变化时
-// 被唤醒，因此等待期间不会定时查询后端或反复消耗大模型工具轮次。
+// 事件驱动地等待训练真正结束（完成 / 失败 / 取消），期间（含数据集下载阶段）持续等待，
+// 不轮询、不提前返回。训练任务状态由 WebSocket 推送写回 canvas.trainingJob，watch 仅在
+// 其状态变化时被唤醒，因此等待不消耗大模型工具轮次，也不忙等。
 function waitForTraining(timeoutSeconds: number): Promise<ReturnType<typeof summarizeTraining> & { timed_out?: boolean }> {
-  const initial = summarizeTraining();
-  if (!initial.started || !initial.running) return Promise.resolve(initial);
+  // 没有进行中的训练任务（无任务或已是终态）→ 立即返回现状，避免空等
+  if (!isTrainingJobActive(activeCanvas().trainingJob)) {
+    return Promise.resolve(summarizeTraining());
+  }
 
   return new Promise(resolve => {
     let settled = false;
@@ -109,11 +147,11 @@ function waitForTraining(timeoutSeconds: number): Promise<ReturnType<typeof summ
       resolve(timedOut ? { ...result, timed_out: true } : result);
     };
 
+    // 只在训练任务进入终态时收尾；下载 / 逐轮训练期间状态仍是活跃，会一直等下去。
     stopWatching = watch(
-      () => [monitor.state, monitor.result?.status, monitor.error] as const,
+      () => activeCanvas().trainingJob?.status,
       () => {
-        const current = summarizeTraining();
-        if (!current.running) finish(false);
+        if (!isTrainingJobActive(activeCanvas().trainingJob)) finish(false);
       },
       { flush: "sync" },
     );
@@ -245,6 +283,14 @@ export async function executeAssistantCommand(
         if (!graph) return { ok: false, error: `未找到模板：${key}` };
         applyTemplateGraph(graph as never);
         return { ok: true, result: { loaded: key } };
+      }
+
+      case "clear_canvas": {
+        const cleared = clearActiveCanvas();
+        return {
+          ok: true,
+          result: cleared ? "已清空当前画布（可撤销）。" : "当前画布本来就是空的，无需清空。",
+        };
       }
 
       case "add_node": {

@@ -1781,6 +1781,24 @@ export function applyTemplateGraph(modelGraph: ModelGraph) {
 }
 
 
+// 清空当前画布上的模型（节点、连线、选中、校验态一并重置）。
+// 返回是否确实清空了内容（本来就空则返回 false，便于调用方提示"无需清空"）。
+export function clearActiveCanvas(): boolean {
+  const canvas = activeCanvas();
+  if (canvas.nodes.length === 0 && canvas.connections.length === 0) return false;
+  recordHistory();
+  canvas.nodes = [];
+  canvas.connections = [];
+  canvas.edgeControls = {};
+  canvas.nodeErrors = {};
+  canvas.selectedNodeId = null;
+  canvas.selectedConnectionKey = null;
+  void redrawAfterDomUpdate();
+  resetValidationAfterGraphChange();
+  return true;
+}
+
+
 // —————————————————————————————————————————————
 // 选中状态
 // —————————————————————————————————————————————

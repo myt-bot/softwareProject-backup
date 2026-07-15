@@ -25,6 +25,7 @@ NEW_BROWSER_COMMANDS = {
     "set_train_config",
     "stop_training",
     "save_model",
+    "clear_canvas",
 }
 
 
@@ -105,7 +106,8 @@ class TestCommandDefinitions(unittest.TestCase):
         self.assertIn("delete_node", prompt)
         self.assertIn("wait_training", prompt)
         self.assertIn("save_model", prompt)
-        self.assertIn("不要反复调用 get_training_result", prompt)
+        self.assertIn("严禁忙等", prompt)
+        self.assertIn("反复调用 get_training_result", prompt)
 
     def test_project_snapshot_summary(self):
         text = assistant.summarize_project_snapshot({

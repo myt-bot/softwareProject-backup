@@ -21,6 +21,7 @@
     { "name": "load_template", "group": "画布 / 训练操作", "summary": "载入内置模板（替换当前模型）", "usage": "load_template --key lenet", "params": [
       { "name": "key", "type": "string", "required": true, "desc": "模板键，见 list_templates" }
     ] },
+    { "name": "clear_canvas", "group": "画布 / 训练操作", "summary": "清空当前画布（删除所有节点与连线，可撤销）", "usage": "clear_canvas", "params": [] },
     { "name": "add_node", "group": "画布 / 训练操作", "summary": "新增一个层节点", "usage": "add_node --type Conv2D --params '{\"out_channels\":16}'", "params": [
       { "name": "type", "type": "string", "required": true, "desc": "层类型，见 help layers" },
       { "name": "params", "type": "JSON", "required": false, "desc": "层参数，用单引号整体包住，见 help layers" }
