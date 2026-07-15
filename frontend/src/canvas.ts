@@ -90,6 +90,11 @@ let dragCandidate: { nodeId: string; startClientX: number; startClientY: number 
 let dragOffsetX = 0;
 let dragOffsetY = 0;
 
+// 节点剪贴板只保存节点本身，不复制它与其它节点之间的连线。
+// 这样 Ctrl+C / Ctrl+V、右键复制和悬浮工具条共用同一套行为。
+let copiedNode: GraphNode | null = null;
+let pasteOffsetStep = 0;
+
 // 按住空白区域拖动画布（视口平移量 panX/panY 属于各画布自身状态）
 let panState: {
   startClientX: number;
@@ -1368,9 +1373,75 @@ export function hideConnectionMenu() {
 
 
 export function showNodeMenu(clientX: number, clientY: number, nodeId: string) {
+  selectNode(nodeId);
   store.menuNodeId = nodeId;
   hideConnectionMenu();
   store.nodeMenu = { visible: true, x: clientX, y: clientY };
+}
+
+
+function cloneGraphNode(node: GraphNode): GraphNode {
+  // GraphNode 只包含可序列化的数据；深拷贝可同时保护 params 数组与容器 subgraph。
+  return JSON.parse(JSON.stringify(node)) as GraphNode;
+}
+
+
+export function copyNodeById(nodeId: string): boolean {
+  const node = activeCanvas().nodes.find(item => item.id === nodeId);
+  if (!node) return false;
+  copiedNode = cloneGraphNode(node);
+  pasteOffsetStep = 0;
+  showToast("success", `已复制 ${node.title}，可按 Ctrl+V 粘贴。`);
+  return true;
+}
+
+
+export function copySelectedNode(): boolean {
+  const nodeId = activeCanvas().selectedNodeId;
+  return nodeId ? copyNodeById(nodeId) : false;
+}
+
+
+export function copyMenuNode(event: Event) {
+  event.stopPropagation();
+  const nodeId = store.menuNodeId;
+  hideNodeMenu();
+  if (nodeId) copyNodeById(nodeId);
+}
+
+
+function nextCopiedNodeId(type: string): string {
+  const canvas = activeCanvas();
+  let counter = canvas.nodeCounters[type] || 0;
+  let id = "";
+  do {
+    counter += 1;
+    id = `${type.toLowerCase()}_${counter}`;
+  } while (canvas.nodes.some(node => node.id === id));
+  canvas.nodeCounters[type] = counter;
+  return id;
+}
+
+
+export function pasteCopiedNode(): boolean {
+  if (!copiedNode) {
+    showToast("info", "还没有复制节点，请先选中节点并按 Ctrl+C。");
+    return false;
+  }
+
+  recordHistory();
+  pasteOffsetStep += 1;
+  const node = cloneGraphNode(copiedNode);
+  node.id = nextCopiedNodeId(node.type);
+  node.title = `${copiedNode.title} 副本`;
+  node.x = copiedNode.x + 36 * pasteOffsetStep;
+  node.y = copiedNode.y + 36 * pasteOffsetStep;
+  activeCanvas().nodes.push(node);
+  void redrawAfterDomUpdate();
+  selectNode(node.id);
+  resetValidationAfterGraphChange();
+  showToast("success", `已粘贴 ${node.title}。`);
+  return true;
 }
 
 
@@ -1440,6 +1511,42 @@ export function deleteMenuConnection(event: Event) {
   resetValidationAfterGraphChange();
   drawLines();
   showToast("success", "连线已删除。");
+}
+
+
+export function deleteConnectionByKey(connectionKey: string): boolean {
+  const canvas = activeCanvas();
+  const connection = canvas.connections.find(
+    ([source, target]) => getConnectionKey(source, target) === connectionKey
+  );
+  if (!connection) return false;
+
+  const [from, to] = connection;
+  recordHistory();
+  canvas.connections = canvas.connections.filter(
+    ([source, target]) => !(source === from && target === to)
+  );
+  removeEdgeControl(from, to);
+  canvas.selectedConnectionKey = null;
+  resetValidationAfterGraphChange();
+  drawLines();
+  return true;
+}
+
+
+export function deleteSelectedGraphItem(): boolean {
+  const canvas = activeCanvas();
+  if (canvas.selectedNodeId) {
+    const deleted = deleteNodeById(canvas.selectedNodeId);
+    if (deleted) showToast("success", "节点已删除。");
+    return deleted;
+  }
+  if (canvas.selectedConnectionKey) {
+    const deleted = deleteConnectionByKey(canvas.selectedConnectionKey);
+    if (deleted) showToast("success", "连线已删除。");
+    return deleted;
+  }
+  return false;
 }
 
 
@@ -1582,7 +1689,7 @@ export function enterContainer(containerId: string) {
   clearHistory(canvas.id);
 
   void redrawAfterDomUpdate().then(() => centerGraphInCanvas());
-  showToast("info", `进入容器「${node.title}」：拖入层搭建；每个 Input=一个输入端口，每个 Output=一个输出端口。`);
+  showToast("info", `进入容器「${node.title}」：单击或拖入层搭建；每个 Input=一个输入端口，每个 Output=一个输出端口。`);
 }
 
 // 退出一层：把编辑好的子图写回容器节点，并还原父层
@@ -1712,6 +1819,74 @@ export function addNodeFromLayer(layerType: string, x: number, y: number): Graph
   selectNode(node.id);
   resetValidationAfterGraphChange();
   showToast("success", `已添加 ${node.badge} 节点。`);
+  return node;
+}
+
+
+// 单击组件库时的推荐落点：空画布放在视口中心；已有节点则放在
+// 当前选中节点（没有则最后一个节点）后方，超出右侧视口时自动换到下一行。
+function suggestedClickAddPosition(): Point {
+  const canvas = activeCanvas();
+  if (!canvas.nodes.length) {
+    if (!canvasEl) return { x: 80, y: 80 };
+    const rect = canvasEl.getBoundingClientRect();
+    const center = getCanvasPoint(
+      rect.left + canvasEl.clientWidth / 2,
+      rect.top + canvasEl.clientHeight / 2
+    );
+    return { x: center.x - 112, y: center.y - 70 };
+  }
+
+  const anchor = canvas.nodes.find(node => node.id === canvas.selectedNodeId)
+    ?? canvas.nodes[canvas.nodes.length - 1]!;
+  let x = anchor.x + 280;
+  let y = anchor.y;
+  if (canvasEl) {
+    const visibleRight = (canvasEl.clientWidth - canvas.panX) / canvas.zoom;
+    if (x + 224 > visibleRight - 24) {
+      x = anchor.x;
+      y = anchor.y + 210;
+    }
+  }
+  return { x, y };
+}
+
+
+export function addLayerByClick(layerType: string): GraphNode | null {
+  if (!isKnownLayerType(layerType)) return null;
+  const point = suggestedClickAddPosition();
+  const node = addNodeFromLayer(layerType, point.x, point.y);
+  if (node.type === "Merge") startMergeCoach(node.id);
+  return node;
+}
+
+
+export function addEmptyContainerByClick(): GraphNode {
+  const point = suggestedClickAddPosition();
+  recordHistory();
+  const node = createEmptyContainerNode(activeCanvas(), point.x, point.y);
+  activeCanvas().nodes.push(node);
+  void redrawAfterDomUpdate();
+  selectNode(node.id);
+  resetValidationAfterGraphChange();
+  showToast("success", "已添加空白容器。");
+  startContainerCoach(node.id);
+  return node;
+}
+
+
+export function addSavedContainerByClick(defId: string): GraphNode | null {
+  const def = containerLibrary.items.find(item => item.defId === defId);
+  if (!def) return null;
+  const point = suggestedClickAddPosition();
+  recordHistory();
+  const node = instantiateContainerDef(activeCanvas(), def, point.x, point.y);
+  activeCanvas().nodes.push(node);
+  void redrawAfterDomUpdate();
+  selectNode(node.id);
+  resetValidationAfterGraphChange();
+  showToast("success", `已添加容器 ${def.name}。`);
+  startContainerCoach(node.id);
   return node;
 }
 

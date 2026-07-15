@@ -1712,6 +1712,12 @@ button:disabled {
   box-shadow: 0 4px 14px rgba(14, 165, 233, 0.14);
 }
 
+.layer-item:focus-visible {
+  outline: 3px solid rgba(14, 165, 233, 0.24);
+  outline-offset: 2px;
+  border-color: var(--indigo);
+}
+
 .layer-item:active {
   cursor: grabbing;
 }
@@ -2028,6 +2034,7 @@ button:disabled {
 }
 
 .node-selected {
+  z-index: 20;
   border-color: var(--indigo);
   box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.22), 0 12px 24px -8px rgba(35, 48, 74, 0.2);
 }
@@ -2035,6 +2042,55 @@ button:disabled {
 .node-selected:hover {
   border-color: var(--indigo);
   box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.22), 0 12px 24px -8px rgba(35, 48, 74, 0.2);
+}
+
+/* 选中节点后显示的小型悬浮工具条，减少对右键菜单的依赖 */
+.node-quick-toolbar {
+  position: absolute;
+  right: 0;
+  top: -42px;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 22px -8px rgba(35, 48, 74, 0.32);
+  backdrop-filter: blur(8px);
+}
+
+.node-quick-toolbar button {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.node-quick-toolbar button:hover {
+  background: var(--panel-2);
+  color: var(--indigo);
+}
+
+.node-quick-toolbar button.danger { color: var(--rose); }
+.node-quick-toolbar button.danger:hover { background: #fff1f2; }
+.node-quick-toolbar iconify-icon { font-size: 15px; }
+
+.context-shortcut {
+  margin-left: auto;
+  padding-left: 14px;
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .node-error {

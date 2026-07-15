@@ -2,7 +2,17 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { loadProjectTemplates, loadProjectToCanvas } from "./actions";
 import { auth, initializeAuth, isLoggedIn } from "./auth";
-import { addCanvas, cancelPendingConnection, hideConnectionMenu, hideNodeMenu, redoGraphChange, undoGraphChange } from "./canvas";
+import {
+  addCanvas,
+  cancelPendingConnection,
+  copySelectedNode,
+  deleteSelectedGraphItem,
+  hideConnectionMenu,
+  hideNodeMenu,
+  pasteCopiedNode,
+  redoGraphChange,
+  undoGraphChange,
+} from "./canvas";
 import { activeCanvas, closeHelpModal, closeSaveModal, confirmDialog, CONTAINER_ID_SEP, containerCoach, getCurrentModelGraph, initializeBeginnerGuide, mergeCoach, resolveConfirm, store, ui, WORKSPACE_COACH_KEY } from "./store";
 import ActionBar from "./components/ActionBar.vue";
 import AgentModal from "./components/AgentModal.vue";
@@ -200,10 +210,23 @@ function handleKeydown(event: KeyboardEvent) {
   if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
     return;
   }
+
+  // 工作台常用快捷键：复制/粘贴节点，删除选中的节点或连线。
+  // 输入框获得焦点时已在上方返回，不会误删正在编辑的文字。
+  if (currentPage.value === "workspace" && hasCanvas.value && (event.key === "Delete" || event.key === "Backspace")) {
+    if (deleteSelectedGraphItem()) event.preventDefault();
+    return;
+  }
+
   const mod = event.ctrlKey || event.metaKey;
   if (!mod) return;
   const key = event.key.toLowerCase();
-  if (key === "z" && !event.shiftKey) {
+  if (currentPage.value === "workspace" && hasCanvas.value && key === "c" && !event.shiftKey) {
+    if (copySelectedNode()) event.preventDefault();
+  } else if (currentPage.value === "workspace" && hasCanvas.value && key === "v" && !event.shiftKey) {
+    event.preventDefault();
+    pasteCopiedNode();
+  } else if (key === "z" && !event.shiftKey) {
     event.preventDefault();
     undoGraphChange();
   } else if ((key === "z" && event.shiftKey) || key === "y") {
