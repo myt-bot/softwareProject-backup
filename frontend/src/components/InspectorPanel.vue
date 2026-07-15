@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { validateModelStructure } from "../api/client";
 import { enterContainer, recordHistory, redrawAfterDomUpdate } from "../canvas";
 import {
@@ -84,6 +84,39 @@ watch(
 
 // 面板悬浮于画布之上：选中节点且未被手动收起时滑入，不改变画布尺寸
 const panelOpen = computed(() => Boolean(selectedNode.value) && !ui.inspectorCollapsed);
+const inspectorRef = ref<HTMLElement | null>(null);
+
+// 从结构问题列表定位过来时，等面板完成渲染后滚动并短暂高亮相关字段。
+watch(
+  () => ui.inspectorFocusParam,
+  async paramKey => {
+    if (!paramKey || !panelOpen.value) return;
+    await nextTick();
+    const aliases: Record<string, string[]> = {
+      in_features: ["In Features", "输入特征数"],
+      out_features: ["Out Features", "输出神经元"],
+      out_channels: ["Out Channels", "输出通道"],
+      kernel_size: ["Kernel Size", "卷积核", "池化核"],
+      stride: ["Stride", "步长"],
+      padding: ["Padding", "填充"],
+      shape: ["Input Shape", "输入形状"],
+      merge: ["合并方式", "Merge"],
+      p: ["Dropout Rate", "失活比例"],
+    };
+    const fields = inspectorRef.value?.querySelectorAll<HTMLElement>(".form-field, [data-param-key]") || [];
+    const field = Array.from(fields).find(item =>
+      item.dataset.paramKey === paramKey
+      || (aliases[paramKey] || [paramKey]).some(alias => item.textContent?.includes(alias))
+    );
+    if (field) {
+      field.scrollIntoView({ behavior: "smooth", block: "center" });
+      field.classList.remove("param-focus-flash");
+      requestAnimationFrame(() => field.classList.add("param-focus-flash"));
+      setTimeout(() => field.classList.remove("param-focus-flash"), 1800);
+    }
+    ui.inspectorFocusParam = null;
+  },
+);
 
 function collapsePanel() {
   ui.inspectorCollapsed = true;
@@ -352,7 +385,7 @@ const inputShapeValue = computed(() => {
 
 <template>
   <!-- 右侧：参数面板（悬浮层，选中节点时滑入，不挤压画布） -->
-  <aside class="inspector-panel" :class="{ open: panelOpen }" id="inspector-content">
+  <aside ref="inspectorRef" class="inspector-panel" :class="{ open: panelOpen }" id="inspector-content">
     <!-- 收起箭头：收起后再次点击节点卡片才会重新展开 -->
     <button v-if="panelOpen" class="inspector-collapse" title="收起参数面板" @click="collapsePanel">
       <iconify-icon icon="mdi:chevron-right"></iconify-icon>
@@ -626,6 +659,7 @@ const inputShapeValue = computed(() => {
         <template v-for="field in advancedInspector.fields" :key="field.key">
           <ParamNumberField
             v-if="field.kind === 'number'"
+            :param-key="field.key"
             :label="field.label"
             :value="selectedNode.params[field.key]"
             :min="field.key === 'dropout' ? 0 : 1"
@@ -637,7 +671,7 @@ const inputShapeValue = computed(() => {
             :empty-message="`${field.label} 不能为空。`"
             @change="setParam(field.key, $event)"
           />
-          <label v-else class="form-field switch-field">
+          <label v-else class="form-field switch-field" :data-param-key="field.key">
             <span>{{ field.label }}</span>
             <input
               type="checkbox"

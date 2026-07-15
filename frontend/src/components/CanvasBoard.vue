@@ -42,6 +42,7 @@ import type { GraphNode } from "../types";
 import CanvasMinimap from "./CanvasMinimap.vue";
 import CanvasTabs from "./CanvasTabs.vue";
 import PetMascot from "./PetMascot.vue";
+import ValidationSummary from "./ValidationSummary.vue";
 
 const canvasRef = ref<HTMLElement | null>(null);
 const svgRef = ref<SVGSVGElement | null>(null);
@@ -225,6 +226,8 @@ onBeforeUnmount(() => {
     </button>
     <!-- 迷你地图：操作画布时短暂淡入，随后淡出 -->
     <CanvasMinimap />
+    <!-- 结构检查的问题汇总：点击后定位节点并展开对应参数 -->
+    <ValidationSummary />
     <!-- 画布功能栏：空闲时收成"缩放"胶囊，悬停向右展开 视图/历史；空闲自动淡出 -->
     <div class="canvas-toolbar" :class="{ 'is-faded': !toolbarActive }" @mouseenter="pokeToolbar">
       <!-- 常驻：缩放 -->
@@ -305,7 +308,6 @@ onBeforeUnmount(() => {
           'connection-source': isConnectionSource(node.id),
           'connection-target': isConnectionTarget(node.id),
           'node-dragging': store.draggingNodeId === node.id,
-          'node-error': !!canvas.nodeErrors[node.id],
         }"
         :style="{ left: `${node.x}px`, top: `${node.y}px` }"
         @mousedown="handleNodeMouseDown($event, node.id)"
@@ -351,7 +353,6 @@ onBeforeUnmount(() => {
           <div class="node-head">
             <span :class="`node-type ${node.color}`">{{ node.badge }}</span>
             <div class="container-head-actions">
-              <span v-if="canvas.nodeErrors[node.id]" class="status-badge error">✕</span>
               <button
                 class="container-toggle"
                 :title="node.collapsed ? '展开查看内部层' : '折叠'"
@@ -395,17 +396,11 @@ onBeforeUnmount(() => {
         <template v-else>
           <div class="node-head">
             <span :class="`node-type ${node.color}`">{{ node.badge }}</span>
-            <span v-if="canvas.nodeErrors[node.id]" class="status-badge error">✕ 有问题</span>
-            <span v-else :class="statusBadgeClass">{{ statusBadgeText }}</span>
+            <span :class="statusBadgeClass">{{ statusBadgeText }}</span>
           </div>
           <h4>{{ node.title }}</h4>
           <p v-if="node.note" class="node-note">{{ node.note }}</p>
-          <!-- 出错节点的人话提示，直接显示在节点上 -->
-          <p v-if="canvas.nodeErrors[node.id]" class="node-error-msg">
-            <iconify-icon icon="mdi:alert-circle-outline"></iconify-icon>
-            {{ canvas.nodeErrors[node.id] }}
-          </p>
-          <div v-else class="shape-row" title="这一层输出数据的尺寸，点击底部“检查结构”后自动推导">
+          <div class="shape-row" title="这一层输出数据的尺寸，点击底部“检查结构”后自动推导">
             <span>输出尺寸</span>
             <strong class="shape-value" :class="{ pending: node.hint === '?' }">{{ shapeHintText(node.hint) }}</strong>
           </div>

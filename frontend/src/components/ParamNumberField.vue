@@ -5,6 +5,7 @@ import InfoTip from "./InfoTip.vue";
 
 const props = withDefaults(defineProps<{
   label: string;
+  paramKey?: string;
   value: unknown;
   hint?: string;       // 参数解释（? 气泡）
   recommend?: string;  // 推荐取值范围
@@ -72,7 +73,7 @@ function handleChange(event: Event) {
 </script>
 
 <template>
-  <label class="form-field">
+  <label class="form-field" :data-param-key="paramKey">
     <span>{{ label }} <InfoTip v-if="hint" :text="hint" /></span>
     <input
       class="param-input"
