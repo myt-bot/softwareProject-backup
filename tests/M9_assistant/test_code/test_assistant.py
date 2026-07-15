@@ -19,10 +19,12 @@ import backend.assistant as assistant
 NEW_BROWSER_COMMANDS = {
     "get_train_config",
     "get_training_result",
+    "wait_training",
     "get_system_status",
     "set_dataset",
     "set_train_config",
     "stop_training",
+    "save_model",
 }
 
 
@@ -73,6 +75,10 @@ class TestCommandDefinitions(unittest.TestCase):
         for name in ("get_train_config", "get_training_result", "get_system_status", "stop_training"):
             self.assertEqual(tools[name]["properties"], {})
             self.assertEqual(tools[name]["required"], [])
+        self.assertEqual(tools["wait_training"]["required"], [])
+        self.assertEqual(tools["wait_training"]["properties"]["timeout_seconds"]["type"], "integer")
+        self.assertEqual(tools["save_model"]["required"], ["name"])
+        self.assertEqual(set(tools["save_model"]["properties"]), {"name", "description"})
 
     def test_tools_use_openai_function_call_format(self):
         tools = assistant.build_command_tools()
@@ -97,6 +103,9 @@ class TestCommandDefinitions(unittest.TestCase):
         self.assertIn("模型工坊", prompt)
         self.assertIn("当前为 LeNet，校验通过。", prompt)
         self.assertIn("delete_node", prompt)
+        self.assertIn("wait_training", prompt)
+        self.assertIn("save_model", prompt)
+        self.assertIn("不要反复调用 get_training_result", prompt)
 
     def test_project_snapshot_summary(self):
         text = assistant.summarize_project_snapshot({
@@ -201,10 +210,12 @@ class TestToolHandling(unittest.IsolatedAsyncioTestCase):
         arguments = {
             "get_train_config": {},
             "get_training_result": {},
+            "wait_training": {"timeout_seconds": 60},
             "get_system_status": {},
             "set_dataset": {"name": "CIFAR10"},
             "set_train_config": {"epochs": 10, "rate": 0.001, "device": "cpu"},
             "stop_training": {},
+            "save_model": {"name": "LeNet", "description": "test"},
         }
         with patch.object(
             assistant.hub,
@@ -217,7 +228,22 @@ class TestToolHandling(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(execute.await_count, len(arguments))
         for name, args in arguments.items():
-            self.assertIn(unittest.mock.call("user_1", name, args), execute.await_args_list)
+            if name == "wait_training":
+                self.assertIn(
+                    unittest.mock.call("user_1", name, args, timeout=70),
+                    execute.await_args_list,
+                )
+            else:
+                self.assertIn(unittest.mock.call("user_1", name, args), execute.await_args_list)
+
+    async def test_wait_training_rejects_invalid_timeout(self):
+        with patch.object(assistant.hub, "execute_command_in_browser", new=AsyncMock()) as execute:
+            result = await assistant.handle_tool_use(
+                "user_1", "wait_training", {"timeout_seconds": 7201},
+            )
+        self.assertFalse(result["ok"])
+        self.assertIn("1~7200", result["error"])
+        execute.assert_not_awaited()
 
     async def test_unknown_tool_is_rejected(self):
         result = await assistant.handle_tool_use("user_1", "does_not_exist", {})
@@ -341,6 +367,9 @@ class TestFrontendCommandContract(unittest.TestCase):
         root = Path(__file__).resolve().parent.parent.parent.parent
         cls.dispatcher = (root / "frontend" / "src" / "assistant.ts").read_text(encoding="utf-8")
         cls.panel = (root / "frontend" / "src" / "components" / "AssistantPanel.vue").read_text(encoding="utf-8")
+        cls.command_help = json.loads(
+            (root / "frontend" / "src" / "assistantHelp.json").read_text(encoding="utf-8")
+        )
 
     def test_every_backend_browser_command_has_frontend_switch_case(self):
         browser_commands = {
@@ -354,8 +383,14 @@ class TestFrontendCommandContract(unittest.TestCase):
         self.assertEqual(missing, set(), f"前端缺少命令分发：{sorted(missing)}")
 
     def test_new_commands_are_listed_in_command_help(self):
-        missing = {name for name in NEW_BROWSER_COMMANDS if name not in self.panel}
+        help_names = {item["name"] for item in self.command_help["commands"]}
+        missing = NEW_BROWSER_COMMANDS - help_names
         self.assertEqual(missing, set(), f"命令面板帮助缺少：{sorted(missing)}")
+
+    def test_save_model_is_available_to_direct_user_commands(self):
+        self.assertIn("parseCommandLine", self.panel)
+        self.assertIn("executeAssistantCommand(parsed.command, parsed.args)", self.panel)
+        self.assertIn('case "save_model"', self.dispatcher)
 
     def test_command_and_ai_paths_share_the_same_dispatcher(self):
         self.assertIn("executeAssistantCommand(parsed.command, parsed.args)", self.panel)

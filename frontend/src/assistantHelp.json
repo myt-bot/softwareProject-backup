@@ -14,6 +14,9 @@
     { "name": "list_templates", "group": "只读 · 了解现状", "summary": "列出内置模板（拿 key 供 load_template）", "usage": "list_templates", "params": [] },
     { "name": "get_train_config", "group": "只读 · 了解现状", "summary": "查看当前训练配置", "usage": "get_train_config", "params": [] },
     { "name": "get_training_result", "group": "只读 · 了解现状", "summary": "查看训练结果与逐轮指标", "usage": "get_training_result", "params": [] },
+    { "name": "wait_training", "group": "只读 · 了解现状", "summary": "等待当前训练结束（事件驱动，不轮询）", "usage": "wait_training --timeout_seconds 3600", "params": [
+      { "name": "timeout_seconds", "type": "integer", "required": false, "desc": "最长等待秒数，1~7200，默认 3600" }
+    ] },
     { "name": "get_system_status", "group": "只读 · 了解现状", "summary": "查看本机 Agent/设备/存储等状态", "usage": "get_system_status", "params": [] },
     { "name": "load_template", "group": "画布 / 训练操作", "summary": "载入内置模板（替换当前模型）", "usage": "load_template --key lenet", "params": [
       { "name": "key", "type": "string", "required": true, "desc": "模板键，见 list_templates" }
@@ -51,6 +54,10 @@
       { "name": "config", "type": "JSON", "required": false, "desc": "训练配置覆盖，如 '{\"epochs\":10}'" }
     ] },
     { "name": "stop_training", "group": "画布 / 训练操作", "summary": "停止当前训练（需本机 Agent）", "usage": "stop_training", "params": [] },
+    { "name": "save_model", "group": "画布 / 训练操作", "summary": "将当前画布保存到我的项目", "usage": "save_model --name LeNet --description 'MNIST 分类模型'", "params": [
+      { "name": "name", "type": "string", "required": true, "desc": "模型名称" },
+      { "name": "description", "type": "string", "required": false, "desc": "模型描述" }
+    ] },
     { "name": "agent", "group": "AI · 帮助", "summary": "进入 AI 对话，用自然语言让 AI 帮你", "usage": "agent", "params": [] },
     { "name": "clear", "group": "AI · 帮助", "summary": "清空命令台内容", "usage": "clear", "params": [] },
     { "name": "help", "group": "AI · 帮助", "summary": "help <命令> 看用法参数；help layers 看层参数", "usage": "help", "params": [

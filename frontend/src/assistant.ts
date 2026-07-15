@@ -1,6 +1,8 @@
 // AI 助手：把后端下发的 tool_request 命令，落到前端现有的建模函数上执行。
 // 命令名与后端 command_specs() 一一对应；执行结果回传后端喂回大模型。
 
+import { watch } from "vue";
+
 import {
   activeCanvas,
   agent,
@@ -29,7 +31,7 @@ import {
   fetchProjectTemplates,
   validateModelStructure,
 } from "./api/client";
-import { handleExportCode, handleStartTraining, handleValidateModel } from "./actions";
+import { handleExportCode, handleStartTraining, handleValidateModel, saveProject } from "./actions";
 import { handleStopTraining, monitor } from "./monitor";
 
 export interface AssistantCommandResult {
@@ -85,6 +87,38 @@ function summarizeTraining() {
     error: m.error || m.result?.error || null,
     artifacts: m.result?.artifacts || null,
   };
+}
+
+// 等待训练最终结果。训练状态由独立 WebSocket 推送写入 monitor，watch 只在状态变化时
+// 被唤醒，因此等待期间不会定时查询后端或反复消耗大模型工具轮次。
+function waitForTraining(timeoutSeconds: number): Promise<ReturnType<typeof summarizeTraining> & { timed_out?: boolean }> {
+  const initial = summarizeTraining();
+  if (!initial.started || !initial.running) return Promise.resolve(initial);
+
+  return new Promise(resolve => {
+    let settled = false;
+    let stopWatching: (() => void) | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (timedOut = false) => {
+      if (settled) return;
+      settled = true;
+      stopWatching?.();
+      if (timer) clearTimeout(timer);
+      const result = summarizeTraining();
+      resolve(timedOut ? { ...result, timed_out: true } : result);
+    };
+
+    stopWatching = watch(
+      () => [monitor.state, monitor.result?.status, monitor.error] as const,
+      () => {
+        const current = summarizeTraining();
+        if (!current.running) finish(false);
+      },
+      { flush: "sync" },
+    );
+    timer = setTimeout(() => finish(true), timeoutSeconds * 1000);
+  });
 }
 
 // 随每条用户消息上送的当前项目快照（后端据此了解现状、少走工具往返）
@@ -325,6 +359,14 @@ export async function executeAssistantCommand(
       case "get_training_result":
         return { ok: true, result: summarizeTraining() };
 
+      case "wait_training": {
+        const timeout = Math.trunc(Number(args.timeout_seconds ?? 3600));
+        if (!Number.isFinite(timeout) || timeout < 1 || timeout > 7200) {
+          return { ok: false, error: "timeout_seconds 必须是 1~7200 之间的整数" };
+        }
+        return { ok: true, result: await waitForTraining(timeout) };
+      }
+
       case "set_train_config": {
         const changes: Record<string, unknown> = {};
         const skipped: string[] = [];
@@ -390,6 +432,16 @@ export async function executeAssistantCommand(
       case "start_training": {
         await handleStartTraining();
         return { ok: true, result: "已尝试发起训练（需本机 Agent 在线，否则会提示用户启动）" };
+      }
+
+      case "save_model": {
+        const name = String(args.name ?? "").trim();
+        const description = String(args.description ?? "").trim();
+        if (!name) return { ok: false, error: "模型名称不能为空" };
+        const saved = await saveProject(name, description);
+        return saved
+          ? { ok: true, result: { saved: true, name, description } }
+          : { ok: false, error: "模型保存失败，请检查登录状态或后端服务" };
       }
 
       default:

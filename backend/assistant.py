@@ -53,15 +53,19 @@ router = APIRouter(tags=["assistant"])
 # 单次工具调用等待浏览器回传结果的超时秒数（超时视为该命令执行失败）
 TOOL_CALL_TIMEOUT_SECONDS = 30
 
+# wait_training 是一次长连接工具调用：浏览器端由训练结果 WebSocket 事件唤醒，
+# 不需要大模型反复轮询。这里为浏览器端的等待时限额外留出少量回传宽限。
+WAIT_TRAINING_DEFAULT_TIMEOUT_SECONDS = 3600
+WAIT_TRAINING_MAX_TIMEOUT_SECONDS = 7200
+WAIT_TRAINING_RESULT_GRACE_SECONDS = 10
+
 # 一轮对话内允许的最大工具调用轮数（防止模型陷入死循环，超出即中止并给出提示）。
 # 复杂建模/多画布/反复校验修正会消耗不少轮次，故给得宽松些，适配更“深”的模型。
 MAX_TOOL_ITERATIONS = 80
 
-# 状态轮询类命令（等待训练完成时反复调 get_training_result、等待 Agent 上线时反复调
-# get_system_status）。模型在"等待"期间会紧凑地连续轮询，若不加间隔，几分钟的训练就能
-# 把 MAX_TOOL_ITERATIONS 的额度耗尽。因此同一轮对话内连续调用这些命令时，服务端强制
-# 拉开最小间隔（首次调用不受影响）：80 次 × 15 秒 ≈ 20 分钟等待额度。
-POLLING_COMMANDS = {"get_training_result", "get_system_status"}
+# 状态轮询类命令。训练完成等待已改为事件驱动的 wait_training；这里只保留等待 Agent
+# 上线时可能重复调用的 get_system_status 作为防御性限速。
+POLLING_COMMANDS = {"get_system_status"}
 POLL_MIN_INTERVAL_SECONDS = 15.0
 
 
@@ -295,6 +299,7 @@ def command_specs() -> list[dict[str, Any]]:
         {"name": "list_templates", "category": "read", "summary": "列出可用的内置模型模板。", "params": [], "usage": "list_templates", "runs_on": "browser"},
         {"name": "get_train_config", "category": "read", "summary": "获取当前训练配置（数据集/轮次/批大小/学习率/优化器/损失/设备）。", "params": [], "usage": "get_train_config", "runs_on": "browser"},
         {"name": "get_training_result", "category": "read", "summary": "获取当前/最近一次训练的结果与逐轮指标（准确率、损失、进度、报错等），用于就训练结果答疑。", "params": [], "usage": "get_training_result", "runs_on": "browser"},
+        {"name": "wait_training", "category": "read", "summary": "等待当前训练结束；由训练结果事件唤醒，不重复轮询。返回完成、失败、取消或超时状态及最终指标。", "params": [p("timeout_seconds", "integer", "最长等待秒数，范围 1~7200", False, WAIT_TRAINING_DEFAULT_TIMEOUT_SECONDS)], "usage": "wait_training --timeout_seconds 3600", "runs_on": "browser"},
         {"name": "get_system_status", "category": "read", "summary": "查看系统实时状态：本机 Agent 是否连接、设备(CPU/GPU)与 CUDA、存储目录、当前画布等。", "params": [], "usage": "get_system_status", "runs_on": "browser"},
         {"name": "load_template", "category": "write", "summary": "将内置模板载入当前画布（会替换当前模型）。", "params": [p("key", "string", "模板键，如 lenet")], "usage": "load_template --key lenet", "runs_on": "browser"},
         {"name": "add_node", "category": "write", "summary": "新增一个层节点。", "params": [p("type", "string", "层类型，如 Conv2D"), p("params", "object", "层参数", False, {})], "usage": "add_node --type Conv2D --params '{\"out_channels\":16}'", "runs_on": "browser"},
@@ -307,6 +312,7 @@ def command_specs() -> list[dict[str, Any]]:
         {"name": "auto_layout", "category": "write", "summary": "自动整理画布节点布局。", "params": [], "usage": "auto_layout", "runs_on": "browser"},
         {"name": "export_code", "category": "read", "summary": "把当前模型导出为 PyTorch 代码。", "params": [], "usage": "export_code", "runs_on": "browser"},
         {"name": "start_training", "category": "write", "summary": "使用当前配置发起训练，需要本机 Agent 在线。", "params": [p("config", "object", "可选的训练配置覆盖项", False, {})], "usage": "start_training --config '{\"epochs\":10}'", "runs_on": "browser"},
+        {"name": "save_model", "category": "write", "summary": "将当前画布模型保存到“我的项目”。", "params": [p("name", "string", "保存后的模型名称"), p("description", "string", "可选的模型描述", False, "")], "usage": "save_model --name LeNet --description 'MNIST 分类模型'", "runs_on": "browser"},
         {"name": "help", "category": "meta", "summary": "显示全部命令、参数和用法。", "params": [], "usage": "help", "runs_on": "backend"},
     ]
 
@@ -502,6 +508,24 @@ async def handle_tool_use(
         if tool_name == "help":
             return {"ok": True, "result": build_help_text(), "error": None}
         return {"ok": False, "result": None, "error": f"后端命令未实现：{tool_name}"}
+    if tool_name == "wait_training":
+        raw_timeout = tool_input.get("timeout_seconds", WAIT_TRAINING_DEFAULT_TIMEOUT_SECONDS)
+        try:
+            wait_timeout = int(raw_timeout)
+        except (TypeError, ValueError):
+            return {"ok": False, "result": None, "error": "timeout_seconds 必须是整数"}
+        if not 1 <= wait_timeout <= WAIT_TRAINING_MAX_TIMEOUT_SECONDS:
+            return {
+                "ok": False,
+                "result": None,
+                "error": f"timeout_seconds 必须在 1~{WAIT_TRAINING_MAX_TIMEOUT_SECONDS} 之间",
+            }
+        return await hub.execute_command_in_browser(
+            user_id,
+            tool_name,
+            dict(tool_input or {}),
+            timeout=wait_timeout + WAIT_TRAINING_RESULT_GRACE_SECONDS,
+        )
     return await hub.execute_command_in_browser(user_id, tool_name, dict(tool_input or {}))
 
 
