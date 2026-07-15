@@ -13,8 +13,8 @@ interface CoachStep {
 const steps: CoachStep[] = [
   {
     selector: '#layer-palette [data-layer-type="Input"]',
-    title: "① 拖入第一个层",
-    text: "按住这个高亮的 Input 层，拖到中间画布松手，就放下了模型的输入。",
+    title: "① 添加第一个层",
+    text: "单击高亮的 Input 可自动添加到画布中心；也可以按住它拖到你想放置的位置。",
   },
   {
     selector: "#btn-validate",

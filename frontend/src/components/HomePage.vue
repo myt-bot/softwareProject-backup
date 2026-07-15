@@ -133,7 +133,7 @@ function projectType(project: ProjectMeta, index: number) {
               <div class="mw-guide-step">
                 <span class="mw-step-icon green"><iconify-icon icon="mdi:cube-outline"></iconify-icon></span>
                 <strong><b>2</b> 搭建模型</strong>
-                <small>拖拽组件搭建网络结构，可视化连接各层</small>
+                <small>单击或拖拽组件搭建网络结构，可视化连接各层</small>
               </div>
               <span class="mw-guide-arrow"><iconify-icon icon="mdi:arrow-right-thin"></iconify-icon></span>
               <div class="mw-guide-step">

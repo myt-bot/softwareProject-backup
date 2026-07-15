@@ -20,8 +20,8 @@ import { closeHelpModal, ui } from "../store";
         <div class="help-steps">
           <div class="help-step">
             <span class="help-step-num">1</span>
-            <h3>拖入组件</h3>
-            <p>左侧组件库里是神经网络的“积木”，把它们拖到中间画布上就能添加。</p>
+            <h3>添加组件</h3>
+            <p>单击左侧模型层可自动添加到画布，也可以把它拖到画布中的指定位置。</p>
           </div>
           <div class="help-step">
             <span class="help-step-num">2</span>
@@ -43,9 +43,11 @@ import { closeHelpModal, ui } from "../store";
           <h3><iconify-icon icon="mdi:lightbulb-on-outline"></iconify-icon>实用小技巧</h3>
           <ul>
             <li><b>单击节点</b>：选中节点，在右侧面板查看和修改参数</li>
+            <li><b>复制节点</b>：选中后使用悬浮工具条、右键菜单或 Ctrl+C，再按 Ctrl+V 粘贴</li>
+            <li><b>快速删除</b>：选中节点或连线后，按 Delete / Backspace 即可删除</li>
             <li><b>教学辅助</b>：打开工作区右下角的“教学辅助”，可查看当前层作用、参数说明、模型概览和结构错误修改指导</li>
             <li><b>拖动节点</b>：按住节点移动，调整画布布局</li>
-            <li><b>右键连线</b>：可以删除不需要的连线</li>
+            <li><b>右键操作</b>：节点可连线、复制或删除，连线可直接删除</li>
             <li><b>快速开始</b>：不知道从哪下手？点画布上方的“快速开始模板”，从模板库一键加载现成的经典网络结构</li>
             <li><b>换数据集</b>：顶部可切换不同的训练数据集</li>
             <li><b>导出代码</b>：搭好的模型可一键导出为 PyTorch 代码，边玩边学</li>

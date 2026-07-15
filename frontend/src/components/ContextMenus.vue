@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import {
   connectFromMenuNode,
+  copyMenuNode,
   deleteMenuConnection,
   deleteMenuNode,
   enterContainerFromMenu,
@@ -40,6 +41,10 @@ const menuNodeIsContainer = computed(() => {
     <button v-else id="btn-connect-node" @click="connectFromMenuNode">
       <iconify-icon icon="mdi:transit-connection-variant"></iconify-icon>
       进行连线
+    </button>
+    <button id="btn-copy-node" @click="copyMenuNode">
+      <iconify-icon icon="mdi:content-copy"></iconify-icon>
+      复制节点 <span class="context-shortcut">Ctrl+C</span>
     </button>
     <button id="btn-delete-node" class="text-rose" @click="deleteMenuNode">
       <iconify-icon icon="mdi:delete-outline"></iconify-icon>

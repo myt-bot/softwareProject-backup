@@ -84,7 +84,7 @@ async function submitRegister() {
         </svg>
 
         <ul class="auth-features">
-          <li><iconify-icon icon="mdi:puzzle-outline"></iconify-icon>像搭积木一样拖拽构建神经网络</li>
+          <li><iconify-icon icon="mdi:puzzle-outline"></iconify-icon>单击或拖拽组件，像搭积木一样构建神经网络</li>
           <li><iconify-icon icon="mdi:check-decagram-outline"></iconify-icon>一键校验结构，自动推导张量维度</li>
           <li><iconify-icon icon="mdi:chart-line"></iconify-icon>实时训练曲线与逐轮指标监控</li>
         </ul>

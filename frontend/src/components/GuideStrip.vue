@@ -6,7 +6,7 @@ import { activeCanvas, getWorkflowProgress } from "../store";
 const progress = computed(() => getWorkflowProgress(activeCanvas()));
 
 const steps = [
-  { n: 1, title: "拖入组件", desc: "从左侧组件库拖到画布" },
+  { n: 1, title: "添加组件", desc: "单击快速添加，或拖到指定位置" },
   { n: 2, title: "连接与删除", desc: "右键节点可连线或删除；右键连线可删除" },
   { n: 3, title: "检查结构", desc: "点击底部“检查结构”按钮" },
   { n: 4, title: "开始训练", desc: "检查通过后一键训练" },

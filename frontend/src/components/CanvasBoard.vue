@@ -7,6 +7,8 @@ import {
   centerGraphInCanvas,
   completeConnection,
   containerBreadcrumb,
+  copyNodeById,
+  deleteNodeById,
   enterContainer,
   exitToDepth,
   handleCanvasClick,
@@ -121,6 +123,14 @@ function onNodeContextMenu(event: MouseEvent, nodeId: string) {
   showNodeMenu(event.clientX, event.clientY, nodeId);
 }
 
+function copyNodeFromToolbar(nodeId: string) {
+  copyNodeById(nodeId);
+}
+
+function deleteNodeFromToolbar(nodeId: string) {
+  if (deleteNodeById(nodeId)) showToast("success", "节点已删除。");
+}
+
 // 从输出端口按住拖拽 → 开始连线（endpoint 普通层为 node.id，容器端口为 容器id::端口层id）
 function onPortMouseDown(event: MouseEvent, endpoint: string) {
   if (event.button !== 0) return;
@@ -184,7 +194,7 @@ onBeforeUnmount(() => {
       </nav>
       <div class="editor-hint">
         <iconify-icon icon="mdi:information-outline"></iconify-icon>
-        正在编辑容器「{{ currentContainerName }}」：拖入层搭建，<b>Input</b>=输入端口、<b>Output</b>=输出端口（可放多个）。
+        正在编辑容器「{{ currentContainerName }}」：单击或拖入层搭建，<b>Input</b>=输入端口、<b>Output</b>=输出端口（可放多个）。
       </div>
       <button class="editor-back" @click="exitToDepth(breadcrumb.length - 2)">
         <iconify-icon icon="mdi:arrow-u-left-top"></iconify-icon>
@@ -251,15 +261,15 @@ onBeforeUnmount(() => {
       <template v-if="editing">
         <iconify-icon icon="mdi:gesture-tap-hold"></iconify-icon>
         <h3>开始搭建容器内部</h3>
-        <p>从左侧拖入 <b>Input</b> 作为输入端口、<b>Output</b> 作为输出端口，<br>中间放需要的层并连起来。多个 Input/Output 即多输入多输出。</p>
+        <p>从左侧单击或拖入 <b>Input</b> 作为输入端口、<b>Output</b> 作为输出端口，<br>中间放需要的层并连起来。多个 Input/Output 即多输入多输出。</p>
       </template>
       <template v-else>
         <p class="empty-title">开始搭建你的模型</p>
         <!-- 落点框：虚线 drop zone + 脉冲，配左向箭头指向组件库 -->
         <div class="empty-dropzone">
           <span class="empty-dz-badge"><iconify-icon icon="mdi:tray-arrow-down"></iconify-icon></span>
-          <strong>把 <b>Input</b> 层拖到这里</strong>
-          <em><iconify-icon icon="mdi:arrow-left-thin"></iconify-icon> 从左侧「组件库」按住拖过来，松手即可放下</em>
+          <strong>添加一个 <b>Input</b> 层</strong>
+          <em><iconify-icon icon="mdi:arrow-left-thin"></iconify-icon> 单击左侧 Input 可快速添加，也可拖到指定位置</em>
         </div>
         <!-- 更快的两种方式：模板 / AI 助手 -->
         <div class="empty-or"><span>或者用更快的方式</span></div>
@@ -303,6 +313,23 @@ onBeforeUnmount(() => {
         @dblclick="onNodeDblClick($event, node)"
         @contextmenu="onNodeContextMenu($event, node.id)"
       >
+        <!-- 选中节点后的直观操作入口：复制到内部剪贴板、删除节点 -->
+        <div
+          v-if="canvas.selectedNodeId === node.id"
+          class="node-quick-toolbar"
+          @mousedown.stop
+          @click.stop
+        >
+          <button type="button" title="复制节点（Ctrl+C 后可 Ctrl+V 粘贴）" @click="copyNodeFromToolbar(node.id)">
+            <iconify-icon icon="mdi:content-copy"></iconify-icon>
+            <span>复制</span>
+          </button>
+          <button type="button" class="danger" title="删除节点（Delete / Backspace）" @click="deleteNodeFromToolbar(node.id)">
+            <iconify-icon icon="mdi:delete-outline"></iconify-icon>
+            <span>删除</span>
+          </button>
+        </div>
+
         <!-- 自定义容器：顶部输入端口行 + 底部输出端口行，每端口带名称与尺寸 -->
         <template v-if="node.type === 'Container'">
           <div class="cport-row cport-row-in">

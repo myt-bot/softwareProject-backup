@@ -26,7 +26,7 @@ const steps: CoachStep[] = [
   },
   {
     title: "③ 这是输出端口",
-    text: "每个 Output 就是一个出口。现在在中间拖入你的层（比如 Conv2D），把 Input → 层 → Output 连起来。",
+    text: "每个 Output 就是一个出口。现在单击或拖入需要的层（比如 Conv2D），把 Input → 层 → Output 连起来。",
   },
   {
     title: "④ 搭好后返回主画布",

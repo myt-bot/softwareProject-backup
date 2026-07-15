@@ -1,9 +1,43 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { isEditingContainer, NEW_CONTAINER_PAYLOAD } from "../canvas";
+import {
+  addEmptyContainerByClick,
+  addLayerByClick,
+  addSavedContainerByClick,
+  isEditingContainer,
+  NEW_CONTAINER_PAYLOAD,
+} from "../canvas";
 import { activeCanvas, containerLibrary, layerGroups } from "../store";
 
 const searchQuery = ref("");
+let suppressPaletteClick = false;
+
+function markPaletteDrag() {
+  suppressPaletteClick = true;
+}
+
+function finishPaletteDrag() {
+  // dragend 后浏览器可能紧接着派发 click，下一轮事件循环再解除抑制。
+  window.setTimeout(() => { suppressPaletteClick = false; }, 0);
+}
+
+function handleLayerClick(layerType: string) {
+  if (suppressPaletteClick) return;
+  hideTip();
+  addLayerByClick(layerType);
+}
+
+function handleEmptyContainerClick() {
+  if (suppressPaletteClick) return;
+  hideTip();
+  addEmptyContainerByClick();
+}
+
+function handleSavedContainerClick(defId: string) {
+  if (suppressPaletteClick) return;
+  hideTip();
+  addSavedContainerByClick(defId);
+}
 
 // 空画布强引导：当前画布还没有节点时，脉冲高亮 Input 层并自动展开其所在的“基础层”组
 const baseLayersTitle = computed(() =>
@@ -25,6 +59,7 @@ function isOpen(title: string) {
 }
 
 function handleNewContainerDragStart(event: DragEvent) {
+  markPaletteDrag();
   event.dataTransfer?.setData("text/plain", NEW_CONTAINER_PAYLOAD);
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = "copy";
@@ -47,6 +82,7 @@ const containerPeeks = computed(() => {
 });
 
 function handleContainerDragStart(event: DragEvent, defId: string) {
+  markPaletteDrag();
   event.dataTransfer?.setData("text/plain", `container:${defId}`);
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = "copy";
@@ -60,7 +96,7 @@ const blankContainerLayer: LayerLike = {
   desc: "封装可复用子网络",
   icon: "mdi:package-variant-closed",
   color: "teal",
-  hint: "把一段完整的网络结构打包成一个节点。拖到画布后双击进入子画板，在里面像搭普通模型一样放入层并连线；子图里的每个 Input 都会变成容器顶部的一个输入端口，每个 Output 都会变成底部的一个输出端口。适合封装残差块、编码器、分类头等重复结构，保存后还能在“我的容器”中反复拖入复用。",
+  hint: "把一段完整的网络结构打包成一个节点。单击可自动添加，也可拖到指定位置；添加后双击进入子画板，在里面像搭普通模型一样放入层并连线。子图里的每个 Input 都会变成容器顶部的一个输入端口，每个 Output 都会变成底部的一个输出端口。适合封装残差块、编码器、分类头等重复结构，保存后还能在“我的容器”中反复拖入复用。",
 };
 // 搜索时：空白容器是否命中关键词，以及“自定义容器”组是否有任何匹配项。
 // 用于让容器组也遵循和其它组一样的搜索行为（无匹配则整组隐藏、不自动展开）。
@@ -115,6 +151,7 @@ const filteredGroups = computed(() => {
 });
 
 function handleDragStart(event: DragEvent, layerType: string) {
+  markPaletteDrag();
   event.dataTransfer?.setData("text/plain", layerType);
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = "copy";
@@ -128,7 +165,7 @@ function handleDragStart(event: DragEvent, layerType: string) {
     <div class="sidebar-inner">
     <div class="sidebar-header">
       <h2><iconify-icon icon="mdi:shape-plus"></iconify-icon>网络层组件库</h2>
-      <p>把下面的“积木”拖到中间画布上</p>
+      <p>单击快速添加，也可以拖到指定位置</p>
     </div>
     <div class="sidebar-search">
       <iconify-icon icon="mdi:magnify"></iconify-icon>
@@ -169,9 +206,16 @@ function handleDragStart(event: DragEvent, layerType: string) {
             :class="{ 'layer-pulse': highlightInput && layer.type === 'Input' }"
             :data-layer-type="layer.type"
             draggable="true"
+            role="button"
+            tabindex="0"
+            :aria-label="`添加 ${layer.type} 节点`"
             @mouseenter="showTip($event, layer)"
             @mouseleave="hideTip"
+            @click="handleLayerClick(layer.type)"
+            @keydown.enter.prevent="handleLayerClick(layer.type)"
+            @keydown.space.prevent="handleLayerClick(layer.type)"
             @dragstart="handleDragStart($event, layer.type); hideTip()"
+            @dragend="finishPaletteDrag"
           >
             <span :class="`layer-icon ${layer.color}`"><iconify-icon :icon="layer.icon"></iconify-icon></span>
             <div>
@@ -213,14 +257,21 @@ function handleDragStart(event: DragEvent, layerType: string) {
             v-show="blankContainerMatched"
             class="layer-item layer-item-container"
             draggable="true"
+            role="button"
+            tabindex="0"
+            aria-label="添加空白容器"
             @mouseenter="showTip($event, blankContainerLayer)"
             @mouseleave="hideTip"
+            @click="handleEmptyContainerClick"
+            @keydown.enter.prevent="handleEmptyContainerClick"
+            @keydown.space.prevent="handleEmptyContainerClick"
             @dragstart="handleNewContainerDragStart($event); hideTip()"
+            @dragend="finishPaletteDrag"
           >
             <span class="layer-icon teal"><iconify-icon icon="mdi:package-variant-closed"></iconify-icon></span>
             <div>
               <strong>空白容器</strong>
-              <span>拖入后双击进入编辑</span>
+              <span>单击添加，或拖入后双击编辑</span>
             </div>
           </article>
           <article
@@ -228,7 +279,14 @@ function handleDragStart(event: DragEvent, layerType: string) {
             :key="def.defId"
             class="layer-item"
             draggable="true"
+            role="button"
+            tabindex="0"
+            :aria-label="`添加容器 ${def.name}`"
+            @click="handleSavedContainerClick(def.defId)"
+            @keydown.enter.prevent="handleSavedContainerClick(def.defId)"
+            @keydown.space.prevent="handleSavedContainerClick(def.defId)"
             @dragstart="handleContainerDragStart($event, def.defId)"
+            @dragend="finishPaletteDrag"
           >
             <span :class="`layer-icon ${def.color}`"><iconify-icon icon="mdi:package-variant"></iconify-icon></span>
             <div>
@@ -263,7 +321,7 @@ function handleDragStart(event: DragEvent, layerType: string) {
       <p class="layer-tip-body">{{ hovered.layer.hint || hovered.layer.desc }}</p>
       <div class="layer-tip-foot">
         <iconify-icon icon="mdi:gesture-tap-hold"></iconify-icon>
-        按住拖到中间画布即可添加
+        单击立即添加；按住拖动可指定放置位置
       </div>
     </div>
   </Teleport>

@@ -104,7 +104,7 @@ let flashTimer: ReturnType<typeof setTimeout> | undefined;
 function onTrainClick() {
   if (canvas.value.validationStatus !== "passing") {
     if (canvas.value.nodes.length === 0) {
-      showToast("warning", "画布还是空的，先从左侧拖入层搭建模型。");
+      showToast("warning", "画布还是空的，先从左侧单击或拖入模型层。");
     } else {
       showToast("error", "请先点击「检查结构」并通过后，才能开始训练。");
     }
