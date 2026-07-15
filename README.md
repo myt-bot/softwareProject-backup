@@ -210,79 +210,177 @@ SQLite 数据就是一个本地文件，部署时需要确保 uvicorn 进程对�
 ```text
 project/
   backend/
-    __init__.py         # 云端后端包声明
-    main.py             # 云端 FastAPI 接口入口
-    cloud_training.py   # 云端训练任务调度与本机 Agent 中转接口
-    schemas.py          # 云端数据结构定义（用户/项目/训练中转）
-    templates.py        # 内置模型模板
-    storage.py          # MySQL 数据库存储层（SQLAlchemy，M1）
-    migrate_json_to_mysql.py  # 一次性迁移脚本：JSON 历史数据导入 MySQL（M1）
-    auth.py             # 用户管理与认证模块（M1）
-    projects.py         # 项目管理模块（M1）
-    security.py         # 密码哈希与 JWT 令牌（M1）
+    __init__.py                  # 云端后端包声明
+    main.py                      # FastAPI 应用入口与路由注册
+    env.py                       # 本地 .env 文件加载
+    auth.py                      # 用户注册、登录与用户管理
+    security.py                  # 密码哈希、JWT 签发与认证依赖
+    projects.py                  # 项目增删改查与模板建项
+    storage.py                   # SQLAlchemy 数据库存储层
+    schemas.py                   # 用户、项目、模型和训练请求结构
+    templates.py                 # 内置模型模板定义
+    cloud_training.py            # 训练任务调度及浏览器/Agent WebSocket 中转
+    assistant.py                 # AI 助手对话、工具调用及浏览器命令桥接
+    teaching.py                  # 层、参数、错误与模型结构教学知识核心
+    teaching_api.py              # 教学辅助 REST API 路由
+    teaching_schemas.py          # 教学接口请求结构
+    migrate_json_to_mysql.py     # JSON 历史数据迁移脚本
+    prompts/
+      system_prompt.md           # AI 助手系统提示词
+    agent_dist/
+      README.md                  # 各平台本机训练应用产物放置说明
   local_agent/
-    __init__.py         # 本机 Agent 包声明
-    main.py             # 用户本机 Agent 入口
-    agent_client.py     # 主动连接云端 WebSocket 的客户端
-    runtime_manager.py  # 动态下载/更新 trainer-runtime 的管理器
+    __init__.py                  # 本机 Agent 包声明
+    launcher.py                  # 零安装启动器与运行环境引导
+    main.py                      # 本机 Agent 服务入口
+    agent_client.py              # 云端 WebSocket 客户端与训练命令执行
+    runtime_manager.py           # 训练运行时下载、校验与更新
+    assets/
+      icon.ico                   # Windows 应用图标
+      icon.png                   # 通用应用图标
     runtime/
-      __init__.py       # 本机训练运行时包声明
-      schemas.py        # 本机训练运行时数据结构
-      device.py         # CPU/GPU 检测与选择
-      model_builder.py  # 根据模型 JSON 构建 PyTorch 模型
-      graph_model.py    # 支持 DAG 前向传播的 PyTorch 图模型
-      graph_utils.py    # 模型图拓扑排序与前驱/后继映射
-      validator.py      # 模型结构校验与维度推导
-      trainer.py        # 本机训练流程
-      code_exporter.py  # 导出 PyTorch 代码
+      __init__.py                # 本机训练运行时包声明
+      schemas.py                 # 模型、校验、训练与导出数据结构
+      device.py                  # CPU/GPU 检测与设备选择
+      graph_utils.py             # 模型图拓扑排序及连接映射
+      graph_model.py             # 支持 DAG 前向传播的 PyTorch 图模型
+      model_builder.py           # 根据模型 JSON 构建 PyTorch 模型
+      validator.py               # 模型结构校验与张量维度推导
+      trainer.py                 # 数据集加载、训练、指标与产物保存
+      code_exporter.py           # PyTorch 源码和 Notebook 导出
   frontend/
-    index.html          # 前端页面入口（Vite）
-    package.json        # 前端依赖与脚本
-    vite.config.ts      # Vite 构建配置
-    tsconfig.json       # TypeScript 配置
+    index.html                   # Vite 页面入口
+    package.json                 # 前端依赖与 npm 脚本
+    package-lock.json            # 前端依赖版本锁定
+    vite.config.ts               # Vite 构建配置
+    tsconfig.json                # TypeScript 配置
     src/
-      main.ts           # 应用入口，挂载 Vue 根组件
-      App.vue           # 根组件，组织页面整体布局
-      store.ts          # 全局响应式状态与纯数据逻辑（含本机 Agent 在线状态）
-      auth.ts           # 登录状态管理（token 持久化与会话恢复，登录后建立 WebSocket）
-      ws.ts             # 与云端的持久化 WebSocket（Agent 状态、训练进度推送、校验/导出请求-响应）
-      canvas.ts         # 画布交互引擎（拖拽/连线/SVG 绘制/缩放）
-      actions.ts        # 业务动作（校验/保存/导出/训练，经 WebSocket 转发到本机 Agent）
-      monitor.ts        # 训练监控页状态机（进度由 WebSocket 推送驱动）
-      types.ts          # 共享类型定义
+      vite-env.d.ts              # Vite 客户端类型声明
+      main.ts                    # Vue 应用入口
+      App.vue                    # 根组件与主页面编排
+      types.ts                   # 前端共享类型
+      store.ts                   # 多画布、模型和训练全局状态
+      auth.ts                    # 登录令牌、会话恢复与退出
+      ws.ts                      # 浏览器与云端的业务 WebSocket
+      canvas.ts                  # 画布拖拽、连线、缩放、布局与历史记录
+      actions.ts                 # 校验、保存、导出及训练业务动作
+      monitor.ts                 # 训练监控状态与指标处理
+      assistant.ts               # AI 助手前端命令分发器
+      markdown.ts                # AI 回复 Markdown 安全渲染
+      zip.ts                     # 浏览器端无依赖 ZIP 打包器
+      assistantHelp.json         # AI 助手命令帮助数据
+      styles.css                 # 全局页面样式
       api/
-        client.ts       # 云端 REST 接口与 WebSocket URL 封装
-      components/       # Vue 组件
-        TopBar.vue          # 顶栏与数据集下拉、本机 Agent 连接状态
-        AgentModal.vue      # 本机训练 Agent 指引弹窗（启动命令、连接状态）
-        DeviceSelector.vue  # 训练设备选择（CPU / GPU）
-        StorageSettings.vue # 存储位置设置（数据集下载 / 结果保存目录）
-        GuideStrip.vue      # 新手引导条
-        LayerSidebar.vue    # 左侧组件库与模板
-        CanvasBoard.vue     # 中间模型画布
-        CanvasTabs.vue      # 多画布标签页（新建/切换/关闭画布）
-        InspectorPanel.vue  # 右侧参数面板
-        ActionBar.vue       # 底部操作栏与训练任务面板
-        ExportModal.vue     # 导出代码弹窗
-        HelpModal.vue       # 新手指南弹窗
-        AuthPage.vue        # 登录 / 注册独立页（登录后才进入主界面）
-        ContextMenus.vue    # 节点/连线右键菜单
-        ToastContainer.vue  # 消息提示
-        TrainingMonitor.vue # 训练监控页
-        TmChart.vue         # 训练指标折线图
-        ParamNumberField.vue # 数字参数输入框
-      styles.css        # 页面样式
+        client.ts                # REST API 与 WebSocket URL 封装
+      components/
+        ActionBar.vue            # 底部操作栏与训练任务面板
+        AgentModal.vue           # 本机训练应用下载和连接指引
+        AssistantPanel.vue       # AI 助手聊天与模型设置面板
+        AuthPage.vue             # 登录与注册页
+        CanvasBoard.vue          # 模型编辑主画布
+        CanvasMinimap.vue        # 画布缩略图导航
+        CanvasTabs.vue           # 多画布标签管理
+        ConfirmDialog.vue        # 通用确认对话框
+        ContainerCoach.vue       # 容器节点教学引导
+        ContextMenus.vue         # 节点与连线右键菜单
+        DatasetSelector.vue      # 训练数据集选择器
+        DeviceSelector.vue       # CPU/GPU 设备选择器
+        DirectoryPicker.vue      # 本机目录选择控件
+        ExportModal.vue          # 代码导出弹窗
+        GuideStrip.vue           # 新手操作引导条
+        HelpModal.vue            # 使用帮助弹窗
+        HomeChrome.vue           # 首页公共外框
+        HomePage.vue             # 产品首页
+        InfoTip.vue              # 通用信息提示
+        InspectorPanel.vue       # 节点参数检查面板
+        LayerSidebar.vue         # 层组件库侧栏
+        MergeCoach.vue           # 分支合并教学引导
+        MyProjectsModal.vue      # 我的项目弹窗
+        ParamNumberField.vue     # 数字参数输入控件
+        PetMascot.vue            # 教学助手形象组件
+        ProjectsPage.vue         # 项目列表页
+        SaveProjectModal.vue     # 保存项目弹窗
+        SelectField.vue          # 通用下拉选择控件
+        StorageSettings.vue      # 数据与训练产物目录设置
+        TeachingPanel.vue        # 层和参数教学面板
+        TemplateGallery.vue      # 模板卡片画廊
+        TemplatesPage.vue        # 模型模板页
+        TmChart.vue              # 训练指标折线图
+        ToastContainer.vue       # 全局消息提示容器
+        TopBar.vue               # 工作区顶栏和连接状态
+        TrainingMonitor.vue      # 训练监控页
+        TrainSettingsModal.vue   # 训练超参数弹窗
+        WorkspaceCoach.vue       # 工作区新手引导
   tests/
     M1_user_project/
-      test_code/        # M1 用户与项目管理模块测试代码
-      test_design/      # M1 模块测试设计文档
-    M2_model_editor/    # M2 模型编辑器模块测试
-    M3_validator_shape/ # M3 结构校验与维度推导模块测试
-    M7_templates_docs/  # M7 内置模板模块测试
-  requirements.txt      # Python 依赖
-  docker-compose.yml    # 一键部署编排：MySQL + 云端后端 API
-  .env.example          # 部署环境变量模板（复制为 .env 使用）
-  README.md             # 项目开发文档
+      test_code/
+        __init__.py              # M1 测试包声明
+        run_all.py               # M1 测试集合运行脚本
+        test_auth.py             # 用户认证测试
+        test_api.py              # 用户与项目 API 测试
+        test_projects.py         # 项目业务逻辑测试
+        test_storage.py          # 数据库存储层测试
+      test_design/               # M1 测试设计文档
+    M2_model_editor/
+      test_code/
+        test_model_editor.js     # 模型编辑器前端逻辑测试
+      test_design/               # M2 测试设计文档
+    M3_validator_shape/
+      test_code/
+        test_schemas.py          # 模型结构数据类型测试
+        test_validate_api.py     # 云端校验 API 测试
+        test_validator_shape.py  # 结构校验与维度推导测试
+      test_design/               # M3 测试设计文档
+    M4_training_metrics/
+      test_code/
+        test_training_metrics.py       # 训练指标流程测试
+        test_agent_training_extra.py   # Agent 训练扩展场景测试
+      test_design/               # M4 测试设计文档
+    M5_teaching/
+      __init__.py                # M5 测试包声明
+      test_code/
+        __init__.py              # 教学核心测试包声明
+        test_teaching.py         # 教学知识核心测试
+      test_api/
+        __init__.py              # 教学 API 测试包声明
+        test_teaching_api.py     # 教学 API 测试
+      test_design/               # M5 测试设计文档
+    M6_code_export/
+      test_code/
+        test_code_exporter.py    # Python/Notebook 代码导出测试
+        test_result/
+          M6AddBranchModel.py       # 分支相加模型导出样例
+          M6CifarAdapterModel.py    # CIFAR 输入适配模型导出样例
+          M6CnnModel.py             # CNN 模型导出样例
+          M6LstmModel.py            # LSTM 模型导出样例
+          M6MlpModel.py             # MLP 模型导出样例
+          M6CifarMlpNotebook.ipynb  # CIFAR MLP Notebook 导出样例
+          M6NotebookModel.ipynb     # 通用 Notebook 导出样例
+      test_design/               # M6 测试设计文档
+    M7_templates_docs/
+      test_code/
+        test_templates_unit.py         # 模板单元测试
+        test_templates_integration.py  # 模板接口集成测试
+      test_design/               # M7 测试设计文档
+    M8_integration_deploy/
+      test_code/
+        run_regression.py              # 全量回归测试入口
+        test_deployment_config.py      # 部署配置测试
+        test_e2e_flow.py               # 端到端业务流测试
+      test_design/               # M8 测试设计文档
+    M9_assistant/
+      test_code/
+        __init__.py              # AI 助手测试包声明
+        test_assistant.py        # AI 助手协议和工具调用测试
+  tools/
+    assemble_bundle.py           # 本机训练应用分发包组装与校验工具
+  requirements.txt               # Python 依赖
+  .env.example                   # 部署环境变量示例
+  .dockerignore                  # 容器构建忽略规则
+  .gitignore                     # Git 忽略规则
+  TEST_ASSIGNMENT.md             # 测试模块分工说明
+  部署.md                        # 生产部署说明
+  README.md                      # 项目开发文档
 ```
 
 ## 核心数据格式

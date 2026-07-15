@@ -2,6 +2,7 @@
 // 命令名与后端 command_specs() 一一对应；执行结果回传后端喂回大模型。
 
 import { watch } from "vue";
+import type { WorkCanvas } from "./store";
 
 import {
   activeCanvas,
@@ -50,12 +51,19 @@ const LOSSES = ["cross_entropy", "nll", "mse", "l1", "smooth_l1"];
 // 权威数据源是 canvas.trainingJob——它由 WebSocket 无条件写回（见 ws.routeTrainingMessage），
 // 与用户在底部任务面板看到的完全一致；monitor 只在监控页可见时才更新、可能滞后，仅用于富化
 // （模型概览、参数量、设备、产物路径等 job 里没有的字段）。
-function summarizeTraining() {
+function summarizeTraining(canvas: WorkCanvas = activeCanvas()) {
   const m = monitor;
   const s = m.series;
-  const monN = Math.max(s.loss.length, s.valLoss.length, s.trainAcc.length, s.valAcc.length);
-  const job = activeCanvas().trainingJob;
-  const started = job != null || m.live || m.result != null || monN > 0;
+  const job = canvas.trainingJob;
+  // monitor 是全局监控面板状态；多画布切换后它可能已指向另一个任务，只有 job_id
+  // 一致时才能用来富化当前画布的结果。无任务时保留活动画布的历史监控兼容行为。
+  const monitorMatchesCanvas = job?.job_id
+    ? m.jobId === job.job_id
+    : canvas === activeCanvas();
+  const monN = monitorMatchesCanvas
+    ? Math.max(s.loss.length, s.valLoss.length, s.trainAcc.length, s.valAcc.length)
+    : 0;
+  const started = job != null || (monitorMatchesCanvas && (m.live || m.result != null || monN > 0));
   if (!started) {
     return {
       started: false,
@@ -81,27 +89,30 @@ function summarizeTraining() {
         val_acc: s.valAcc[i] ?? null,
       }));
 
-  const running = job ? isTrainingJobActive(job) : (m.state === "running" || m.state === "cancelling");
-  const status = job?.status || m.result?.status || m.state;
-  const totalEpochs = job?.total_epochs || s.totalEpochs || m.hyperparams.epochs;
+  const running = job
+    ? isTrainingJobActive(job)
+    : monitorMatchesCanvas && (m.state === "running" || m.state === "cancelling");
+  const status = job?.status || (monitorMatchesCanvas ? (m.result?.status || m.state) : "idle");
+  const totalEpochs = job?.total_epochs
+    || (monitorMatchesCanvas ? (s.totalEpochs || m.hyperparams.epochs) : canvas.epochs);
   const currentEpoch = job?.current_epoch ?? metricsPerEpoch.length;
-  const progressRaw = job?.progress ?? (m.result ? 1 : m.progress);
+  const progressRaw = job?.progress ?? (monitorMatchesCanvas ? (m.result ? 1 : m.progress) : 0);
   const progress = Math.round((typeof progressRaw === "number" ? progressRaw : 0) * 100) / 100;
 
   // 准确率一律从权威逐轮指标推导，避免与监控页/任务面板不一致
   const last = metricsPerEpoch[metricsPerEpoch.length - 1];
-  const finalTrainAcc = last?.train_acc ?? m.result?.accuracy ?? null;
+  const finalTrainAcc = last?.train_acc ?? (monitorMatchesCanvas ? m.result?.accuracy : null) ?? null;
   const finalValAcc = last?.val_acc ?? null;
   const bestValAcc = metricsPerEpoch.reduce<number | null>(
     (best, e) => (e.val_acc != null && (best == null || e.val_acc > best) ? e.val_acc : best),
     null,
   );
-  const finalLoss = last?.loss ?? m.result?.loss ?? null;
+  const finalLoss = last?.loss ?? (monitorMatchesCanvas ? m.result?.loss : null) ?? null;
   // 训练进行中且卡在数据集下载阶段时，附带下载进度，方便 AI 如实告知用户仍在准备数据
-  const datasetProgress = m.datasetProgress || job?.dataset_progress || null;
+  const datasetProgress = job?.dataset_progress || (monitorMatchesCanvas ? m.datasetProgress : null) || null;
   return {
     started: true,
-    live: m.live,
+    live: monitorMatchesCanvas && m.live,
     status,
     running,
     progress,
@@ -112,25 +123,29 @@ function summarizeTraining() {
     final_val_accuracy: finalValAcc,     // 最后一轮验证集准确率
     best_val_accuracy: bestValAcc,       // 各轮中最好的验证集准确率
     final_loss: finalLoss,
-    device: m.result?.device ?? m.hyperparams.device,
-    dataset: store.dataset,
+    device: job?.trainConfig?.device
+      ?? (monitorMatchesCanvas ? (m.result?.device ?? m.hyperparams.device) : null),
+    dataset: job?.trainConfig?.dataset_name ?? store.dataset,
     dataset_progress: datasetProgress,
-    hyperparams: m.hyperparams,
-    model_summary: m.modelSummary,
-    param_count: m.paramCount,
+    hyperparams: job?.trainConfig ?? (monitorMatchesCanvas ? m.hyperparams : null),
+    model_summary: job?.modelSummary ?? (monitorMatchesCanvas ? m.modelSummary : null),
+    param_count: job?.modelSummary?.paramCount ?? (monitorMatchesCanvas ? m.paramCount : null),
     metrics_per_epoch: metricsPerEpoch,
-    error: job?.error || m.error || m.result?.error || null,
-    artifacts: m.result?.artifacts || null,
+    error: job?.error || (monitorMatchesCanvas ? (m.error || m.result?.error) : null) || null,
+    artifacts: monitorMatchesCanvas ? (m.result?.artifacts || null) : null,
   };
 }
 
 // 事件驱动地等待训练真正结束（完成 / 失败 / 取消），期间（含数据集下载阶段）持续等待，
 // 不轮询、不提前返回。训练任务状态由 WebSocket 推送写回 canvas.trainingJob，watch 仅在
 // 其状态变化时被唤醒，因此等待不消耗大模型工具轮次，也不忙等。
-function waitForTraining(timeoutSeconds: number): Promise<ReturnType<typeof summarizeTraining> & { timed_out?: boolean }> {
+function waitForTraining(
+  timeoutSeconds: number,
+  canvas: WorkCanvas,
+): Promise<ReturnType<typeof summarizeTraining> & { timed_out?: boolean }> {
   // 没有进行中的训练任务（无任务或已是终态）→ 立即返回现状，避免空等
-  if (!isTrainingJobActive(activeCanvas().trainingJob)) {
-    return Promise.resolve(summarizeTraining());
+  if (!isTrainingJobActive(canvas.trainingJob)) {
+    return Promise.resolve(summarizeTraining(canvas));
   }
 
   return new Promise(resolve => {
@@ -143,15 +158,15 @@ function waitForTraining(timeoutSeconds: number): Promise<ReturnType<typeof summ
       settled = true;
       stopWatching?.();
       if (timer) clearTimeout(timer);
-      const result = summarizeTraining();
+      const result = summarizeTraining(canvas);
       resolve(timedOut ? { ...result, timed_out: true } : result);
     };
 
     // 只在训练任务进入终态时收尾；下载 / 逐轮训练期间状态仍是活跃，会一直等下去。
     stopWatching = watch(
-      () => activeCanvas().trainingJob?.status,
+      () => canvas.trainingJob?.status,
       () => {
-        if (!isTrainingJobActive(activeCanvas().trainingJob)) finish(false);
+        if (!isTrainingJobActive(canvas.trainingJob)) finish(false);
       },
       { flush: "sync" },
     );
@@ -410,7 +425,9 @@ export async function executeAssistantCommand(
         if (!Number.isFinite(timeout) || timeout < 1 || timeout > 7200) {
           return { ok: false, error: "timeout_seconds 必须是 1~7200 之间的整数" };
         }
-        return { ok: true, result: await waitForTraining(timeout) };
+        // 调用开始时固定目标画布；等待期间切换标签不会把监听目标带到新活动画布。
+        const canvas = activeCanvas();
+        return { ok: true, result: await waitForTraining(timeout, canvas) };
       }
 
       case "set_train_config": {
