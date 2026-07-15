@@ -6586,3 +6586,164 @@ body.is-connecting .node-port {
 .merge-arrow:hover:not(:disabled) { border-color: var(--indigo); color: var(--indigo); background: var(--panel-2); }
 .merge-arrow:disabled { opacity: 0.4; cursor: not-allowed; }
 .merge-order-hint { font-size: 11px; color: var(--muted); }
+
+/* 结构检查结果：常驻在画布左下角，逐项提供“定位 + 修复参数”入口 */
+.validation-summary {
+  position: absolute;
+  left: 20px;
+  bottom: 20px;
+  z-index: 38;
+  width: min(390px, calc(100% - 40px));
+  max-height: min(460px, calc(100% - 100px));
+  overflow: hidden;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 96%, #fff 4%);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
+  animation: validation-summary-in 180ms ease-out;
+}
+
+.validation-summary.collapsed { width: 260px; }
+
+.validation-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 11px;
+  background: rgba(254, 242, 242, 0.88);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.14);
+}
+
+.validation-summary.collapsed .validation-summary-head { border-bottom: 0; }
+
+.validation-summary-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  background: #fee2e2;
+  color: #dc2626;
+  font-size: 18px;
+}
+
+.validation-summary-head > div {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.validation-summary-head strong { font-size: 13px; color: #991b1b; }
+.validation-summary-head small { font-size: 11px; color: #9f5252; }
+
+.validation-summary-head > button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #b91c1c;
+  cursor: pointer;
+}
+
+.validation-summary-head > button:hover { background: #fee2e2; }
+
+.validation-issue-list {
+  max-height: 360px;
+  margin: 0;
+  padding: 6px;
+  overflow: auto;
+  list-style: none;
+}
+
+.validation-issue-list li + li { border-top: 1px solid var(--border); }
+
+.validation-issue-list button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.validation-issue-list button:hover { background: var(--panel-2); }
+.validation-issue-list button.locatable:hover { background: #eff6ff; }
+
+.validation-issue-index {
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.validation-issue-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.validation-issue-copy strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.validation-issue-copy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.validation-issue-copy .validation-issue-suggestion {
+  display: -webkit-box;
+  color: #2563eb;
+  line-height: 1.45;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.validation-issue-list button > iconify-icon {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 17px;
+}
+
+.validation-issue-list button.locatable > iconify-icon { color: #2563eb; }
+
+.param-focus-flash {
+  border-radius: 10px;
+  animation: param-focus-pulse 1.7s ease-out;
+}
+
+@keyframes validation-summary-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes param-focus-pulse {
+  0%, 55% { background: rgba(254, 226, 226, 0.92); box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.14); }
+  100% { background: transparent; box-shadow: 0 0 0 0 transparent; }
+}

@@ -1438,7 +1438,7 @@ export function pasteCopiedNode(): boolean {
   node.y = copiedNode.y + 36 * pasteOffsetStep;
   activeCanvas().nodes.push(node);
   void redrawAfterDomUpdate();
-  selectNode(node.id);
+  selectNode(node.id, { openInspector: false });
   resetValidationAfterGraphChange();
   showToast("success", `已粘贴 ${node.title}。`);
   return true;
@@ -1600,7 +1600,7 @@ export function handleCanvasDrop(event: DragEvent) {
     const node = createEmptyContainerNode(activeCanvas(), point.x - 112, point.y - 70);
     activeCanvas().nodes.push(node);
     void redrawAfterDomUpdate();
-    selectNode(node.id);
+    selectNode(node.id, { openInspector: false });
     resetValidationAfterGraphChange();
     startContainerCoach(node.id);
     return;
@@ -1614,7 +1614,7 @@ export function handleCanvasDrop(event: DragEvent) {
     const node = instantiateContainerDef(activeCanvas(), def, point.x - 112, point.y - 70);
     activeCanvas().nodes.push(node);
     void redrawAfterDomUpdate();
-    selectNode(node.id);
+    selectNode(node.id, { openInspector: false });
     resetValidationAfterGraphChange();
     showToast("success", `已添加容器 ${def.name}。`);
     startContainerCoach(node.id);
@@ -1683,6 +1683,7 @@ export function enterContainer(containerId: string) {
   canvas.validationStatus = "unvalidated";
   canvas.nodeBadge = "none";
   canvas.nodeErrors = {};
+  canvas.validationIssues = [];
   canvas.lastValidationResult = null;
   canvas.validationRequestError = null;
   canvas.hasCenteredInitialGraph = true;
@@ -1713,6 +1714,7 @@ export function exitContainer() {
   canvas.validationStatus = "unvalidated";
   canvas.nodeBadge = "none";
   canvas.nodeErrors = {};
+  canvas.validationIssues = [];
   canvas.lastValidationResult = null;
   canvas.validationRequestError = null;
   canvas.inFeatures = frame.inFeatures;
@@ -1816,7 +1818,7 @@ export function addNodeFromLayer(layerType: string, x: number, y: number): Graph
   const node = createNodeConfig(layerType, x, y);
   activeCanvas().nodes.push(node);
   void redrawAfterDomUpdate();
-  selectNode(node.id);
+  selectNode(node.id, { openInspector: false });
   resetValidationAfterGraphChange();
   showToast("success", `已添加 ${node.badge} 节点。`);
   return node;
@@ -1867,7 +1869,7 @@ export function addEmptyContainerByClick(): GraphNode {
   const node = createEmptyContainerNode(activeCanvas(), point.x, point.y);
   activeCanvas().nodes.push(node);
   void redrawAfterDomUpdate();
-  selectNode(node.id);
+  selectNode(node.id, { openInspector: false });
   resetValidationAfterGraphChange();
   showToast("success", "已添加空白容器。");
   startContainerCoach(node.id);
@@ -1883,7 +1885,7 @@ export function addSavedContainerByClick(defId: string): GraphNode | null {
   const node = instantiateContainerDef(activeCanvas(), def, point.x, point.y);
   activeCanvas().nodes.push(node);
   void redrawAfterDomUpdate();
-  selectNode(node.id);
+  selectNode(node.id, { openInspector: false });
   resetValidationAfterGraphChange();
   showToast("success", `已添加容器 ${def.name}。`);
   startContainerCoach(node.id);
@@ -1978,18 +1980,45 @@ export function clearActiveCanvas(): boolean {
 // 选中状态
 // —————————————————————————————————————————————
 
-export function selectNode(nodeId: string) {
+export function selectNode(nodeId: string, options: { openInspector?: boolean } = {}) {
   const canvas = activeCanvas();
   canvas.selectedNodeId = nodeId;
   canvas.selectedConnectionKey = null;
-  // 点击节点卡片时重新展开参数面板
-  ui.inspectorCollapsed = false;
+  ui.inspectorFocusParam = null;
+  // 新增/粘贴节点时仅保留选中反馈，避免面板遮住刚落下的节点；
+  // 用户明确点击节点或检查问题时再展开。
+  ui.inspectorCollapsed = options.openInspector === false;
 }
 
 
 export function deselectNode() {
   activeCanvas().selectedNodeId = null;
   activeCanvas().selectedConnectionKey = null;
+}
+
+
+// 结构检查的问题定位：选中节点、将它移到未被参数面板遮挡的可视区中心，
+// 同时展开面板并请求滚动到相关参数字段。
+export function focusNodeInCanvas(nodeId: string, parameter: string | null = null): boolean {
+  const canvas = activeCanvas();
+  const node = canvas.nodes.find(item => item.id === nodeId);
+  if (!node) return false;
+
+  selectNode(nodeId);
+  ui.inspectorFocusParam = parameter;
+
+  if (canvasEl) {
+    const inspectorReserve = 360;
+    const visibleWidth = Math.max(320, canvasEl.clientWidth - inspectorReserve);
+    const nodeCenterX = node.x + 112;
+    const nodeCenterY = node.y + 75;
+    canvas.panX = visibleWidth / 2 - nodeCenterX * canvas.zoom;
+    canvas.panY = canvasEl.clientHeight / 2 - nodeCenterY * canvas.zoom;
+    applyTransform();
+    pokeMinimap();
+    void redrawAfterDomUpdate();
+  }
+  return true;
 }
 
 

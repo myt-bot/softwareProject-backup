@@ -131,6 +131,15 @@ export type ValidationStatus = "unvalidated" | "passing" | "failed";
 export type NodeBadgeState = "none" | "passed" | "pending";
 export type ExportCodeFormat = "py" | "ipynb";
 
+export interface ValidationIssue {
+  id: string;
+  title: string;
+  detail: string;
+  suggestion: string;
+  nodeId: string | null;
+  parameter: string | null;
+}
+
 // 进入容器子画板编辑时压栈的"父层"快照：退出时用它还原画布，并把编辑好的
 // 子图写回对应容器节点。
 export interface EditFrame {
@@ -173,6 +182,8 @@ export interface WorkCanvas {
   nodeBadge: NodeBadgeState;
   // 校验失败时每个出错节点的人话提示（nodeId → 说明），用于在画布上标红定位
   nodeErrors: Record<string, string>;
+  // 可操作的问题汇总：点击后定位节点，并把参数面板滚动到相关字段
+  validationIssues: ValidationIssue[];
   inFeatures: number;
   lastValidationResult: ValidationResult | null;
   validating: boolean;
@@ -214,6 +225,7 @@ export function createCanvas(
     validationStatus: "unvalidated",
     nodeBadge: "none",
     nodeErrors: {},
+    validationIssues: [],
     inFeatures: 1024,
     lastValidationResult: null,
     validating: false,
@@ -440,6 +452,8 @@ export const ui = reactive({
   sidebarCollapsed: false,
   // 右侧参数面板被用户手动收起（点击节点卡片时自动重新展开）
   inspectorCollapsed: false,
+  // 由结构检查定位时，要在参数面板中滚动并高亮的字段
+  inspectorFocusParam: null as string | null,
 });
 
 
@@ -815,6 +829,7 @@ export function resetValidationAfterGraphChange(canvas: WorkCanvas = activeCanva
   canvas.validationStatus = "unvalidated";
   canvas.nodeBadge = "none";
   canvas.nodeErrors = {};
+  canvas.validationIssues = [];
   canvas.lastValidationResult = null;
   canvas.validationRequestError = null;
 }

@@ -33,8 +33,8 @@ import {
   ui,
   updateShapeHints,
 } from "./store";
-import type { WorkCanvas } from "./store";
-import type { ProjectMeta, TrainConfig, TrainStartResponse, ValidationResult } from "./types";
+import type { ValidationIssue, WorkCanvas } from "./store";
+import type { GraphNode, LayerShapeInfo, ProjectMeta, TrainConfig, TrainStartResponse, ValidationResult } from "./types";
 import { requestAgent } from "./ws";
 import { createZip } from "./zip";
 
@@ -177,6 +177,7 @@ export async function handleValidateModel(): Promise<ValidationResult | null> {
     canvas.validationRequestError = message;
     canvas.nodeBadge = "none";
     canvas.nodeErrors = {};
+    canvas.validationIssues = [];
     return null;
   } finally {
     canvas.validating = false;
@@ -190,6 +191,7 @@ function applyValidationResult(canvas: WorkCanvas, result: ValidationResult) {
   canvas.validationRequestError = null;
   canvas.lastValidationResult = result;
   canvas.nodeErrors = {};
+  canvas.validationIssues = [];
   const valid = result?.valid === true || result?.status === "ok";
   if (valid) {
     canvas.validationStatus = "passing";
@@ -201,56 +203,183 @@ function applyValidationResult(canvas: WorkCanvas, result: ValidationResult) {
 
   canvas.validationStatus = "failed";
   canvas.nodeBadge = "pending";
+  canvas.validationIssues = buildValidationIssues(canvas, result);
+  // 校验失败只使用画布内的问题列表反馈，不再同时弹 Toast 或显示旧版节点错误文案。
+}
 
-  // 把每个出错节点标红并给人话提示（用节点标题而非内部 id），实现"定位"
-  const nodeErrors: Record<string, string> = {};
-  const shapes = result?.shapes || {};
-  for (const [layerId, info] of Object.entries(shapes)) {
-    if (info?.status && info.status !== "ok") {
-      // 容器内部层的错误（层级 id 形如 容器id__内部层id）归到容器节点上标红
-      const containerId = layerId.split(CONTAINER_ID_SEP)[0]!;
-      const node = canvas.nodes.find(n => n.id === layerId) || canvas.nodes.find(n => n.id === containerId);
-      const targetId = node ? node.id : layerId;
-      nodeErrors[targetId] = friendlyShapeError(node?.title || layerId, info);
+
+function errorLayerId(error: string): string | null {
+  const patterns = [
+    /^层\s+([^\s:：,，]+)\s*[:：]/,
+    /^(?:Input|Output)\s*节点[^:：]*[:：]\s*([^\s,，]+)\s*$/,
+    /^(?:存在孤立节点或连接异常|连接起点不存在|连接终点不存在)\s*[:：]\s*([^\s,，]+)\s*$/,
+    /^节点\s+([^\s]+)\s+不能连接到自身/,
+  ];
+  for (const pattern of patterns) {
+    const matched = error.match(pattern);
+    if (matched?.[1]) return matched[1];
+  }
+  return null;
+}
+
+
+function issueParameter(error: string, layerType?: string): string | null {
+  if (/in_features|输入维度|输入特征/i.test(error)) return "in_features";
+  if (/out_features|输出神经元/i.test(error)) return "out_features";
+  if (/out_channels|输出通道/i.test(error)) return "out_channels";
+  if (/kernel_size|卷积核|池化核/i.test(error)) return "kernel_size";
+  if (/stride|步长/i.test(error)) return "stride";
+  if (/padding|填充/i.test(error)) return "padding";
+  if (/input shape|输入形状|shape/i.test(error) && layerType === "Input") return "shape";
+  if (/merge|合并模式/i.test(error)) return "merge";
+  // Conv2D / Pooling 无法推导输出尺寸时，最常见且最值得先检查的是窗口大小。
+  if (/输出尺寸|无法推导输出维度/.test(error) && (layerType === "Conv2D" || layerType === "Pooling")) {
+    return "kernel_size";
+  }
+  return null;
+}
+
+
+function issueTitle(error: string, nodeTitle?: string, layerType?: string): string {
+  const prefix = nodeTitle || layerType || "模型";
+  if (/Linear.*(?:输入维度|in_features).*不匹配/i.test(error)) return `${prefix} 输入维度不匹配`;
+  if ((layerType === "Conv2D" || /Conv2D/i.test(error)) && /输出尺寸|无法推导输出维度|shape|维度/i.test(error)) {
+    return `${prefix} 卷积核或输入尺寸不匹配`;
+  }
+  if (layerType === "Pooling" && /输出尺寸|无法推导输出维度|shape|维度/i.test(error)) {
+    return `${prefix} 池化窗口大于输入尺寸`;
+  }
+  if (/没有输入连接|没有输出连接|孤立|无法到达|不在任何 Input|不能有输入连接|不能有输出连接/.test(error)) {
+    return `${prefix} 未正确连接`;
+  }
+  if (/缺少必要节点/.test(error)) {
+    const type = error.includes("Input") ? "Input" : error.includes("Output") ? "Output" : "必要";
+    return `缺少 ${type} 节点`;
+  }
+  if (/合并模块的模式/.test(error)) return `${prefix} 尚未选择合并模式`;
+  const withoutId = error.replace(/^层\s+[^:：]+\s*[:：]\s*/, "");
+  return nodeTitle ? `${nodeTitle}：${withoutId}` : withoutId;
+}
+
+
+function issueSuggestion(error: string, node?: GraphNode, shapeInfo?: LayerShapeInfo): string {
+  const inputShape = shapeInfo?.input_shape;
+  const height = inputShape && inputShape.length >= 3 ? inputShape[inputShape.length - 2] : undefined;
+  const width = inputShape && inputShape.length >= 3 ? inputShape[inputShape.length - 1] : undefined;
+  const minSide = typeof height === "number" && typeof width === "number"
+    ? Math.min(height, width)
+    : undefined;
+
+  if (node?.type === "Conv2D" && /输出尺寸|无法推导输出维度|shape|维度/i.test(error)) {
+    const current = node.params.kernel_size;
+    const recommended = minSide == null ? 3 : minSide >= 3 ? 3 : 1;
+    const sizeNote = minSide == null ? "" : `（当前输入为 ${height}×${width}）`;
+    return `建议将 Kernel Size 从 ${String(current ?? "当前值")} 改为 ${recommended}${sizeNote}`;
+  }
+  if (node?.type === "Pooling" && /输出尺寸|无法推导输出维度|shape|维度/i.test(error)) {
+    const recommended = minSide == null ? 2 : minSide >= 2 ? 2 : 1;
+    return `建议将 Kernel Size 改为 ${recommended}${minSide == null ? "" : `（不能大于 ${minSide}）`}`;
+  }
+  if (/Linear.*(?:输入维度|in_features).*不匹配/i.test(error)) {
+    const actual = shapeInfo?.actual_in_features;
+    return actual == null
+      ? "建议检查前一层输出尺寸，再调整 Linear 的输入维度"
+      : `建议将 in_features 调整为 ${actual}，或修改前一层输出`;
+  }
+  if (/out_channels|输出通道/i.test(error)) return "建议将 Out Channels 设为正整数，例如 16";
+  if (/out_features|输出神经元/i.test(error)) return "建议将 Out Features 设为正整数；分类末层通常等于类别数";
+  if (/stride|步长/i.test(error)) return "建议将 Stride 设为正整数，通常使用 1";
+  if (/padding|填充/i.test(error)) return "建议将 Padding 设为非负整数，通常使用 0 或 1";
+  if (/Dropout|\bp\b.*0.*1/i.test(error)) return "建议将 Dropout Rate 设在 0 到 1 之间，例如 0.5";
+  if (/shape|输入形状/i.test(error) && node?.type === "Input") return "建议使用“通道,高度,宽度”格式，例如 1,28,28";
+  if (/合并模块的模式/.test(error)) return "建议在参数面板选择 add、concat 或 matmul";
+  if (/缺少必要节点/.test(error)) {
+    return error.includes("Input") ? "建议从组件库添加一个 Input 节点" : "建议从组件库添加一个 Output 节点";
+  }
+  return "建议打开对应参数，按字段提示修改后重新检查";
+}
+
+
+function isConnectivityError(error: string): boolean {
+  return /没有输入连接|没有输出连接|孤立|无法到达|不在任何 Input|不能有输入连接|不能有输出连接|多个层节点时必须提供 connections|连接起点不存在|连接终点不存在|不能连接到自身|重复连接|连接中存在环/.test(error);
+}
+
+
+function buildValidationIssues(canvas: WorkCanvas, result: ValidationResult): ValidationIssue[] {
+  const errors = result.errors?.length
+    ? result.errors
+    : [result.message || "结构校验未通过"];
+  const shapes = result.shapes || {};
+
+  const rawIssues = errors.map((error, index) => {
+    let layerId = errorLayerId(error);
+    if (!layerId) {
+      layerId = Object.entries(shapes).find(([, info]) => info?.error === error)?.[0] || null;
     }
-  }
-  canvas.nodeErrors = nodeErrors;
 
-  const errorNodeIds = Object.keys(nodeErrors);
-  if (errorNodeIds.length > 0) {
-    // 选中并聚焦第一个出错节点，方便用户直接看到
-    const firstMsg = nodeErrors[errorNodeIds[0]!]!;
-    showToast("error", `${canvas.name} 结构有问题：${firstMsg}（出错的层已在画布上标红）`);
-    return;
+    const topLevelId = layerId?.split(CONTAINER_ID_SEP)[0] || null;
+    const node = canvas.nodes.find(item => item.id === layerId)
+      || canvas.nodes.find(item => item.id === topLevelId)
+      || null;
+    const shapeInfo = layerId ? shapes[layerId] : undefined;
+    const layerType = shapeInfo?.layer_type || node?.type;
+
+    return {
+      id: `${index}-${layerId || "graph"}`,
+      title: issueTitle(error, node?.title, layerType),
+      detail: error,
+      suggestion: issueSuggestion(error, node || undefined, shapeInfo),
+      nodeId: node?.id || null,
+      parameter: issueParameter(error, layerType),
+    };
+  });
+
+  const compactIssues: ValidationIssue[] = [];
+  const seen = new Set<string>();
+  const connectionErrors = rawIssues.filter((_, index) => isConnectivityError(errors[index]!));
+
+  // 一处断链常会派生“无输入、无输出、孤立、不可达”等多条后端错误；
+  // 对用户而言它们是同一个修复任务，因此合并成一条完整通路提示。
+  if (connectionErrors.length) {
+    const hasCycle = errors.some(error => /连接中存在环|不能连接到自身/.test(error));
+    const targetNode = connectionErrors
+      .map(issue => canvas.nodes.find(node => node.id === issue.nodeId))
+      .find(node => node?.type === "Output")
+      || connectionErrors
+        .map(issue => canvas.nodes.find(node => node.id === issue.nodeId))
+        .find(Boolean);
+    compactIssues.push({
+      id: "connectivity",
+      title: hasCycle ? "模型连接存在环路" : "Input 到 Output 未形成完整通路",
+      detail: hasCycle
+        ? "请移除回到前面节点的连线，保证数据只向 Output 方向流动。"
+        : "请检查节点之间的连线，确保数据能从 Input 依次流到 Output。",
+      suggestion: hasCycle
+        ? "建议删除形成回路的连线，再按从上游到下游的方向重新连接"
+        : "建议补齐断开的连线，形成 Input → 中间层 → Output 的完整路径",
+      nodeId: targetNode?.id || null,
+      parameter: null,
+    });
   }
 
-  // 没有具体到某一层的错误（如缺少 Input/Output、节点未连通）：给整体的人话提示
-  showToast("error", `${canvas.name}：${friendlyGraphError(result)}`);
-}
+  rawIssues.forEach((issue, index) => {
+    if (isConnectivityError(errors[index]!)) return;
+    // 上游参数已导致维度推导失败时，Output/ReLU 等下游节点的“无法推导”只是结果，
+    // 不再单独列为新问题，避免用户误以为还要修改下游节点。
+    const isCascadingShapeError = !issue.parameter
+      && /无法推导输出维度|无法推导.*shape/i.test(errors[index]!)
+      && rawIssues.some(other => other.nodeId !== issue.nodeId && Boolean(other.parameter));
+    if (isCascadingShapeError) return;
+    // 同一节点、同一参数的多条底层报错只保留第一条；没有参数时按标题去重。
+    const key = issue.nodeId
+      ? `${issue.nodeId}:${issue.parameter || issue.title}`
+      : `graph:${issue.title}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    compactIssues.push({ ...issue, id: `issue-${compactIssues.length}` });
+  });
 
-
-// 把维度类错误翻译成初学者能懂的话（引用节点标题，给可操作建议）
-function friendlyShapeError(nodeTitle: string, info: { layer_type?: string; actual_in_features?: number; expected_in_features?: number }): string {
-  if (info.layer_type === "Linear" && info.actual_in_features != null) {
-    return `「${nodeTitle}」全连接层输入维度对不上：上一层实际输出 ${info.actual_in_features} 个特征，但这里设定的输入是 ${info.expected_in_features}。把该层的“输入特征数”改成 ${info.actual_in_features}，或调整它前面的层。`;
-  }
-  return `「${nodeTitle}」这一层的输出尺寸算不出来，请检查它的参数，或它前面的连接是否接对了。`;
-}
-
-
-// 把整体结构错误（缺节点/未连通等）翻译成人话
-function friendlyGraphError(result: ValidationResult): string {
-  const first = (result?.errors && result.errors[0]) || result?.message || "结构校验没通过";
-  if (first.includes("缺少必要节点") && first.includes("Input")) {
-    return "模型缺少输入节点：请先从左侧拖一个「Input」层进来。";
-  }
-  if (first.includes("缺少必要节点") && first.includes("Output")) {
-    return "模型缺少输出节点：请加一个「Output」层作为结尾。";
-  }
-  if (first.includes("未连通") || first.includes("连接") || first.includes("孤立") || first.includes("环")) {
-    return "各层还没连成一条通路：请检查是否有节点没连线，从 Input 一路连到 Output。";
-  }
-  return first;
+  return compactIssues;
 }
 
 
