@@ -10,9 +10,13 @@
     python -m pytest tests/M8_integration_deploy/test_code/test_deployment_config.py -q
 """
 
+import hashlib
+import io
+import json
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -138,6 +142,72 @@ class ReadmeConsistencyTests(unittest.TestCase):
         self.assertIn("uvicorn", readme, "README 未记录 uvicorn 启动命令")
         self.assertIn("backend.main:app", readme, "README 未记录后端应用入口")
         self.assertRegex(readme, r"[Nn]ginx", "README 未记录 Nginx 部署")
+
+
+class AgentDistributionTests(unittest.TestCase):
+    """本机 Agent 长期令牌、运行时更新与公共发布包凭证安全。"""
+
+    @classmethod
+    def setUpClass(cls):
+        from fastapi.testclient import TestClient
+        from backend.main import app
+        cls.client = TestClient(app)
+
+    # M8-019
+    def test_long_lived_agent_token(self):
+        from backend.security import create_access_token, verify_access_token
+
+        login_token = create_access_token("agent_owner")
+        response = self.client.get("/agent/token", params={"token": login_token})
+        self.assertEqual(200, response.status_code, response.text)
+        body = response.json()
+        self.assertGreater(body["expires_days"], 0)
+        self.assertEqual("agent_owner", verify_access_token(body["token"])["sub"])
+
+        rejected = self.client.get("/agent/token", params={"token": "invalid"})
+        self.assertEqual(401, rejected.status_code)
+
+    # M8-020
+    def test_runtime_manifest_contract(self):
+        response = self.client.get("/runtime/manifest")
+        self.assertEqual(200, response.status_code, response.text)
+        body = response.json()
+        self.assertEqual("/runtime/download", body["download_url"])
+        for field in ("version", "sha256", "size_bytes", "min_agent_version"):
+            self.assertIn(field, body)
+        self.assertRegex(body["sha256"], r"^[0-9a-f]{64}$")
+        self.assertGreater(body["size_bytes"], 0)
+
+    # M8-021
+    def test_runtime_download_matches_manifest_hash(self):
+        manifest = self.client.get("/runtime/manifest").json()
+        response = self.client.get("/runtime/download")
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertTrue(zipfile.is_zipfile(io.BytesIO(response.content)))
+        self.assertEqual(manifest["size_bytes"], len(response.content))
+        self.assertEqual(manifest["sha256"], hashlib.sha256(response.content).hexdigest())
+
+    # M8-022
+    def test_public_bundle_excludes_credentials_and_user_package_injects_token(self):
+        from backend import cloud_training
+        from tools import assemble_bundle
+
+        self.assertIn("config.json", assemble_bundle.EXCLUDE_NAMES)
+        self.assertTrue(assemble_bundle._excluded("config.json"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "VisualDL-Agent.exe"
+            artifact.write_bytes(b"agent-binary")
+            package = cloud_training._build_app_package(
+                artifact, "windows", "https://example.test", "agent-secret",
+            )
+
+        with zipfile.ZipFile(io.BytesIO(package)) as archive:
+            config_name = "VisualDL-Agent/config.json"
+            self.assertIn(config_name, archive.namelist())
+            config = json.loads(archive.read(config_name).decode("utf-8"))
+        self.assertEqual("https://example.test", config["server_url"])
+        self.assertEqual("agent-secret", config["token"])
 
 
 if __name__ == "__main__":

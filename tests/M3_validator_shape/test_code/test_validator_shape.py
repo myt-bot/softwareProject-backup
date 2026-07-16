@@ -153,9 +153,13 @@ class ValidatorShapeUnitTests(unittest.TestCase):
         graph = {
             "layers": [
                 layer("input", "Input", {"shape": [1, 28, 28]}),
+                layer("linear", "Linear", {"in_features": 784, "out_features": 10}),
                 layer("output", "Output"),
             ],
-            "connections": [connection("input", "missing_output")],
+            "connections": [
+                connection("input", "linear"),
+                connection("linear", "missing_output"),
+            ],
         }
 
         result = validate_model_graph(graph)

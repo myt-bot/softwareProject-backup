@@ -544,17 +544,13 @@ class TestInfraRoutes(unittest.TestCase):
         data = resp.json()
         self.assertEqual(data["status"], "ok")
 
-    def test_devices_returns_device_info(self):
-        """GET /devices 返回 200 和设备摘要信息。"""
-        resp = self.client.get("/devices")
+    def test_agent_status_reports_offline_without_connection(self):
+        """GET /agents/status 在本机 Agent 未连接时返回离线状态。"""
+        resp = self.client.get("/agents/status", params={"user_id": "infra_test_user"})
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertEqual(data["status"], "ok")
-        self.assertIn("available_devices", data)
-        self.assertIn("default_device", data)
-        self.assertIn("cuda_available", data)
-        self.assertIsInstance(data["available_devices"], list)
-        self.assertIn("cpu", data["available_devices"])
+        self.assertEqual(data["type"], "agent_status")
+        self.assertFalse(data["online"])
 
     def test_train_creates_job(self):
         """POST /train 传入合法模型结构返回 200 和训练任务信息。"""
@@ -571,7 +567,7 @@ class TestInfraRoutes(unittest.TestCase):
                 {"source": "fc", "target": "out"},
             ],
         }
-        resp = self.client.post("/train", json={
+        resp = self.client.post("/train", params={"user_id": "infra_test_user"}, json={
             "model": valid_model,
             "train_config": {
                 "dataset_name": "MNIST",
@@ -587,9 +583,9 @@ class TestInfraRoutes(unittest.TestCase):
         data = resp.json()
         self.assertEqual(data["status"], "ok")
         self.assertIn("job_id", data)
-        self.assertTrue(data["job_id"].startswith("train_"))
-        self.assertEqual(data["job_status"], "pending")
-        self.assertGreater(data["total_epochs"], 0)
+        self.assertTrue(data["job_id"].startswith("job_"))
+        self.assertEqual(data["job_status"], "no_agent")
+        self.assertEqual(data["agent_status"], "offline")
 
 
 if __name__ == "__main__":

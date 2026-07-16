@@ -253,15 +253,15 @@ class TestToolHandling(unittest.IsolatedAsyncioTestCase):
         self.assertIn("未知命令", result["error"])
 
 
-def openai_response(content="", tool_calls=None):
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
-        content=content,
-        tool_calls=tool_calls or [],
-    ))])
+def openai_stream(content="", tool_calls=None):
+    """构造与当前流式 OpenAI 调用契约一致的内存响应。"""
+    delta = SimpleNamespace(content=content, tool_calls=tool_calls or [])
+    return iter([SimpleNamespace(choices=[SimpleNamespace(delta=delta)])])
 
 
-def openai_tool_call(call_id, name, arguments):
+def openai_stream_tool_call(call_id, name, arguments, index=0):
     return SimpleNamespace(
+        index=index,
         id=call_id,
         function=SimpleNamespace(name=name, arguments=arguments),
     )
@@ -270,12 +270,15 @@ def openai_tool_call(call_id, name, arguments):
 class TestAssistantTurn(unittest.IsolatedAsyncioTestCase):
     async def test_plain_answer_is_sent_and_added_to_history(self):
         client = Mock()
-        client.chat.completions.create.return_value = openai_response("这是最终答案。")
+        client.chat.completions.create.return_value = openai_stream("这是最终答案。")
         websocket = FakeWebSocket()
         connection = assistant.AssistantConnection("user_1", websocket)
         history = []
 
-        with patch.object(assistant, "create_openai_client", return_value=client):
+        with (
+            patch.object(assistant, "create_openai_client", return_value=client),
+            patch.object(assistant, "generate_followups", new=AsyncMock(return_value=[])),
+        ):
             result = await assistant.run_assistant_turn(
                 connection, "什么是卷积？", history, "当前项目为空。",
                 model="test-model", api_key="test-key", base_url="https://example.test/v1",
@@ -283,19 +286,27 @@ class TestAssistantTurn(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, "这是最终答案。")
         self.assertEqual(history[-1], {"role": "assistant", "content": "这是最终答案。"})
-        self.assertTrue(websocket.sent[-1]["final"])
+        self.assertTrue(any(
+            message.get("type") == "assistant_delta" and message.get("text") == "这是最终答案。"
+            for message in websocket.sent
+        ))
+        self.assertTrue(any(
+            message.get("type") == "assistant_message" and message.get("final")
+            for message in websocket.sent
+        ))
         request = client.chat.completions.create.call_args.kwargs
         self.assertEqual(request["messages"][0]["role"], "system")
         self.assertIn("当前项目为空。", request["messages"][0]["content"])
         self.assertEqual(request["tools"][0]["type"], "function")
         self.assertEqual(request["model"], "test-model")
+        self.assertTrue(request["stream"])
 
     async def test_tool_call_result_is_returned_to_openai(self):
-        tool_call = openai_tool_call("call_1", "list_nodes", "{}")
+        tool_call = openai_stream_tool_call("call_1", "list_nodes", "{}")
         client = Mock()
         client.chat.completions.create.side_effect = [
-            openai_response(tool_calls=[tool_call]),
-            openai_response("画布中有一个输入节点。"),
+            openai_stream(tool_calls=[tool_call]),
+            openai_stream("画布中有一个输入节点。"),
         ]
         connection = assistant.AssistantConnection("user_1", FakeWebSocket())
 
@@ -305,6 +316,7 @@ class TestAssistantTurn(unittest.IsolatedAsyncioTestCase):
                 assistant, "handle_tool_use",
                 new=AsyncMock(return_value={"ok": True, "result": [{"id": "input_1"}], "error": None}),
             ) as execute,
+            patch.object(assistant, "generate_followups", new=AsyncMock(return_value=[])),
         ):
             result = await assistant.run_assistant_turn(
                 connection, "看看画布", [],
@@ -320,17 +332,18 @@ class TestAssistantTurn(unittest.IsolatedAsyncioTestCase):
         create_client.assert_called_once_with("test-key", "https://example.test/v1")
 
     async def test_invalid_tool_arguments_are_reported_to_model(self):
-        tool_call = openai_tool_call("bad_call", "list_nodes", "not-json")
+        tool_call = openai_stream_tool_call("bad_call", "list_nodes", "not-json")
         client = Mock()
         client.chat.completions.create.side_effect = [
-            openai_response(tool_calls=[tool_call]),
-            openai_response("工具参数无效，未执行。"),
+            openai_stream(tool_calls=[tool_call]),
+            openai_stream("工具参数无效，未执行。"),
         ]
         connection = assistant.AssistantConnection("user_1", FakeWebSocket())
 
         with (
             patch.object(assistant, "create_openai_client", return_value=client),
             patch.object(assistant, "handle_tool_use", new=AsyncMock()) as execute,
+            patch.object(assistant, "generate_followups", new=AsyncMock(return_value=[])),
         ):
             await assistant.run_assistant_turn(
                 connection, "测试", [],

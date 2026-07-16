@@ -22,9 +22,20 @@ import backend.storage as storage
 VALID_MODEL = {
     "layers": [
         {"id": "input_1", "type": "Input", "name": "输入层", "params": {"shape": [1, 28, 28]}},
+        {"id": "flatten_1", "type": "Flatten", "name": "展平层", "params": {}},
+        {
+            "id": "linear_1",
+            "type": "Linear",
+            "name": "全连接层",
+            "params": {"in_features": 784, "out_features": 10},
+        },
         {"id": "output_1", "type": "Output", "name": "输出层", "params": {}},
     ],
-    "connections": [{"source": "input_1", "target": "output_1"}],
+    "connections": [
+        {"source": "input_1", "target": "flatten_1"},
+        {"source": "flatten_1", "target": "linear_1"},
+        {"source": "linear_1", "target": "output_1"},
+    ],
 }
 
 # 一个非法模型图：缺少 Output

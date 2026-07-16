@@ -56,6 +56,10 @@ SQLite 持久化、CORS、JWT、.env/端口等配置）正确；并对全量自�
 | M8-016   | 前端构建配置/产物      | 无                                                           | 检查`package.json` build 脚本、vite 配置；若已构建则校验 dist                             | 存在 build 脚本与 vite 配置；dist（若有）引用 hash 化 js/css | 与预期一致：配置齐全，dist 产物结构正确                           | 高     |
 | M8-017   | README 与启动方式一致  | 无                                                           | 检索 README                                                                                 | 含`uvicorn`、`backend.main:app`、`Nginx`               | 与预期一致：均记录                                                | 中     |
 | M8-018   | 全量自动化回归         | 无                                                           | `python -m pytest tests/ -q`                                                              | 汇总通过/失败/跳过（见第 8 节）                              | 255 passed / 6 failed（失败均为 M1、M7 既有过时用例，非 M8 引入） | 高     |
+| M8-019   | 长期 Agent 令牌        | 有效及无效登录令牌                                           | `GET /agent/token`                                                                         | 有效令牌返回长期 Agent 令牌与有效天数；无效令牌返回 401       | 与预期一致                                                       | 高     |
+| M8-020   | 运行时 manifest        | 无                                                           | `GET /runtime/manifest`                                                                    | 返回版本、下载地址、SHA-256、包大小和最低 Agent 版本          | 与预期一致                                                       | 高     |
+| M8-021   | 运行时下载完整性       | manifest 与运行时下载包                                      | 下载后计算 SHA-256 并解析 zip                                                              | 大小与哈希均和 manifest 一致，且压缩包可解析                  | 与预期一致                                                       | 高     |
+| M8-022   | 公共包凭证安全         | 公共组装规则及临时用户下载包                                 | 检查公共包排除项，并构造带用户令牌的下载包                                                 | 公共包排除 config.json；用户包按请求动态写入令牌              | 与预期一致                                                       | 高     |
 
 **自动化执行结论**：M8 自身 19 条用例（M8-001 ~ M8-017 对应）**全部通过**
 （`19 passed`）。
