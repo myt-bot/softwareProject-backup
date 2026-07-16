@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
-  autoLayoutGraph,
   beginConnectionDrag,
   cancelPendingConnection,
-  centerGraphInCanvas,
   completeConnection,
   containerBreadcrumb,
   copyNodeById,
@@ -21,12 +19,10 @@ import {
   handleZoomAction,
   initializeCanvasView,
   isEditingContainer,
-  redoGraphChange,
   registerCanvasElements,
   selectNode,
   showNodeMenu,
   toggleContainerCollapse,
-  undoGraphChange,
 } from "../canvas";
 import {
   activeCanvas,
@@ -228,27 +224,13 @@ onBeforeUnmount(() => {
     <CanvasMinimap />
     <!-- 结构检查的问题汇总：点击后定位节点并展开对应参数 -->
     <ValidationSummary />
-    <!-- 画布功能栏：空闲时收成"缩放"胶囊，悬停向右展开 视图/历史；空闲自动淡出 -->
+
+    <!-- 缩放栏单独保留在左下角，空闲时自动淡出 -->
     <div class="canvas-toolbar" :class="{ 'is-faded': !toolbarActive }" @mouseenter="pokeToolbar">
-      <!-- 常驻：缩放 -->
       <div class="ctb-section ctb-always">
         <button class="ctb-btn" id="zoom-out" title="缩小" @click="handleZoomAction('zoom-out')"><iconify-icon icon="mdi:minus"></iconify-icon></button>
         <button class="ctb-zoom" id="zoom-reset" title="点击恢复 100%" @click="handleZoomAction('reset')">{{ zoomLabel }}</button>
         <button class="ctb-btn" id="zoom-in" title="放大" @click="handleZoomAction('zoom-in')"><iconify-icon icon="mdi:plus"></iconify-icon></button>
-      </div>
-      <iconify-icon icon="mdi:chevron-right" class="ctb-expand-caret" aria-hidden="true"></iconify-icon>
-      <!-- 悬停向右展开：视图 + 历史 -->
-      <div class="ctb-content">
-        <span class="ctb-divider"></span>
-        <div class="ctb-section">
-          <button class="ctb-btn" id="btn-auto-layout" title="自动布局：按数据流向整齐排列" @click="autoLayoutGraph"><iconify-icon icon="mdi:sitemap-outline"></iconify-icon></button>
-          <button class="ctb-btn" id="zoom-fit" title="适应视图：定位并居中所有节点" @click="centerGraphInCanvas"><iconify-icon icon="mdi:fit-to-screen-outline"></iconify-icon></button>
-        </div>
-        <span class="ctb-divider"></span>
-        <div class="ctb-section">
-          <button class="ctb-btn" id="btn-undo" title="撤销 (Ctrl+Z)" @click="undoGraphChange"><iconify-icon icon="mdi:undo-variant"></iconify-icon></button>
-          <button class="ctb-btn" id="btn-redo" title="重做 (Ctrl+Shift+Z / Ctrl+Y)" @click="redoGraphChange"><iconify-icon icon="mdi:redo-variant"></iconify-icon></button>
-        </div>
       </div>
     </div>
     <div ref="gridRef" class="canvas-grid connections-svg"></div>
