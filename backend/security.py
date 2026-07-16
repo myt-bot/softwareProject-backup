@@ -40,8 +40,18 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # JWT 令牌配置
 # ============================================================
 
-# 优先从环境变量读取密钥，开发环境使用固定默认值
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key-change-in-production")
+# 优先从环境变量读取密钥；仅开发/测试环境回退到固定默认值。
+# 生产环境（APP_ENV=production）必须通过 JWT_SECRET_KEY 注入独立强密钥，
+# 否则启动即失败，避免使用公开的开发默认密钥导致令牌可被伪造。
+_DEV_SECRET_KEY = "dev-secret-key-change-in-production"
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", _DEV_SECRET_KEY)
+_APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+if _APP_ENV == "production" and SECRET_KEY == _DEV_SECRET_KEY:
+    raise RuntimeError(
+        "生产环境（APP_ENV=production）必须通过环境变量 JWT_SECRET_KEY 设置独立密钥，"
+        "不能使用开发默认值。"
+    )
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 

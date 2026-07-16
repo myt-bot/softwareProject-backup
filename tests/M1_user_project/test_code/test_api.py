@@ -37,14 +37,25 @@ VALID_MODEL = {
 
 
 class TestUserAPI(unittest.TestCase):
-    """用户管理接口测试。"""
+    """用户管理接口测试。
+
+    用户管理接口（/users 系列）已收敛为需要登录的账号管理接口：
+    - 创建用户需要登录；
+    - 列表只返回本人；
+    - 查看 / 修改 / 删除单个用户仅限本人（越权返回 403，未登录返回 401）。
+    面向普通用户的自助注册走 /auth/register。
+    """
 
     _tmp_dir = None
     _data_dir = None
+    _token = None
+    _user_id = None
+    _other_token = None
+    _other_user_id = None
 
     @classmethod
     def setUpClass(cls):
-        """把存储切换到独立的临时 SQLite 库。"""
+        """把存储切换到独立的临时 SQLite 库，并注册两名测试用户。"""
         cls._tmp_dir = tempfile.TemporaryDirectory()
         cls._data_dir = Path(cls._tmp_dir.name)
         storage.configure_database(f"sqlite:///{cls._data_dir / 'test.db'}")
@@ -53,25 +64,55 @@ class TestUserAPI(unittest.TestCase):
         from backend.main import app
         cls.client = TestClient(app)
 
+        cls._token, cls._user_id = cls._register("main_user", "main_user@test.com")
+        cls._other_token, cls._other_user_id = cls._register("other_user", "other_user@test.com")
+
     @classmethod
     def tearDownClass(cls):
         storage.dispose_database()
         cls._tmp_dir.cleanup()
 
+    @classmethod
+    def _register(cls, username, email, password="testpass123"):
+        """注册一个用户并返回 (token, user_id)。"""
+        resp = cls.client.post("/auth/register", json={
+            "username": username,
+            "email": email,
+            "password": password,
+            "confirm_password": password,
+        })
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        return body["access_token"], body["user"]["id"]
+
+    def _auth_headers(self, token=None):
+        """生成带 Authorization 头的字典。"""
+        t = token if token is not None else self._token
+        return {"Authorization": f"Bearer {t}"}
+
     # ========== 创建用户 ==========
 
     def test_create_user_success(self):
-        """POST /users 正常创建。"""
+        """POST /users 已登录时正常创建。"""
         resp = self.client.post("/users", json={
             "username": "apiuser",
             "email": "api@test.com",
             "password": "testpass123",
-        })
+        }, headers=self._auth_headers())
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["status"], "ok")
         self.assertEqual(data["data"]["username"], "apiuser")
         self.assertNotIn("password_hash", data["data"])
+
+    def test_create_user_no_auth(self):
+        """POST /users 未登录返回 401（缺陷 1 修复）。"""
+        resp = self.client.post("/users", json={
+            "username": "anon",
+            "email": "anon@test.com",
+            "password": "testpass123",
+        })
+        self.assertEqual(resp.status_code, 401)
 
     def test_create_user_invalid_email(self):
         """POST /users 非法邮箱返回 400。"""
@@ -79,94 +120,98 @@ class TestUserAPI(unittest.TestCase):
             "username": "apiuser",
             "email": "bad-email",
             "password": "testpass123",
-        })
+        }, headers=self._auth_headers())
         self.assertEqual(resp.status_code, 400)
 
     def test_create_user_duplicate(self):
         """POST /users 重复邮箱返回 400。"""
         self.client.post("/users", json={
             "username": "u1", "email": "dup@test.com", "password": "testpass123",
-        })
+        }, headers=self._auth_headers())
         resp = self.client.post("/users", json={
             "username": "u2", "email": "dup@test.com", "password": "testpass123",
-        })
+        }, headers=self._auth_headers())
         self.assertEqual(resp.status_code, 400)
 
     def test_create_user_missing_field(self):
         """POST /users 缺少必填字段返回 422。"""
-        resp = self.client.post("/users", json={"username": "test"})
+        resp = self.client.post("/users", json={"username": "test"},
+                                headers=self._auth_headers())
         self.assertEqual(resp.status_code, 422)
 
     # ========== 获取用户列表 ==========
 
-    def test_list_users(self):
-        """GET /users 获取用户列表。"""
-        resp = self.client.get("/users")
+    def test_list_users_self_only(self):
+        """GET /users 已登录时只返回本人记录。"""
+        resp = self.client.get("/users", headers=self._auth_headers())
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["status"], "ok")
-        self.assertIn("data", data)
-        self.assertIn("count", data)
+        self.assertEqual(data["count"], 1)
+        self.assertEqual(data["data"][0]["id"], self._user_id)
+
+    def test_list_users_no_auth(self):
+        """GET /users 未登录返回 401（缺陷 2 修复）。"""
+        resp = self.client.get("/users")
+        self.assertEqual(resp.status_code, 401)
 
     # ========== 获取单个用户 ==========
 
-    def test_get_user_exists(self):
-        """GET /users/{id} 获取存在的用户。"""
-        create_resp = self.client.post("/users", json={
-            "username": "fetchme",
-            "email": "fetch@test.com",
-            "password": "testpass123",
-        })
-        user_id = create_resp.json()["data"]["id"]
-
-        resp = self.client.get(f"/users/{user_id}")
+    def test_get_user_self(self):
+        """GET /users/{id} 获取本人信息。"""
+        resp = self.client.get(f"/users/{self._user_id}", headers=self._auth_headers())
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["data"]["username"], "fetchme")
+        self.assertEqual(resp.json()["data"]["id"], self._user_id)
 
-    def test_get_user_not_found(self):
-        """GET /users/{id} 不存在返回 404。"""
-        resp = self.client.get("/users/user_nonexistent")
-        self.assertEqual(resp.status_code, 404)
+    def test_get_user_other_forbidden(self):
+        """GET /users/{id} 查看他人账号返回 403（缺陷 2 修复）。"""
+        resp = self.client.get(f"/users/{self._other_user_id}", headers=self._auth_headers())
+        self.assertEqual(resp.status_code, 403)
+
+    def test_get_user_no_auth(self):
+        """GET /users/{id} 未登录返回 401。"""
+        resp = self.client.get(f"/users/{self._user_id}")
+        self.assertEqual(resp.status_code, 401)
 
     # ========== 更新用户 ==========
 
-    def test_update_user_success(self):
-        """PUT /users/{id} 正常更新。"""
-        create_resp = self.client.post("/users", json={
-            "username": "update_me",
-            "email": "old@test.com",
-            "password": "testpass123",
-        })
-        user_id = create_resp.json()["data"]["id"]
-
-        resp = self.client.put(f"/users/{user_id}", json={"username": "updated"})
+    def test_update_user_self(self):
+        """PUT /users/{id} 修改本人信息成功。"""
+        token, user_id = self._register("upd_self", "upd_self@test.com")
+        resp = self.client.put(f"/users/{user_id}", json={"username": "updated"},
+                               headers=self._auth_headers(token))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["data"]["username"], "updated")
 
-    def test_update_user_not_found(self):
-        """PUT /users/{id} 不存在返回 400。"""
-        resp = self.client.put("/users/user_nonexistent", json={"username": "x"})
-        self.assertEqual(resp.status_code, 400)
+    def test_update_user_other_forbidden(self):
+        """PUT /users/{id} 修改他人账号返回 403（缺陷 1 修复）。"""
+        resp = self.client.put(f"/users/{self._other_user_id}", json={"username": "hacked"},
+                               headers=self._auth_headers())
+        self.assertEqual(resp.status_code, 403)
+
+    def test_update_user_no_auth(self):
+        """PUT /users/{id} 未登录返回 401（缺陷 1 修复）。"""
+        resp = self.client.put(f"/users/{self._user_id}", json={"username": "x"})
+        self.assertEqual(resp.status_code, 401)
 
     # ========== 删除用户 ==========
 
-    def test_delete_user_success(self):
-        """DELETE /users/{id} 正常删除。"""
-        create_resp = self.client.post("/users", json={
-            "username": "delete_me",
-            "email": "del@test.com",
-            "password": "testpass123",
-        })
-        user_id = create_resp.json()["data"]["id"]
-
-        resp = self.client.delete(f"/users/{user_id}")
+    def test_delete_user_self(self):
+        """DELETE /users/{id} 删除本人账号成功。"""
+        token, user_id = self._register("del_self", "del_self@test.com")
+        resp = self.client.delete(f"/users/{user_id}", headers=self._auth_headers(token))
         self.assertEqual(resp.status_code, 200)
         self.assertIn("已删除", resp.json()["message"])
 
-    def test_delete_user_not_found(self):
-        """DELETE /users/{id} 不存在返回 400。"""
-        resp = self.client.delete("/users/user_nonexistent")
-        self.assertEqual(resp.status_code, 400)
+    def test_delete_user_other_forbidden(self):
+        """DELETE /users/{id} 删除他人账号返回 403（缺陷 1 修复）。"""
+        resp = self.client.delete(f"/users/{self._other_user_id}", headers=self._auth_headers())
+        self.assertEqual(resp.status_code, 403)
+
+    def test_delete_user_no_auth(self):
+        """DELETE /users/{id} 未登录返回 401（缺陷 1 修复）。"""
+        resp = self.client.delete(f"/users/{self._user_id}")
+        self.assertEqual(resp.status_code, 401)
 
 
 class TestAuthAPI(unittest.TestCase):
@@ -426,20 +471,24 @@ class TestProjectAPI(unittest.TestCase):
     # ========== 获取项目列表 ==========
 
     def test_list_projects(self):
-        """GET /projects 获取项目列表。"""
-        resp = self.client.get("/projects")
+        """GET /projects 已登录时只返回本人项目。"""
+        resp = self.client.get("/projects", headers=self._auth_headers())
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("data", resp.json())
+        body = resp.json()
+        self.assertIn("data", body)
+        # 强制按 token 过滤，返回的项目应全部属于当前用户
+        for project in body["data"]:
+            self.assertEqual(project["user_id"], self._user_id)
 
-    def test_list_projects_by_user(self):
-        """GET /projects?user_id=xxx 按用户过滤。"""
-        resp = self.client.get(f"/projects?user_id={self._user_id}")
-        self.assertEqual(resp.status_code, 200)
+    def test_list_projects_no_auth(self):
+        """GET /projects 未登录返回 401（缺陷 2 修复）。"""
+        resp = self.client.get("/projects")
+        self.assertEqual(resp.status_code, 401)
 
     # ========== 获取单个项目 ==========
 
     def test_get_project_exists(self):
-        """GET /projects/{id} 获取存在的项目。"""
+        """GET /projects/{id} 获取本人项目。"""
         create_resp = self.client.post("/projects", json={
             "user_id": self._user_id,
             "name": "fetch_proj",
@@ -447,14 +496,39 @@ class TestProjectAPI(unittest.TestCase):
         }, headers=self._auth_headers())
         proj_id = create_resp.json()["data"]["id"]
 
-        resp = self.client.get(f"/projects/{proj_id}")
+        resp = self.client.get(f"/projects/{proj_id}", headers=self._auth_headers())
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["data"]["name"], "fetch_proj")
 
     def test_get_project_not_found(self):
         """GET /projects/{id} 不存在返回 404。"""
-        resp = self.client.get("/projects/proj_nonexistent")
+        resp = self.client.get("/projects/proj_nonexistent", headers=self._auth_headers())
         self.assertEqual(resp.status_code, 404)
+
+    def test_get_project_no_auth(self):
+        """GET /projects/{id} 未登录返回 401（缺陷 2 修复）。"""
+        create_resp = self.client.post("/projects", json={
+            "user_id": self._user_id,
+            "name": "noauth_proj",
+            "model_graph": VALID_MODEL,
+        }, headers=self._auth_headers())
+        proj_id = create_resp.json()["data"]["id"]
+
+        resp = self.client.get(f"/projects/{proj_id}")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_get_project_wrong_owner_rejected(self):
+        """GET /projects/{id} 访问他人项目返回 403（缺陷 2 修复）。"""
+        create_resp = self.client.post("/projects", json={
+            "user_id": self._user_id,
+            "name": "private_proj",
+            "model_graph": VALID_MODEL,
+        }, headers=self._auth_headers())
+        proj_id = create_resp.json()["data"]["id"]
+
+        resp = self.client.get(f"/projects/{proj_id}",
+                               headers=self._auth_headers(self._other_token))
+        self.assertEqual(resp.status_code, 403)
 
     # ========== 更新项目 ==========
 
@@ -526,6 +600,60 @@ class TestProjectAPI(unittest.TestCase):
         resp = self.client.delete(f"/projects/{proj_id}",
                                   headers=self._auth_headers(self._other_token))
         self.assertEqual(resp.status_code, 403)
+
+    # ========== 健壮性与安全（缺陷④：超大数据体 / 畸形结构 / 注入样式输入）==========
+
+    def test_oversized_project_name_rejected(self):
+        """项目名称超过 100 字符返回 400，不写入存储。"""
+        resp = self.client.post("/projects", json={
+            "user_id": self._user_id,
+            "name": "n" * 101,
+            "model_graph": VALID_MODEL,
+        }, headers=self._auth_headers())
+        self.assertEqual(resp.status_code, 400)
+
+    def test_oversized_description_rejected(self):
+        """项目描述超过 500 字符返回 400。"""
+        resp = self.client.post("/projects", json={
+            "user_id": self._user_id,
+            "name": "desc_limit_proj",
+            "model_graph": VALID_MODEL,
+            "description": "d" * 501,
+        }, headers=self._auth_headers())
+        self.assertEqual(resp.status_code, 400)
+
+    def test_malformed_model_graph_rejected(self):
+        """model_graph 缺少 layers 字段返回 422（请求体结构校验）。"""
+        resp = self.client.post("/projects", json={
+            "user_id": self._user_id,
+            "name": "malformed_proj",
+            "model_graph": {"connections": []},
+        }, headers=self._auth_headers())
+        self.assertEqual(resp.status_code, 422)
+
+    def test_injection_like_name_stored_literally(self):
+        """注入样式的项目名被当作普通字符串原样存储，不被执行（参数化查询）。"""
+        payload_name = "Rob'); DROP TABLE projects;--"
+        create = self.client.post("/projects", json={
+            "user_id": self._user_id,
+            "name": payload_name,
+            "model_graph": VALID_MODEL,
+        }, headers=self._auth_headers())
+        self.assertEqual(create.status_code, 200)
+        proj_id = create.json()["data"]["id"]
+
+        # 读回校验：名称原样保存
+        detail = self.client.get(f"/projects/{proj_id}", headers=self._auth_headers())
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["data"]["name"], payload_name)
+
+        # 后续正常创建仍可用，证明 projects 表未被破坏
+        ok = self.client.post("/projects", json={
+            "user_id": self._user_id,
+            "name": "after_injection_proj",
+            "model_graph": VALID_MODEL,
+        }, headers=self._auth_headers())
+        self.assertEqual(ok.status_code, 200)
 
 
 class TestInfraRoutes(unittest.TestCase):

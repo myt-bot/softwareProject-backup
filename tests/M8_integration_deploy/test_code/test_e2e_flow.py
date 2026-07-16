@@ -103,11 +103,11 @@ class EndToEndFlowTests(unittest.TestCase):
         self.assertEqual(200, create.status_code, create.text)
         pid = create.json()["data"]["id"]
 
-        listing = self.client.get("/projects", params={"user_id": user["id"]})
+        listing = self.client.get("/projects", headers=headers)
         self.assertEqual(200, listing.status_code)
         self.assertIn(pid, [p["id"] for p in listing.json()["data"]])
 
-        detail = self.client.get(f"/projects/{pid}")
+        detail = self.client.get(f"/projects/{pid}", headers=headers)
         self.assertEqual(200, detail.status_code)
         self.assertEqual("E2E 项目", detail.json()["data"]["name"])
 
@@ -144,9 +144,10 @@ class EndToEndFlowTests(unittest.TestCase):
     # M8-010
     def test_create_from_template_and_validate(self):
         token, user = self._register("tmpl")
-        created = self.client.post("/projects/from-template", json={
-            "user_id": user["id"], "template_name": "lenet",
-        })
+        created = self.client.post("/projects/from-template",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"user_id": user["id"], "template_name": "lenet"},
+        )
         self.assertEqual(200, created.status_code, created.text)
         self.assertEqual("ok", created.json()["status"])
 

@@ -2,7 +2,7 @@
 
 本文件声明课设项目需要的接口结构，具体业务逻辑在对应模块中实现。
 
-M1（甘淞文）：用户 CRUD + 项目 CRUD + /auth/* 认证路由 + JWT 令牌 + 权限控制
+M1：用户 CRUD + 项目 CRUD + /auth/* 认证路由 + JWT 令牌 + 权限控制
 M3：模型校验、形状推导
 """
 
@@ -178,8 +178,15 @@ def get_current_user_info(current_user: dict = Depends(get_current_user)):
 # ============================================================
 
 @app.post("/users")
-def create_user(request: UserCreateRequest):
-    """创建新用户。
+def create_user(
+    request: UserCreateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """创建新用户（需要登录）。
+
+    说明：
+        面向用户的自助注册请走 /auth/register。此接口要求已登录身份，
+        避免匿名调用批量创建用户。
 
     参数：
         request：创建用户请求体，包含 username、email、password。
@@ -199,15 +206,28 @@ def create_user(request: UserCreateRequest):
 
 
 @app.get("/users")
-def list_users():
-    """获取所有用户列表。"""
-    users = auth_mgr.list_users()
+def list_users(current_user: dict = Depends(get_current_user)):
+    """获取用户列表（需要登录）。
+
+    本系统无管理员角色，为避免任意用户枚举全站账号信息，
+    此接口只返回当前登录用户本人的记录。
+    """
+    users = [current_user]
     return {"status": "ok", "data": users, "count": len(users)}
 
 
 @app.get("/users/{user_id}")
-def get_user(user_id: str):
-    """获取指定用户信息。"""
+def get_user(
+    user_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """获取指定用户信息（需要登录且只能查看本人账号）。"""
+    if current_user["id"] != user_id:
+        return JSONResponse(
+            status_code=403,
+            content={"status": "error", "message": "无权操作：只能查看本人账号"},
+        )
+
     try:
         user = auth_mgr.get_user(user_id)
     except ValueError as exc:
@@ -226,8 +246,17 @@ def get_user(user_id: str):
 
 
 @app.put("/users/{user_id}")
-def update_user(user_id: str, request: UserUpdateRequest):
-    """更新用户信息（支持修改密码）。"""
+def update_user(
+    user_id: str,
+    request: UserUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """更新用户信息（支持修改密码，需要登录且只能修改本人账号）。"""
+    if current_user["id"] != user_id:
+        return JSONResponse(
+            status_code=403,
+            content={"status": "error", "message": "无权操作：只能修改本人账号"},
+        )
     try:
         user = auth_mgr.update_user(
             user_id=user_id,
@@ -249,8 +278,16 @@ def update_user(user_id: str, request: UserUpdateRequest):
 
 
 @app.delete("/users/{user_id}")
-def delete_user(user_id: str):
-    """删除用户及其所有项目。"""
+def delete_user(
+    user_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """删除用户及其所有项目（需要登录且只能删除本人账号）。"""
+    if current_user["id"] != user_id:
+        return JSONResponse(
+            status_code=403,
+            content={"status": "error", "message": "无权操作：只能删除本人账号"},
+        )
     try:
         auth_mgr.delete_user(user_id)
         return {"status": "ok", "message": f"用户 '{user_id}' 已删除"}
@@ -322,8 +359,11 @@ def get_project_template(template_name: str):
 
 
 @app.post("/projects/from-template")
-def create_project_from_template(request: ProjectTemplateCreateRequest):
-    """基于内置模板创建项目，并复用 /projects 的项目存储逻辑。"""
+def create_project_from_template(
+    request: ProjectTemplateCreateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """基于内置模板创建项目（需要登录），并复用 /projects 的项目存储逻辑。"""
     from .projects import create_project as _create_project
     from .templates import apply_template, get_available_templates
     from fastapi.responses import JSONResponse
@@ -352,10 +392,11 @@ def create_project_from_template(request: ProjectTemplateCreateRequest):
 
     try:
         project = _create_project(
-            user_id=request.user_id,
+            user_id=current_user["id"],
             name=project_name,
             model_graph=template_result["model"],
             description=description,
+            current_user_id=current_user["id"],
         )
         return {"status": "ok", "data": project, "template": template_result["template"]}
     except ValueError as exc:
@@ -366,10 +407,14 @@ def create_project_from_template(request: ProjectTemplateCreateRequest):
 
 
 @app.get("/projects")
-def list_projects(user_id: str | None = None):
-    """获取项目列表，可按用户过滤。"""
+def list_projects(current_user: dict = Depends(get_current_user)):
+    """获取当前登录用户的项目列表（需要登录）。
+
+    强制按 token 中的用户过滤，用户只能看到自己的项目，
+    不接受调用方自行指定 user_id，避免越权读取他人项目。
+    """
     try:
-        projects = project_mgr.list_projects(user_id=user_id)
+        projects = project_mgr.list_projects(user_id=current_user["id"])
         return {"status": "ok", "data": projects, "count": len(projects)}
     except ValueError as exc:
         return JSONResponse(
@@ -379,8 +424,11 @@ def list_projects(user_id: str | None = None):
 
 
 @app.get("/projects/{project_id}")
-def get_project(project_id: str):
-    """获取指定项目详情。"""
+def get_project(
+    project_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """获取指定项目详情（需要登录且只能查看本人项目）。"""
     try:
         project = project_mgr.get_project(project_id)
     except ValueError as exc:
@@ -393,6 +441,12 @@ def get_project(project_id: str):
         return JSONResponse(
             status_code=404,
             content={"status": "error", "message": f"项目 '{project_id}' 不存在"},
+        )
+
+    if project.get("user_id") != current_user["id"]:
+        return JSONResponse(
+            status_code=403,
+            content={"status": "error", "message": "无权访问：您不是项目所有者"},
         )
 
     return {"status": "ok", "data": project}
