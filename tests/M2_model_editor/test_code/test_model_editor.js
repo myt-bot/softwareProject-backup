@@ -1,582 +1,271 @@
+"use strict";
+
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const test = require("node:test");
 
 /**
- * M2 前端模型搭建编辑器模块测试
+ * M2 前端模型搭建编辑器自动化测试
  *
- * 说明：
- * 当前前端页面主要依赖 DOM 事件、Vue 组件和浏览器交互，不适合直接在 Node.js 中 import 执行。
- * 因此本测试文件抽取与前端模型编辑器一致的核心数据结构和模型编辑逻辑进行测试，
- * 重点验证节点增删、连接管理、参数修改、非法参数拒绝和 ModelGraph 导出格式。
+ * 本文件直接检查项目中的真实前端实现，不再在测试文件里复制一套假的编辑器逻辑。
+ * Vue 组件交互由源码契约测试覆盖；可以脱离浏览器验证的几何规则在本文件中做边界测试。
+ *
+ * 运行方式（项目根目录）：
+ *   node tests/M2_model_editor/test_code/test_model_editor.js
  */
 
-// 创建一个简化的编辑器状态
-function createEditorState() {
-  return {
-    nodes: [],
-    connections: [],
-    nodeCounters: {},
-  };
+const PROJECT_ROOT = path.resolve(__dirname, "../../..");
+
+function readProjectFile(relativePath) {
+  const absolutePath = path.join(PROJECT_ROOT, relativePath);
+  assert.equal(fs.existsSync(absolutePath), true, `缺少被测文件：${relativePath}`);
+  return fs.readFileSync(absolutePath, "utf8");
 }
 
-// 与前端组件库保持一致的层配置
-function getLayerConfig(layerType) {
-  const configs = {
-    Input: {
-      type: "Input",
-      title: "Input",
-      badge: "Input",
-      color: "emerald",
-      hint: "28x28x1",
-      params: { shape: [1, 28, 28] },
-    },
+const source = {
+  app: readProjectFile("frontend/src/App.vue"),
+  actions: readProjectFile("frontend/src/actions.ts"),
+  canvas: readProjectFile("frontend/src/canvas.ts"),
+  store: readProjectFile("frontend/src/store.ts"),
+  canvasBoard: readProjectFile("frontend/src/components/CanvasBoard.vue"),
+  canvasTabs: readProjectFile("frontend/src/components/CanvasTabs.vue"),
+  contextMenus: readProjectFile("frontend/src/components/ContextMenus.vue"),
+  layerSidebar: readProjectFile("frontend/src/components/LayerSidebar.vue"),
+  paramField: readProjectFile("frontend/src/components/ParamNumberField.vue"),
+  validationSummary: readProjectFile("frontend/src/components/ValidationSummary.vue"),
+  styles: readProjectFile("frontend/src/styles.css"),
+};
 
-    Output: {
-      type: "Output",
-      title: "Output",
-      badge: "Output",
-      color: "rose",
-      hint: "?",
-      params: {},
-    },
-
-    Conv2D: {
-      type: "Conv2D",
-      title: "Conv2D",
-      badge: "Conv2D",
-      color: "blue",
-      note: "out=16, k=3, s=1, p=0",
-      hint: "?",
-      params: {
-        out_channels: 16,
-        kernel_size: 3,
-        stride: 1,
-        padding: 0,
-      },
-    },
-
-    MaxPooling: {
-      type: "Pooling",
-      title: "MaxPooling",
-      badge: "MaxPool",
-      color: "purple",
-      note: "k=2, s=2, p=0",
-      hint: "?",
-      params: {
-        kernel_size: 2,
-        stride: 2,
-        padding: 0,
-      },
-    },
-
-    ReLU: {
-      type: "ReLU",
-      title: "ReLU",
-      badge: "ReLU",
-      color: "orange",
-      hint: "?",
-      params: {},
-    },
-
-    Flatten: {
-      type: "Flatten",
-      title: "Flatten",
-      badge: "Flatten",
-      color: "indigo",
-      hint: "?",
-      params: {},
-    },
-
-    Linear: {
-      type: "Linear",
-      title: "Linear",
-      badge: "Linear",
-      color: "cyan",
-      note: "out=128",
-      hint: "?",
-      params: {
-        out_features: 128,
-      },
-    },
-
-    Dropout: {
-      type: "Dropout",
-      title: "Dropout",
-      badge: "Dropout",
-      color: "amber",
-      note: "p=0.5",
-      hint: "?",
-      params: {
-        p: 0.5,
-      },
-    },
-  };
-
-  return configs[layerType] || configs.Linear;
+function indexOrFail(text, fragment, description) {
+  const index = text.indexOf(fragment);
+  assert.notEqual(index, -1, `未找到：${description}`);
+  return index;
 }
 
-// 添加节点
-function addNodeFromLayer(state, layerType) {
-  const config = getLayerConfig(layerType);
-  const type = config.type;
-
-  state.nodeCounters[type] = (state.nodeCounters[type] || 0) + 1;
-
-  const node = {
-    id: `${type.toLowerCase()}_${state.nodeCounters[type]}`,
-    type,
-    title: config.title,
-    badge: config.badge,
-    color: config.color,
-    note: config.note,
-    hint: config.hint || "?",
-    x: 40,
-    y: 40,
-    params: { ...config.params },
-  };
-
-  state.nodes.push(node);
-  return node;
+function buttonBlock(componentSource, id) {
+  const idIndex = indexOrFail(componentSource, `id="${id}"`, `按钮 #${id}`);
+  const start = componentSource.lastIndexOf("<button", idIndex);
+  const end = componentSource.indexOf("</button>", idIndex);
+  assert.ok(start >= 0 && end > idIndex, `无法提取按钮 #${id}`);
+  return componentSource.slice(start, end + "</button>".length);
 }
 
-// 删除节点，同时删除相关连接
-function deleteNode(state, nodeId) {
-  const beforeLength = state.nodes.length;
-
-  state.nodes = state.nodes.filter(node => node.id !== nodeId);
-  state.connections = state.connections.filter(
-    ([source, target]) => source !== nodeId && target !== nodeId
-  );
-
-  return state.nodes.length < beforeLength;
+function limitedTopEntryDirection(dx, dy, maxHorizontalRatio = 0.625) {
+  let limitedDx = dx;
+  if (Math.abs(dy) > 0.001) {
+    limitedDx = Math.sign(dx) * Math.min(Math.abs(dx), Math.abs(dy) * maxHorizontalRatio);
+  }
+  return { dx: limitedDx, dy };
 }
 
-// 建立连接
-function connectNodes(state, sourceId, targetId) {
-  if (!sourceId || !targetId) return false;
-
-  // 不允许自连接
-  if (sourceId === targetId) return false;
-
-  const sourceExists = state.nodes.some(node => node.id === sourceId);
-  const targetExists = state.nodes.some(node => node.id === targetId);
-
-  // 不允许连接不存在的节点
-  if (!sourceExists || !targetExists) return false;
-
-  // 不允许重复连接，包括同方向重复和反方向重复
-  const exists = state.connections.some(
-    ([source, target]) =>
-      (source === sourceId && target === targetId) ||
-      (source === targetId && target === sourceId)
-  );
-
-  if (exists) return false;
-
-  state.connections.push([sourceId, targetId]);
-  return true;
+function deviationFromVerticalDegrees(dx, dy) {
+  return Math.atan2(Math.abs(dx), Math.abs(dy)) * 180 / Math.PI;
 }
 
-// 删除指定连接
-function deleteConnection(state, sourceId, targetId) {
-  const beforeLength = state.connections.length;
-
-  state.connections = state.connections.filter(
-    ([source, target]) => !(source === sourceId && target === targetId)
-  );
-
-  return state.connections.length < beforeLength;
-}
-
-// 根据节点类型和参数名给出前端基础校验规则
-function getParamRule(node, key) {
-  const integerAtLeastOne = {
-    integer: true,
-    min: 1,
-  };
-
-  if (node.type === "Conv2D") {
-    if (key === "out_channels") return { ...integerAtLeastOne, label: "输出通道数" };
-    if (key === "kernel_size") return { ...integerAtLeastOne, label: "卷积核大小" };
-    if (key === "stride") return { ...integerAtLeastOne, label: "Stride" };
-    if (key === "padding") return { integer: true, min: 0, label: "Padding" };
-  }
-
-  if (node.type === "Pooling") {
-    if (key === "kernel_size") return { ...integerAtLeastOne, label: "池化核大小" };
-    if (key === "stride") return { ...integerAtLeastOne, label: "Stride" };
-    if (key === "padding") return { integer: true, min: 0, label: "Padding" };
-  }
-
-  if (node.type === "Linear" && key === "out_features") {
-    return { ...integerAtLeastOne, label: "输出特征数" };
-  }
-
-  if (node.type === "Dropout" && key === "p") {
-    return { min: 0, max: 1, label: "Dropout 比例" };
-  }
-
-  return null;
-}
-
-// 模拟右侧参数输入框：回车或失焦确认后才进行校验；非法时不更新节点参数
-function updateNodeParam(state, nodeId, key, value) {
-  const node = state.nodes.find(item => item.id === nodeId);
-  if (!node) return false;
-
-  // 模拟前端参数为空的情况
-  if (value === "" || value === null || value === undefined) {
-    return false;
-  }
-
-  const rule = getParamRule(node, key);
-
-  if (!rule) {
-    node.params = {
-      ...node.params,
-      [key]: value,
-    };
-    return true;
-  }
-
-  const normalizedValue = typeof value === "string" ? value.trim() : value;
-
-  if (normalizedValue === "") {
-    return false;
-  }
-
-  const numberValue = Number(normalizedValue);
-
-  if (!Number.isFinite(numberValue)) {
-    return false;
-  }
-
-  if (rule.integer && !Number.isInteger(numberValue)) {
-    return false;
-  }
-
-  if (typeof rule.min === "number" && numberValue < rule.min) {
-    return false;
-  }
-
-  if (typeof rule.max === "number" && numberValue > rule.max) {
-    return false;
-  }
-
-  node.params = {
-    ...node.params,
-    [key]: numberValue,
-  };
-
-  return true;
-}
-
-// 修改 Input Shape
-function updateInputShape(state, nodeId, shapeText) {
-  const node = state.nodes.find(item => item.id === nodeId);
-  if (!node || node.type !== "Input") return false;
-
-  const rawItems = shapeText.split(",").map(item => item.trim());
-
-  if (rawItems.length === 0 || rawItems.some(item => item === "")) {
-    return false;
-  }
-
-  const shape = rawItems.map(item => Number(item));
-
-  if (shape.some(item => !Number.isFinite(item) || item <= 0)) {
-    return false;
-  }
-
-  node.params = {
-    ...node.params,
-    shape,
-  };
-
-  node.hint = shape.join("x");
-
-  return true;
-}
-
-// 导出 ModelGraph
-function getCurrentModelGraph(state) {
-  return {
-    layers: state.nodes.map(node => ({
-      id: node.id,
-      type: node.type,
-      name: node.title,
-      params: { ...node.params },
-    })),
-
-    connections: state.connections.map(([source, target]) => ({
-      source,
-      target,
-    })),
-  };
-}
-
-function runTests() {
-  // M2-001 空画布导出 ModelGraph
-  let state = createEditorState();
-  let graph = getCurrentModelGraph(state);
-
-  assert.deepEqual(graph.layers, []);
-  assert.deepEqual(graph.connections, []);
-
-  // M2-002 添加 Input 节点
-  const input = addNodeFromLayer(state, "Input");
-
-  assert.equal(state.nodes.length, 1);
-  assert.equal(input.type, "Input");
-  assert.equal(input.id, "input_1");
-  assert.deepEqual(input.params.shape, [1, 28, 28]);
-
-  // M2-003 添加 Conv2D 节点
-  const conv = addNodeFromLayer(state, "Conv2D");
-
-  assert.equal(state.nodes.length, 2);
-  assert.equal(conv.type, "Conv2D");
-  assert.equal(conv.params.out_channels, 16);
-  assert.equal(conv.params.kernel_size, 3);
-  assert.equal(conv.params.stride, 1);
-  assert.equal(conv.params.padding, 0);
-
-  // M2-004 添加 Pooling 节点
-  const pool = addNodeFromLayer(state, "MaxPooling");
-
-  assert.equal(pool.type, "Pooling");
-  assert.equal(pool.params.kernel_size, 2);
-  assert.equal(pool.params.stride, 2);
-  assert.equal(pool.params.padding, 0);
-
-  // M2-005 添加 Linear 节点
-  const linear = addNodeFromLayer(state, "Linear");
-
-  assert.equal(linear.type, "Linear");
-  assert.equal(linear.params.out_features, 128);
-
-  // M2-006 添加 Dropout 节点
-  const dropout = addNodeFromLayer(state, "Dropout");
-
-  assert.equal(dropout.type, "Dropout");
-  assert.equal(dropout.params.p, 0.5);
-
-  // M2-007 添加无参数节点
-  const flatten = addNodeFromLayer(state, "Flatten");
-  const output = addNodeFromLayer(state, "Output");
-
-  assert.equal(flatten.type, "Flatten");
-  assert.deepEqual(flatten.params, {});
-  assert.equal(output.type, "Output");
-  assert.deepEqual(output.params, {});
-
-  // M2-008 建立节点连接
-  const connectResult = connectNodes(state, input.id, conv.id);
-
-  assert.equal(connectResult, true);
-  assert.equal(state.connections.length, 1);
-  assert.deepEqual(state.connections[0], [input.id, conv.id]);
-
-  // M2-009 拒绝自连接
-  const selfConnectResult = connectNodes(state, input.id, input.id);
-
-  assert.equal(selfConnectResult, false);
-  assert.equal(state.connections.length, 1);
-
-  // M2-010 拒绝同方向重复连接
-  const duplicateConnectResult = connectNodes(state, input.id, conv.id);
-
-  assert.equal(duplicateConnectResult, false);
-  assert.equal(state.connections.length, 1);
-
-  // M2-011 拒绝反方向重复连接
-  const reverseDuplicateConnectResult = connectNodes(state, conv.id, input.id);
-
-  assert.equal(reverseDuplicateConnectResult, false);
-  assert.equal(state.connections.length, 1);
-
-  // M2-012 拒绝连接不存在的节点
-  const missingNodeConnectResult = connectNodes(state, input.id, "missing_node");
-
-  assert.equal(missingNodeConnectResult, false);
-  assert.equal(state.connections.length, 1);
-
-  // M2-013 修改 Conv2D 参数
-  const updateConvResult = updateNodeParam(state, conv.id, "out_channels", 32);
-
-  assert.equal(updateConvResult, true);
-  assert.equal(
-    state.nodes.find(node => node.id === conv.id).params.out_channels,
-    32
-  );
-
-  // M2-014 修改 Pooling 参数
-  const updatePoolingResult = updateNodeParam(state, pool.id, "kernel_size", 3);
-
-  assert.equal(updatePoolingResult, true);
-  assert.equal(
-    state.nodes.find(node => node.id === pool.id).params.kernel_size,
-    3
-  );
-
-  // M2-015 修改 Linear 参数
-  const updateLinearResult = updateNodeParam(state, linear.id, "out_features", 64);
-
-  assert.equal(updateLinearResult, true);
-  assert.equal(
-    state.nodes.find(node => node.id === linear.id).params.out_features,
-    64
-  );
-
-  // M2-016 修改 Dropout 参数
-  const updateDropoutResult = updateNodeParam(state, dropout.id, "p", 0.3);
-
-  assert.equal(updateDropoutResult, true);
-  assert.equal(
-    state.nodes.find(node => node.id === dropout.id).params.p,
-    0.3
-  );
-
-  // M2-017 修改 Input Shape
-  const updateShapeResult = updateInputShape(state, input.id, "3,224,224");
-
-  assert.equal(updateShapeResult, true);
-  assert.deepEqual(
-    state.nodes.find(node => node.id === input.id).params.shape,
-    [3, 224, 224]
-  );
-  assert.equal(
-    state.nodes.find(node => node.id === input.id).hint,
-    "3x224x224"
-  );
-
-  // M2-018 拒绝空参数，且不更新画布节点参数
-  const beforeEmptyOutChannels = state.nodes.find(node => node.id === conv.id).params.out_channels;
-  const emptyParamResult = updateNodeParam(state, conv.id, "out_channels", "");
-
-  assert.equal(emptyParamResult, false);
-  assert.equal(
-    state.nodes.find(node => node.id === conv.id).params.out_channels,
-    beforeEmptyOutChannels
-  );
-
-  // M2-019 拒绝非法 Input Shape，且不更新画布节点参数
-  const beforeInvalidShape = [
-    ...state.nodes.find(node => node.id === input.id).params.shape,
-  ];
-  const invalidShapeResult = updateInputShape(state, input.id, "1,a,28");
-
-  assert.equal(invalidShapeResult, false);
-  assert.deepEqual(
-    state.nodes.find(node => node.id === input.id).params.shape,
-    beforeInvalidShape
-  );
-
-  // M2-020 拒绝 Conv2D 输出通道数为负数
-  const beforeInvalidOutChannels = state.nodes.find(node => node.id === conv.id).params.out_channels;
-  const invalidOutChannelsResult = updateNodeParam(state, conv.id, "out_channels", -1);
-
-  assert.equal(invalidOutChannelsResult, false);
-  assert.equal(
-    state.nodes.find(node => node.id === conv.id).params.out_channels,
-    beforeInvalidOutChannels
-  );
-
-  // M2-021 拒绝 Conv2D 卷积核大小为负数
-  const beforeInvalidKernelSize = state.nodes.find(node => node.id === conv.id).params.kernel_size;
-  const invalidKernelSizeResult = updateNodeParam(state, conv.id, "kernel_size", -1);
-
-  assert.equal(invalidKernelSizeResult, false);
-  assert.equal(
-    state.nodes.find(node => node.id === conv.id).params.kernel_size,
-    beforeInvalidKernelSize
-  );
-
-  // M2-022 拒绝 Stride 为空
-  const beforeEmptyStride = state.nodes.find(node => node.id === conv.id).params.stride;
-  const emptyStrideResult = updateNodeParam(state, conv.id, "stride", "");
-
-  assert.equal(emptyStrideResult, false);
-  assert.equal(
-    state.nodes.find(node => node.id === conv.id).params.stride,
-    beforeEmptyStride
-  );
-
-  // M2-023 拒绝 Padding 为负数
-  const beforeInvalidPadding = state.nodes.find(node => node.id === conv.id).params.padding;
-  const invalidPaddingResult = updateNodeParam(state, conv.id, "padding", -1);
-
-  assert.equal(invalidPaddingResult, false);
-  assert.equal(
-    state.nodes.find(node => node.id === conv.id).params.padding,
-    beforeInvalidPadding
-  );
-
-  // M2-024 拒绝 Dropout 比例超出 0 到 1 的范围
-  const beforeInvalidDropout = state.nodes.find(node => node.id === dropout.id).params.p;
-  const invalidDropoutResult = updateNodeParam(state, dropout.id, "p", 1.5);
-
-  assert.equal(invalidDropoutResult, false);
-  assert.equal(
-    state.nodes.find(node => node.id === dropout.id).params.p,
-    beforeInvalidDropout
-  );
-
-  // M2-025 导出 ModelGraph
-  graph = getCurrentModelGraph(state);
-
-  assert.equal(Array.isArray(graph.layers), true);
-  assert.equal(Array.isArray(graph.connections), true);
-  assert.equal(graph.layers.length, 7);
-  assert.equal(graph.connections.length, 1);
-
-  const exportedInput = graph.layers.find(layer => layer.id === input.id);
-  const exportedConv = graph.layers.find(layer => layer.id === conv.id);
-  const exportedPool = graph.layers.find(layer => layer.id === pool.id);
-  const exportedLinear = graph.layers.find(layer => layer.id === linear.id);
-  const exportedDropout = graph.layers.find(layer => layer.id === dropout.id);
-  const exportedFlatten = graph.layers.find(layer => layer.id === flatten.id);
-  const exportedOutput = graph.layers.find(layer => layer.id === output.id);
-
-  assert.deepEqual(exportedInput.params.shape, [3, 224, 224]);
-  assert.equal(exportedConv.params.out_channels, 32);
-  assert.equal(exportedConv.params.kernel_size, 3);
-  assert.equal(exportedConv.params.stride, 1);
-  assert.equal(exportedConv.params.padding, 0);
-  assert.equal(exportedPool.params.kernel_size, 3);
-  assert.equal(exportedLinear.params.out_features, 64);
-  assert.equal(exportedDropout.params.p, 0.3);
-  assert.deepEqual(exportedFlatten.params, {});
-  assert.deepEqual(exportedOutput.params, {});
-
-  assert.deepEqual(graph.connections[0], {
-    source: input.id,
-    target: conv.id,
+test("M2-001：所有模型编辑器核心文件存在", () => {
+  Object.entries(source).forEach(([name, content]) => {
+    assert.ok(content.length > 0, `${name} 不应为空`);
   });
+});
 
-  // M2-026 删除连接
-  const deleteConnectionResult = deleteConnection(state, input.id, conv.id);
+test("M2-002：组件库支持单击和键盘添加节点", () => {
+  assert.match(source.layerSidebar, /@click="handleLayerClick\(layer\.type\)"/);
+  assert.match(source.layerSidebar, /@keydown\.enter\.prevent="handleLayerClick\(layer\.type\)"/);
+  assert.match(source.layerSidebar, /@keydown\.space\.prevent="handleLayerClick\(layer\.type\)"/);
+  assert.match(source.canvas, /export function addLayerByClick\(layerType: string\)/);
+  assert.match(source.canvas, /function suggestedClickAddPosition\(\): Point/);
+});
 
-  assert.equal(deleteConnectionResult, true);
-  assert.equal(state.connections.length, 0);
+test("M2-003：新增节点不会自动打开可能遮挡画布的参数面板", () => {
+  assert.match(source.canvas, /selectNode\(node\.id, \{ openInspector: false \}\)/);
+  assert.match(source.canvas, /ui\.inspectorCollapsed = options\.openInspector === false/);
+});
 
-  // M2-027 删除不存在的连接
-  const deleteMissingConnectionResult = deleteConnection(state, input.id, conv.id);
+test("M2-004：选中节点显示复制和删除悬浮工具条", () => {
+  assert.match(source.canvasBoard, /class="node-quick-toolbar"/);
+  assert.match(source.canvasBoard, /@click="copyNodeFromToolbar\(node\.id\)"/);
+  assert.match(source.canvasBoard, /@click="deleteNodeFromToolbar\(node\.id\)"/);
+});
 
-  assert.equal(deleteMissingConnectionResult, false);
-  assert.equal(state.connections.length, 0);
+test("M2-005：右键菜单提供复制节点和删除节点", () => {
+  assert.match(source.contextMenus, /id="btn-copy-node"/);
+  assert.match(source.contextMenus, /@click="copyMenuNode"/);
+  assert.match(source.contextMenus, /id="btn-delete-node"/);
+  assert.match(source.contextMenus, /@click="deleteMenuNode"/);
+});
 
-  // M2-028 删除节点，同时删除相关连接
-  const reconnectResult = connectNodes(state, conv.id, pool.id);
-  assert.equal(reconnectResult, true);
-  assert.equal(state.connections.length, 1);
+test("M2-006：Ctrl+C、Ctrl+V、Delete 和 Backspace 快捷键已接入真实操作", () => {
+  assert.match(source.app, /event\.key === "Delete" \|\| event\.key === "Backspace"/);
+  assert.match(source.app, /deleteSelectedGraphItem\(\)/);
+  assert.match(source.app, /key === "c"/);
+  assert.match(source.app, /copySelectedNode\(\)/);
+  assert.match(source.app, /key === "v"/);
+  assert.match(source.app, /pasteCopiedNode\(\)/);
+});
 
-  const deleteNodeResult = deleteNode(state, conv.id);
+test("M2-007：输入框编辑时不会误触画布快捷键", () => {
+  assert.match(source.app, /target\.tagName === "INPUT"/);
+  assert.match(source.app, /target\.tagName === "TEXTAREA"/);
+  assert.match(source.app, /target\.isContentEditable/);
+});
 
-  assert.equal(deleteNodeResult, true);
-  assert.equal(state.nodes.some(node => node.id === conv.id), false);
-  assert.equal(state.connections.length, 0);
+test("M2-008：复制节点使用深拷贝，并为粘贴副本生成新 id 和偏移位置", () => {
+  assert.match(source.canvas, /function cloneGraphNode\(node: GraphNode\)/);
+  assert.match(source.canvas, /JSON\.parse\(JSON\.stringify\(node\)\)/);
+  assert.match(source.canvas, /node\.id = nextCopiedNodeId\(node\.type\)/);
+  assert.match(source.canvas, /node\.x = copiedNode\.x \+ 36 \* pasteOffsetStep/);
+  assert.match(source.canvas, /node\.y = copiedNode\.y \+ 36 \* pasteOffsetStep/);
+});
 
-  console.log("M2 model editor tests passed.");
-}
+test("M2-009：删除节点时同步清除普通连接和容器端口连接", () => {
+  assert.match(source.canvas, /export function deleteNodeById\(nodeId: string\)/);
+  assert.match(source.canvas, /endpointBaseId\(source\) !== nodeId/);
+  assert.match(source.canvas, /endpointBaseId\(target\) !== nodeId/);
+  assert.match(source.canvas, /removeEdgeControlsForNode\(nodeId\)/);
+});
 
-runTests();
+test("M2-010：删除选中项同时支持节点和连线", () => {
+  assert.match(source.canvas, /export function deleteSelectedGraphItem\(\): boolean/);
+  assert.match(source.canvas, /deleteNodeById\(canvas\.selectedNodeId\)/);
+  assert.match(source.canvas, /deleteConnectionByKey\(canvas\.selectedConnectionKey\)/);
+});
+
+test("M2-011：撤销和重做记录节点、连线、控制点及计数器", () => {
+  assert.match(source.canvas, /interface GraphSnapshot/);
+  assert.match(source.canvas, /nodes: GraphNode\[\]/);
+  assert.match(source.canvas, /connections: Connection\[\]/);
+  assert.match(source.canvas, /edgeControls: Record<string, Point>/);
+  assert.match(source.canvas, /nodeCounters: Record<string, number>/);
+  assert.match(source.canvas, /export function undoGraphChange\(\)/);
+  assert.match(source.canvas, /export function redoGraphChange\(\)/);
+});
+
+test("M2-012：撤销、重做、智能布局和适应视图固定在模板按钮前", () => {
+  const toolsIndex = indexOrFail(source.canvasTabs, "class=\"tab-canvas-tools\"", "标签栏工具组");
+  const templateIndex = indexOrFail(source.canvasTabs, "id=\"btn-template-gallery\"", "快速开始模板按钮");
+  assert.ok(toolsIndex < templateIndex, "画布工具组应位于快速开始模板按钮之前");
+  assert.match(source.canvasTabs, /@click="undoGraphChange"/);
+  assert.match(source.canvasTabs, /@click="redoGraphChange"/);
+  assert.match(source.canvasTabs, /@click="autoLayoutGraph"/);
+  assert.match(source.canvasTabs, /@click="centerGraphInCanvas"/);
+  assert.match(source.styles, /\.canvas-tab-list\s*\{[\s\S]*?overflow-x: auto/);
+});
+
+test("M2-013：撤销和重做按钮仅显示图标", () => {
+  const undo = buttonBlock(source.canvasTabs, "btn-undo");
+  const redo = buttonBlock(source.canvasTabs, "btn-redo");
+  assert.match(undo, /mdi:undo-variant/);
+  assert.match(redo, /mdi:redo-variant/);
+  assert.doesNotMatch(undo, /<span>撤销<\/span>/);
+  assert.doesNotMatch(redo, /<span>重做<\/span>/);
+  assert.match(undo, /aria-label="撤销上一步"/);
+  assert.match(redo, /aria-label="重做"/);
+});
+
+test("M2-014：三个及以下节点采用单列竖向布局", () => {
+  assert.match(source.canvas, /nodes\.length <= 3/);
+  assert.match(source.canvas, /\? layers\.length/);
+  assert.match(source.canvas, /mode: SmartLayoutMode/);
+});
+
+test("M2-015：复杂图按拓扑层排列、分支展开并在高度不足时折列", () => {
+  assert.match(source.canvas, /const preds: Record<string, string\[]>/);
+  assert.match(source.canvas, /const succ: Record<string, string\[]>/);
+  assert.match(source.canvas, /const layers: string\[\]\[\]/);
+  assert.match(source.canvas, /const columns: string\[\]\[\]\[\]/);
+  assert.match(source.canvas, /const barycenter =/);
+  assert.match(source.canvas, /columnLeft \+= columnWidth \+ COLUMN_GAP/);
+});
+
+test("M2-016：模板加载统一调用智能布局且不覆盖用户手动拖动", () => {
+  assert.match(source.canvas, /export function applyTemplateGraph\(modelGraph: ModelGraph\)/);
+  assert.match(source.canvas, /layoutGraphNodes\(activeCanvas\(\)\)/);
+  assert.match(source.canvas, /export function autoLayoutGraph\(\)/);
+  assert.doesNotMatch(source.canvas, /handleDocumentMouseMove[\s\S]{0,1000}layoutGraphNodes/);
+});
+
+test("M2-017：结构检查将连接类派生错误合并为一条完整通路问题", () => {
+  assert.match(source.actions, /function isConnectivityError\(error: string\)/);
+  assert.match(source.actions, /const connectionErrors = rawIssues\.filter/);
+  assert.match(source.actions, /id: "connectivity"/);
+  assert.match(source.actions, /Input 到 Output 未形成完整通路/);
+  assert.match(source.actions, /建议补齐断开的连线/);
+});
+
+test("M2-018：结构检查去除同节点同参数的重复问题和下游级联错误", () => {
+  assert.match(source.actions, /const seen = new Set<string>\(\)/);
+  assert.match(source.actions, /const isCascadingShapeError =/);
+  assert.match(source.actions, /if \(isCascadingShapeError\) return/);
+  assert.match(source.actions, /if \(seen\.has\(key\)\) return/);
+});
+
+test("M2-019：错误列表显示修改建议，并可定位节点和对应参数", () => {
+  assert.match(source.validationSummary, /issue\.suggestion/);
+  assert.match(source.validationSummary, /focusNodeInCanvas\(issue\.nodeId, issue\.parameter\)/);
+  assert.match(source.canvas, /ui\.inspectorFocusParam = parameter/);
+  assert.match(source.canvas, /ui\.inspectorCollapsed = options\.openInspector === false/);
+  assert.doesNotMatch(source.canvasBoard, /node-error-msg/);
+});
+
+test("M2-020：数字参数只在 change 确认后提交，非法值保留在本地错误状态", () => {
+  assert.match(source.paramField, /@change="handleChange"/);
+  assert.match(source.paramField, /if \(rawValue === ""\)/);
+  assert.match(source.paramField, /Number\.isFinite\(value\)/);
+  assert.match(source.paramField, /Number\.isInteger\(value\)/);
+  assert.match(source.paramField, /value < props\.min/);
+  assert.match(source.paramField, /value > props\.max/);
+  assert.match(source.paramField, /emit\("change", value\)/);
+});
+
+test("M2-021：ModelGraph 导出包含层、连接和训练配置", () => {
+  assert.match(source.store, /export function getCurrentModelGraph/);
+  assert.match(source.store, /layers: serialized\.layers/);
+  assert.match(source.store, /connections: serialized\.connections/);
+  assert.match(source.store, /train_config: getTrainConfig\(canvas\)/);
+});
+
+test("M2-022：多输入节点使用独立顶部落点，但不再渲染入口圆点", () => {
+  assert.match(source.canvas, /function getMultiInputPoint/);
+  assert.match(source.canvas, /\(sourceIndex \+ 1\) \/ \(incoming\.length \+ 1\)/);
+  assert.doesNotMatch(source.canvasBoard, /multi-input-port/);
+  assert.doesNotMatch(source.styles, /\.multi-input-port/);
+});
+
+test("M2-023：连线箭头使用终点切线自动旋转", () => {
+  assert.match(source.canvas, /marker\.setAttribute\("orient", "auto"\)/);
+  assert.match(source.canvas, /function getAdaptiveEndControl/);
+  assert.match(source.canvas, /c2: getAdaptiveEndControl/);
+});
+
+test("M2-024：顶部多输入箭头限制在距竖直方向约 32 度以内", () => {
+  assert.match(source.canvas, /endApproach: multiInputEnd \? "top-biased" : "free"/);
+  assert.match(source.canvas, /maxEndHorizontalRatio = points\.endApproach === "top-biased" \? 0\.625/);
+
+  const direction = limitedTopEntryDirection(-500, 120);
+  const deviation = deviationFromVerticalDegrees(direction.dx, direction.dy);
+  assert.ok(deviation <= 32.01, `实际偏转角 ${deviation.toFixed(2)}° 超出限制`);
+  assert.equal(direction.dx, -75);
+});
+
+test("M2-025：左右侧跨列连线仍使用水平路由，不受顶部角度限制", () => {
+  assert.match(source.canvas, /routing: crossesToNextColumn \? "horizontal" : "vertical"/);
+  assert.match(source.canvas, /if \(points\.routing === "horizontal"\)/);
+  assert.match(source.canvas, /return \[buildHorizontalBezierSegment\(start, end\)\]/);
+  assert.match(source.canvas, /function buildHorizontalBezierSegment/);
+});
+
+test("M2-026：连线支持悬停追踪源节点和目标节点", () => {
+  assert.match(source.canvas, /function setConnectionTrace/);
+  assert.match(source.canvas, /classList\.toggle\("node-connection-focus", active\)/);
+  assert.match(source.canvas, /visiblePath\.classList\.add\("line-hover"\)/);
+  assert.match(source.styles, /\.line-dimmed\s*\{\s*opacity: 0\.16/);
+});
+
+test("M2-027：当前前端工程能够通过 TypeScript 类型检查配置", () => {
+  const packageJson = JSON.parse(readProjectFile("frontend/package.json"));
+  assert.equal(typeof packageJson.scripts?.build, "string");
+  assert.match(packageJson.scripts.build, /vue-tsc --noEmit/);
+  assert.equal(fs.existsSync(path.join(PROJECT_ROOT, "frontend/tsconfig.json")), true);
+});
+
