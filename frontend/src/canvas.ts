@@ -63,6 +63,8 @@ interface ConnectorPoints {
   index: number;
   start: Point;
   end: Point;
+  routing: "vertical" | "horizontal";
+  endApproach: "free" | "top-biased";
 }
 
 interface Connector extends ConnectorPoints {
@@ -257,6 +259,7 @@ export function drawLines() {
   if (!svgEl) return;
   const svg = svgEl;
   svg.innerHTML = "";
+  appendConnectorMarkers(svg);
   const flowingAll = activeCanvas().validationStatus === "passing";
   const renderedConnectors: Connector[] = [];
   const hitPaths: SVGPathElement[] = [];
@@ -278,10 +281,12 @@ export function drawLines() {
     // 结构校验通过后：连线变成"数据通路"——浅色管道 + 末端箭头，
     // 再叠加一条流动的亮色虚线，营造数据在管道里移动的感觉。
     const isSelected = activeCanvas().selectedConnectionKey === connector.key;
+    const markerId = flowingAll ? "connector-arrow-flow" : isSelected ? "connector-arrow-selected" : "connector-arrow";
     visiblePath.setAttribute(
       "class",
       `line-connector${isSelected ? " line-selected" : ""}${flowingAll ? " line-flow-track" : ""}`
     );
+    visiblePath.setAttribute("marker-end", `url(#${markerId})`);
     visiblePath.dataset.from = from;
     visiblePath.dataset.to = to;
 
@@ -289,8 +294,16 @@ export function drawLines() {
     hitPath.setAttribute("class", "line-hit-area");
     hitPath.dataset.from = from;
     hitPath.dataset.to = to;
-    hitPath.addEventListener("mouseenter", () => visiblePath.classList.add("line-hover"));
-    hitPath.addEventListener("mouseleave", () => visiblePath.classList.remove("line-hover"));
+    hitPath.addEventListener("mouseenter", () => {
+      visiblePath.classList.add("line-hover");
+      visiblePath.setAttribute("marker-end", "url(#connector-arrow-selected)");
+      setConnectionTrace(from, to, visiblePath, true);
+    });
+    hitPath.addEventListener("mouseleave", () => {
+      visiblePath.classList.remove("line-hover");
+      visiblePath.setAttribute("marker-end", `url(#${markerId})`);
+      setConnectionTrace(from, to, visiblePath, false);
+    });
     hitPath.addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
@@ -319,6 +332,55 @@ export function drawLines() {
   renderLineJumps(svg, bridges);
   hitPaths.forEach(hitPath => svg.appendChild(hitPath));
   renderEdgeControlPoints(svg, connectorsByKey);
+}
+
+
+function appendConnectorMarkers(svg: SVGSVGElement) {
+  const defs = document.createElementNS(SVG_NS, "defs");
+  const markers = [
+    ["connector-arrow", "#9fb0cc"],
+    ["connector-arrow-selected", "#6366f1"],
+    ["connector-arrow-flow", "#10b981"],
+  ] as const;
+
+  markers.forEach(([id, color]) => {
+    const marker = document.createElementNS(SVG_NS, "marker");
+    marker.setAttribute("id", id);
+    marker.setAttribute("viewBox", "0 0 10 10");
+    marker.setAttribute("refX", "8.5");
+    marker.setAttribute("refY", "5");
+    marker.setAttribute("markerWidth", "10");
+    marker.setAttribute("markerHeight", "10");
+    marker.setAttribute("markerUnits", "userSpaceOnUse");
+    // marker-end 使用 auto 后，会按照贝塞尔曲线终点处的切线自动旋转。
+    // 箭头方向由真实来线方向决定，不再固定为朝下或朝上。
+    marker.setAttribute("orient", "auto");
+    const arrow = document.createElementNS(SVG_NS, "path");
+    // 圆角空心箭头与连线使用同样的视觉重量；尖端正好落在路径终点，
+    // 不再像旧版大号实心三角形那样与线条割裂。
+    arrow.setAttribute("d", "M 1.5 1.5 L 8.5 5 L 1.5 8.5");
+    arrow.setAttribute("fill", "none");
+    arrow.setAttribute("stroke", color);
+    arrow.setAttribute("stroke-width", "2");
+    arrow.setAttribute("stroke-linecap", "round");
+    arrow.setAttribute("stroke-linejoin", "round");
+    marker.appendChild(arrow);
+    defs.appendChild(marker);
+  });
+  svg.appendChild(defs);
+}
+
+
+function setConnectionTrace(from: string, to: string, activePath: SVGPathElement, active: boolean) {
+  const endpointIds = [endpointBaseId(from), endpointBaseId(to)];
+  endpointIds.forEach(id => {
+    document.getElementById(`node-${id}`)?.classList.toggle("node-connection-focus", active);
+  });
+  const activeGroup = activePath.parentElement;
+  svgEl?.querySelectorAll<SVGPathElement>(".line-connector, .line-flow-dash").forEach(path => {
+    const belongsToActiveConnection = path === activePath || path.parentElement === activeGroup;
+    path.classList.toggle("line-dimmed", active && !belongsToActiveConnection);
+  });
 }
 
 
@@ -418,8 +480,15 @@ export function redoGraphChange() {
 
 
 // —————————————————————————————————————————————
-// 自动布局：分层（拓扑最长路径）+ 层内重心法排序，把 DAG 排整齐
+// 智能布局：短图竖排；超出视口高度后向右折列；分支在同层左右展开。
 // —————————————————————————————————————————————
+
+type SmartLayoutMode = "vertical" | "wrapped" | "branched" | "wrapped-branched";
+
+interface SmartLayoutResult {
+  mode: SmartLayoutMode;
+  columns: number;
+}
 
 export function autoLayoutGraph() {
   const canvas = activeCanvas();
@@ -428,18 +497,24 @@ export function autoLayoutGraph() {
     return;
   }
   recordHistory();
-  layoutGraphNodes(canvas);
-  void redrawAfterDomUpdate();
-  centerGraphInCanvas();
-  showToast("success", "已按数据流向自动分层排列。");
+  const result = layoutGraphNodes(canvas);
+  void redrawAfterDomUpdate().then(centerGraphInCanvas);
+  pokeMinimap();
+  const message = result.mode === "vertical"
+    ? "已按数据流向竖向排列。"
+    : result.mode === "branched"
+      ? "已按数据流向排列，分支已左右展开。"
+      : `已按数据流向排列，并折成 ${result.columns} 列。`;
+  showToast("success", message);
 }
 
 
-// 按数据流向做拓扑分层布局（重心法减少交叉），仅重排 canvas.nodes 的坐标、无其它副作用。
-// 手动「自动布局」按钮与「加载模板/项目后自动布局」共用。
-function layoutGraphNodes(canvas: ReturnType<typeof activeCanvas>) {
+// 按数据流向做拓扑分层布局（重心法减少交叉）。每个拓扑层占一行：
+// 同层分支左右展开，汇合节点自然回到下一行中央；行数超过当前视口后整段移到右侧新列。
+// 手动「自动布局」按钮与内置模板 / 已保存项目加载共用，普通拖拽不会调用。
+function layoutGraphNodes(canvas: ReturnType<typeof activeCanvas>): SmartLayoutResult {
   const nodes = canvas.nodes;
-  if (nodes.length === 0) return;
+  if (nodes.length === 0) return { mode: "vertical", columns: 0 };
 
   const ids = nodes.map(node => node.id);
   const preds: Record<string, string[]> = {};
@@ -448,9 +523,11 @@ function layoutGraphNodes(canvas: ReturnType<typeof activeCanvas>) {
     preds[id] = [];
     succ[id] = [];
   });
-  canvas.connections.forEach(([from, to]) => {
-    if (preds[to]) preds[to].push(from);
-    if (succ[from]) succ[from].push(to);
+  canvas.connections.forEach(([fromEndpoint, toEndpoint]) => {
+    const from = endpointBaseId(fromEndpoint);
+    const to = endpointBaseId(toEndpoint);
+    if (preds[to] && !preds[to].includes(from)) preds[to].push(from);
+    if (succ[from] && !succ[from].includes(to)) succ[from].push(to);
   });
 
   // 1) 分层：Kahn 拓扑排序 + 最长路径，layer[n] = max(layer[前驱]) + 1
@@ -503,42 +580,128 @@ function layoutGraphNodes(canvas: ReturnType<typeof activeCanvas>) {
     }
   }
 
-  // 4) 落位：竖直方向按层、水平方向层内居中对齐
+  // 4) 根据画布可视高度切分为若干列。切点若正好落在 Merge 前，向前移动一层，
+  // 尽量让“分支层 + 汇合层”留在同一列中，阅读方向更连贯。
   const NODE_W = 224;
+  const NODE_H = 150;
   const V_GAP = 205;
-  const H_GAP = 64;
+  const H_GAP = 56;
+  const COLUMN_GAP = 140;
   const TOP = 60;
-  const widestRow = Math.max(...layers.map(row => row.length));
-  const centerX = 40 + (widestRow * NODE_W + (widestRow - 1) * H_GAP) / 2;
-  layers.forEach((row, depth) => {
-    const rowWidth = row.length * NODE_W + (row.length - 1) * H_GAP;
-    const startX = centerX - rowWidth / 2;
-    row.forEach((id, i) => {
-      const node = nodes.find(item => item.id === id);
-      if (!node) return;
-      node.x = Math.round(startX + i * (NODE_W + H_GAP));
-      node.y = TOP + depth * V_GAP;
+  const BOTTOM = 60;
+  const viewportHeight = Math.max(520, canvasEl?.clientHeight || 720);
+  // 3 个及以下节点始终保持旧版单列竖排；从第 4 个节点开始才根据视口高度折列。
+  const rowsThatFit = nodes.length <= 3
+    ? layers.length
+    : Math.max(
+        2,
+        Math.floor((viewportHeight - TOP - BOTTOM - NODE_H) / V_GAP) + 1
+      );
+
+  const columns: string[][][] = [];
+  let startDepth = 0;
+  while (startDepth < layers.length) {
+    let endDepth = Math.min(layers.length, startDepth + rowsThatFit);
+    if (
+      endDepth < layers.length
+      && endDepth - startDepth > 1
+      && layers[endDepth]!.some(id => preds[id].length > 1)
+    ) {
+      endDepth -= 1;
+    }
+    columns.push(layers.slice(startDepth, endDepth));
+    startDepth = endDepth;
+  }
+
+  const rowWidth = (row: string[]) =>
+    row.length * NODE_W + Math.max(0, row.length - 1) * H_GAP;
+  const columnWidths = columns.map(column => Math.max(NODE_W, ...column.map(rowWidth)));
+
+  let columnLeft = 40;
+  columns.forEach((column, columnIndex) => {
+    const columnWidth = columnWidths[columnIndex]!;
+    column.forEach((row, rowIndex) => {
+      const width = rowWidth(row);
+      const rowLeft = columnLeft + (columnWidth - width) / 2;
+      row.forEach((id, nodeIndex) => {
+        const node = nodes.find(item => item.id === id);
+        if (!node) return;
+        node.x = Math.round(rowLeft + nodeIndex * (NODE_W + H_GAP));
+        node.y = TOP + rowIndex * V_GAP;
+      });
     });
+    columnLeft += columnWidth + COLUMN_GAP;
   });
+
+  // 节点已整体换位，旧的手工连线控制点不再对应新的几何位置。
+  canvas.edgeControls = {};
+
+  const hasBranches = ids.some(id => preds[id].length > 1 || succ[id].length > 1)
+    || layers.some(row => row.length > 1);
+  const wrapped = columns.length > 1;
+  const mode: SmartLayoutMode = wrapped
+    ? hasBranches ? "wrapped-branched" : "wrapped"
+    : hasBranches ? "branched" : "vertical";
+
+  return { mode, columns: columns.length };
 }
 
 
 function getConnectionPoints(from: string, to: string, index = 0): ConnectorPoints | null {
   // from/to 是"端点"：普通层为节点 id，容器端口为 容器id::端口层id
-  if (
-    !activeCanvas().nodes.some(node => node.id === endpointBaseId(from)) ||
-    !activeCanvas().nodes.some(node => node.id === endpointBaseId(to))
-  ) {
+  const fromId = endpointBaseId(from);
+  const toId = endpointBaseId(to);
+  const fromNode = activeCanvas().nodes.find(node => node.id === fromId);
+  const toNode = activeCanvas().nodes.find(node => node.id === toId);
+  if (!fromNode || !toNode) {
     return null;
   }
+
+  // 折列边沿阅读方向从左列进入右列。左右侧锚点可避免原先
+  // “从底部绕到下一列顶部”的巨大 U 形线，让主链和跳连更容易追踪。
+  const multiInputEnd = getMultiInputPoint(to, from);
+  const crossesToNextColumn = !multiInputEnd
+    && toNode.x - fromNode.x > 300
+    && toNode.y <= fromNode.y + 40;
 
   return {
     from,
     to,
     key: getConnectionKey(from, to),
     index,
-    start: getEndpointOutPoint(from),
-    end: getEndpointInPoint(to),
+    start: crossesToNextColumn ? getNodeRightCenter(fromId) : getEndpointOutPoint(from),
+    end: multiInputEnd ?? (crossesToNextColumn ? getNodeLeftCenter(toId) : getEndpointInPoint(to)),
+    routing: crossesToNextColumn ? "horizontal" : "vertical",
+    // 多输入线从节点顶边进入：允许箭头顺着来线偏转，但不能接近水平，
+    // 否则箭头会贴住卡片上边框而难以辨认。
+    endApproach: multiInputEnd ? "top-biased" : "free",
+  };
+}
+
+
+// 普通节点有多个输入时，为每条连线分配独立的顶部入口。
+// 入口按来源节点的水平位置排序，左侧来源接左端口、右侧来源接右端口，
+// 避免多根线在进入节点前重合成一根、或形成难看的交合点。
+function getMultiInputPoint(targetEndpoint: string, sourceEndpoint: string): Point | null {
+  if (endpointPortId(targetEndpoint)) return null;
+
+  const targetId = endpointBaseId(targetEndpoint);
+  const incoming = activeCanvas().connections
+    .filter(([, target]) => endpointBaseId(target) === targetId && !endpointPortId(target))
+    .sort(([sourceA], [sourceB]) => {
+      const nodeA = activeCanvas().nodes.find(node => node.id === endpointBaseId(sourceA));
+      const nodeB = activeCanvas().nodes.find(node => node.id === endpointBaseId(sourceB));
+      return (nodeA?.x ?? 0) - (nodeB?.x ?? 0) || (nodeA?.y ?? 0) - (nodeB?.y ?? 0);
+    });
+  if (incoming.length <= 1) return null;
+
+  const sourceIndex = incoming.findIndex(([source]) => source === sourceEndpoint);
+  const rect = getNodeRect(targetId);
+  if (sourceIndex < 0 || !rect) return null;
+
+  return {
+    x: rect.left + rect.width * ((sourceIndex + 1) / (incoming.length + 1)),
+    y: rect.top,
   };
 }
 
@@ -560,9 +723,28 @@ function buildConnector(points: Partial<ConnectorPoints> & { start: Point; end: 
 function buildBezierSegments(points: Partial<ConnectorPoints> & { start: Point; end: Point }): BezierSegment[] {
   const { start, end } = points;
   const controlPoint = points.key ? activeCanvas().edgeControls[points.key] : null;
+  // tan(32°) ≈ 0.625：顶部入口的箭头最多偏离竖直方向约 32°。
+  const maxEndHorizontalRatio = points.endApproach === "top-biased" ? 0.625 : undefined;
 
   if (controlPoint) {
-    return buildControlledBezierSegments(start, controlPoint, end);
+    return buildControlledBezierSegments(start, controlPoint, end, maxEndHorizontalRatio);
+  }
+
+  if (points.routing === "horizontal") {
+    return [buildHorizontalBezierSegment(start, end)];
+  }
+
+  // 折列后的跨列连线：先从源节点底部向下离开，再沿两列之间的留白向上，
+  // 最后从目标节点上方进入。避免普通反向贝塞尔直接穿过源节点或中间卡片。
+  if (end.y < start.y - 80 && Math.abs(end.x - start.x) > 180) {
+    const gutterX = (start.x + end.x) / 2;
+    const lowerTurn = { x: gutterX, y: start.y + 54 };
+    const upperTurn = { x: gutterX, y: Math.max(8, end.y - 54) };
+    return [
+      buildBezierSegment(start, lowerTurn),
+      buildBezierSegment(lowerTurn, upperTurn),
+      buildBezierSegment(upperTurn, end, maxEndHorizontalRatio),
+    ];
   }
 
   const rawDeltaY = Math.abs(end.y - start.y);
@@ -576,6 +758,14 @@ function buildBezierSegments(points: Partial<ConnectorPoints> & { start: Point; 
   const verticalControl = detour
     ? clamp(rawDeltaY * 0.32, 70, 240)
     : clamp(yDistance * 0.42, 42, 120);
+  // 终点控制点沿“实际来线 → 节点入口”的方向回退。
+  // SVG marker 会读取 c2 → end 的切线，因此斜向、横向进入时箭头也会同步转向。
+  const endControl = getAdaptiveEndControl(
+    { x: start.x + bowX, y: start.y },
+    end,
+    verticalControl,
+    maxEndHorizontalRatio
+  );
 
   return [
     {
@@ -584,10 +774,7 @@ function buildBezierSegments(points: Partial<ConnectorPoints> & { start: Point; 
         x: start.x + bowX,
         y: start.y + yDirection * verticalControl,
       },
-      c2: {
-        x: end.x + bowX,
-        y: end.y - yDirection * verticalControl,
-      },
+      c2: endControl,
       end,
     },
   ];
@@ -637,15 +824,20 @@ function computeAvoidanceBow(points: Partial<ConnectorPoints> & { start: Point; 
 }
 
 
-function buildControlledBezierSegments(start: Point, control: Point, end: Point): BezierSegment[] {
+function buildControlledBezierSegments(
+  start: Point,
+  control: Point,
+  end: Point,
+  maxEndHorizontalRatio?: number
+): BezierSegment[] {
   return [
     buildBezierSegment(start, control),
-    buildBezierSegment(control, end),
+    buildBezierSegment(control, end, maxEndHorizontalRatio),
   ];
 }
 
 
-function buildBezierSegment(start: Point, end: Point): BezierSegment {
+function buildBezierSegment(start: Point, end: Point, maxEndHorizontalRatio?: number): BezierSegment {
   const deltaY = Math.abs(end.y - start.y);
   const yDirection = end.y >= start.y ? 1 : -1;
   const verticalControl = clamp(deltaY * 0.42, 28, 120);
@@ -656,10 +848,48 @@ function buildBezierSegment(start: Point, end: Point): BezierSegment {
       x: start.x,
       y: start.y + yDirection * verticalControl,
     },
-    c2: {
-      x: end.x,
-      y: end.y - yDirection * verticalControl,
-    },
+    c2: getAdaptiveEndControl(start, end, verticalControl, maxEndHorizontalRatio),
+    end,
+  };
+}
+
+
+// 沿连线整体方向从终点向后取控制点，使最后一小段的切线与来线一致。
+// 当两个节点正好竖直排列时 dx=0，行为与原先完全相同；横向或斜向时则自然旋转。
+function getAdaptiveEndControl(
+  approachFrom: Point,
+  end: Point,
+  maxDistance: number,
+  maxHorizontalRatio?: number
+): Point {
+  let dx = end.x - approachFrom.x;
+  const dy = end.y - approachFrom.y;
+  if (maxHorizontalRatio !== undefined && Math.abs(dy) > 0.001) {
+    const maxHorizontal = Math.abs(dy) * maxHorizontalRatio;
+    dx = Math.sign(dx) * Math.min(Math.abs(dx), maxHorizontal);
+  }
+  const length = Math.hypot(dx, dy);
+  if (length < 0.001) {
+    return { x: end.x, y: end.y - maxDistance };
+  }
+
+  const distance = Math.min(maxDistance, length * 0.38);
+  return {
+    x: end.x - (dx / length) * distance,
+    y: end.y - (dy / length) * distance,
+  };
+}
+
+
+function buildHorizontalBezierSegment(start: Point, end: Point): BezierSegment {
+  const deltaX = Math.abs(end.x - start.x);
+  const direction = end.x >= start.x ? 1 : -1;
+  const horizontalControl = clamp(deltaX * 0.42, 56, 180);
+
+  return {
+    start,
+    c1: { x: start.x + direction * horizontalControl, y: start.y },
+    c2: { x: end.x - direction * horizontalControl, y: end.y },
     end,
   };
 }
@@ -1019,6 +1249,22 @@ function getNodeTopCenter(nodeId: string): Point {
     x: node.x + rect.width / 2,
     y: node.y,
   };
+}
+
+
+function getNodeRightCenter(nodeId: string): Point {
+  const rect = getNodeRect(nodeId);
+  return rect
+    ? { x: rect.right, y: rect.top + rect.height / 2 }
+    : { x: 0, y: 0 };
+}
+
+
+function getNodeLeftCenter(nodeId: string): Point {
+  const rect = getNodeRect(nodeId);
+  return rect
+    ? { x: rect.left, y: rect.top + rect.height / 2 }
+    : { x: 0, y: 0 };
 }
 
 
@@ -1951,9 +2197,12 @@ export function applyTemplateGraph(modelGraph: ModelGraph) {
   activeCanvas().edgeControls = {};
   activeCanvas().selectedConnectionKey = null;
   activeCanvas().hasCenteredInitialGraph = true;
-  // 加载模板/项目后自动按数据流向分层布局，避免分支模型堆成一列、连线交叉
+  // 内置模板、AI 生成模型和已保存项目统一经过智能布局；以后新增模板无需手写坐标。
   layoutGraphNodes(activeCanvas());
-  void redrawAfterDomUpdate().then(centerGraphHorizontally);
+  void redrawAfterDomUpdate().then(() => {
+    centerGraphHorizontally();
+    pokeMinimap();
+  });
   resetValidationAfterGraphChange();
 }
 
@@ -2041,15 +2290,20 @@ export function centerGraphInCanvas() {
 }
 
 
-// 初始加载 / 模板加载：水平居中并回到图的顶部（保持旧版首屏视角）
+// 初始加载 / 模板加载：能完整显示时水平居中；多列宽于视口时从 Input 一侧开始，
+// 避免居中后首尾同时被裁掉。竖向始终回到图的顶部。
 function centerGraphHorizontally() {
   const canvas = activeCanvas();
   if (!canvasEl || canvas.nodes.length === 0) return;
 
   const bounds = getGraphBounds();
   const graphCenterX = (bounds.left + bounds.right) / 2;
+  const graphWidth = bounds.right - bounds.left;
+  const visibleWidth = canvasEl.clientWidth / canvas.zoom;
 
-  canvas.panX = canvasEl.clientWidth / 2 - graphCenterX * canvas.zoom;
+  canvas.panX = graphWidth <= visibleWidth - 80
+    ? canvasEl.clientWidth / 2 - graphCenterX * canvas.zoom
+    : 40 - bounds.left * canvas.zoom;
   canvas.panY = 0;
   applyTransform();
 }
