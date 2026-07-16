@@ -1360,7 +1360,7 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  margin: 0 6px 6px 4px;
+  margin: 0 6px 6px auto;
   border: 0;
   border-radius: 10px;
   background: linear-gradient(135deg, #fbbf24, #f59e0b);
@@ -1837,25 +1837,16 @@ button:disabled {
   flex: 0 0 auto;
   display: flex;
   align-items: flex-end;
-  gap: 4px;
+  gap: 2px;
   padding: 4px 10px 0;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
-  overflow: hidden;
-}
-
-/* 标签过多时仅滚动标签本身，右侧编辑工具始终可见 */
-.canvas-tab-list {
-  flex: 1 1 auto;
-  min-width: 80px;
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
+  /* 标签过多时仍可横向滚动，但隐藏滚动条以保持整洁 */
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-.canvas-tab-list::-webkit-scrollbar {
+.canvas-tabs::-webkit-scrollbar {
   display: none;
 }
 
@@ -1964,53 +1955,6 @@ button:disabled {
 .canvas-tab-add:hover {
   color: var(--indigo);
   background: rgba(255, 255, 255, 0.8);
-}
-
-/* 标签栏右侧常驻操作区：紧邻“快速开始模板”，避免常用能力藏在画布浮层中 */
-.tab-canvas-tools {
-  flex: 0 0 auto;
-  align-self: center;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  margin: 0 0 4px 2px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 3px 10px rgba(40, 70, 120, 0.08);
-}
-
-.tab-canvas-tools button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  height: 30px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
-}
-
-.tab-canvas-tools button iconify-icon { font-size: 17px; }
-.tab-canvas-tools button:hover { background: var(--panel-2); color: var(--indigo); }
-.tab-canvas-tools button:active { transform: translateY(1px); }
-.tab-canvas-tools button.icon-only { width: 30px; padding: 0; }
-.tab-canvas-tools button.primary { background: #eef2ff; color: var(--indigo); }
-.tab-canvas-tools button.primary:hover { background: #e0e7ff; color: var(--indigo-strong); }
-
-.tab-canvas-tools-divider {
-  width: 1px;
-  height: 19px;
-  margin: 0 2px;
-  background: var(--border-2);
 }
 
 .canvas {
@@ -2670,21 +2614,13 @@ body.is-connecting .node-port {
   stroke: #9fb0cc;
   stroke-width: 2.5;
   fill: none;
-  transition: opacity 0.16s ease, stroke 0.2s ease, stroke-width 0.2s ease;
+  transition: stroke 0.2s ease, stroke-width 0.2s ease;
   pointer-events: none;
 }
 
 .line-hover {
   stroke: var(--indigo);
   stroke-width: 3.5;
-  opacity: 1;
-}
-
-.line-dimmed { opacity: 0.16; }
-
-.node-card.node-connection-focus {
-  border-color: var(--indigo);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16), var(--shadow-md);
 }
 
 .line-selected {
@@ -2827,7 +2763,7 @@ body.is-connecting .node-port {
   stroke-width: 1.5;
 }
 
-/* 缩放栏：左下角独立显示，空闲时自动淡出 */
+/* 画布功能栏：半透明毛玻璃胶囊；默认收成把手，悬停向右展开；空闲自动淡出 */
 .canvas-toolbar {
   position: absolute;
   left: 24px;
@@ -2845,7 +2781,6 @@ body.is-connecting .node-port {
   box-shadow: 0 8px 26px rgba(40, 70, 120, 0.15);
   transition: opacity 0.45s ease, background 0.3s ease, box-shadow 0.3s ease;
 }
-
 /* 空闲：整体淡出 */
 .canvas-toolbar.is-faded { opacity: 0.26; }
 /* 悬停：唤醒并提升不透明度 */
