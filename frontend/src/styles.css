@@ -4855,6 +4855,40 @@ body.is-connecting .node-port {
 .tm-breadcrumb { gap: 8px; min-width: 0; color: var(--muted); font-size: 13px; }
 .tm-breadcrumb strong { color: var(--text); }
 
+/* 顶栏任务切换器：并行训练结果间跳转 */
+.tm-task-switcher { position: relative; }
+.tm-switcher-trigger {
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel); color: var(--text);
+  padding: 5px 10px; font-size: 13px; font-weight: 600; cursor: pointer;
+  max-width: 220px;
+}
+.tm-switcher-trigger:hover { border-color: var(--cyan); }
+.tm-switcher-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-switcher-arrow { transition: transform 0.15s ease; color: var(--muted); }
+.tm-task-switcher.open .tm-switcher-arrow { transform: rotate(180deg); }
+.tm-switcher-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 40;
+  min-width: 200px; max-height: 320px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  padding: 4px; display: none;
+}
+.tm-task-switcher.open .tm-switcher-menu { display: block; }
+.tm-switcher-option {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: none; background: transparent; color: var(--text);
+  padding: 8px 10px; border-radius: 7px; font-size: 13px; cursor: pointer; text-align: left;
+}
+.tm-switcher-option:hover { background: var(--panel-2); }
+.tm-switcher-option.active { background: #ecfeff; color: var(--cyan); font-weight: 700; }
+.tm-switcher-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-switcher-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--muted); flex-shrink: 0; }
+.tm-switcher-dot.live { background: var(--cyan); animation: pulse-dot 1.4s ease-in-out infinite; }
+.tm-switcher-check { color: var(--cyan); flex-shrink: 0; }
+
 .tm-badge { gap: 7px; border: 1px solid; border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 800; }
 .tm-badge.running { border-color: #a5f3fc; background: #ecfeff; color: var(--cyan); }
 .tm-badge.stopping { border-color: #fed7aa; background: #fff7ed; color: var(--orange); }

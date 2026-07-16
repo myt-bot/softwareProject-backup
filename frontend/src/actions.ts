@@ -15,7 +15,7 @@ import {
   validateModelStructure,
 } from "./api/client";
 import { auth, isLoggedIn } from "./auth";
-import { addCanvas, applyTemplateGraph, drawLines } from "./canvas";
+import { addCanvas, applyTemplateGraph, drawLines, switchCanvas } from "./canvas";
 import { openTrainingMonitor } from "./monitor";
 import {
   activeCanvas,
@@ -773,4 +773,15 @@ function openTrainingMonitorForCanvas(canvas: WorkCanvas) {
 
 export function openCurrentTrainingMonitor() {
   openTrainingMonitorForCanvas(activeCanvas());
+}
+
+
+// 在监控页内切到另一个画布的训练任务（顶栏任务切换器调用）。
+// 复用 openTrainingMonitorForCanvas 重新装载 monitor 单例（会更新 monitor.jobId，
+// WS 路由随即匹配新任务），并同步活动画布，保证「返回」后回到对应画布。
+export function switchTrainingMonitorToCanvas(canvasId: number) {
+  const canvas = store.canvases.find(item => item.id === canvasId);
+  if (!canvas?.trainingJob?.job_id) return;
+  switchCanvas(canvas.id);
+  openTrainingMonitorForCanvas(canvas);
 }

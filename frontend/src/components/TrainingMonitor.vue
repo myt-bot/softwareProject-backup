@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 训练监控页（Training Monitor）
 // 作为一个全屏视图挂载在主 shell 之上：训练开始时打开，"返回继续修改"关闭回到搭建页。
-import { computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   activeSeries,
   computeResults,
@@ -17,7 +17,8 @@ import {
   ticksFor,
   visibleCount,
 } from "../monitor";
-import { showToast } from "../store";
+import { isTrainingJobActive, showToast, store } from "../store";
+import { switchTrainingMonitorToCanvas } from "../actions";
 import TmChart from "./TmChart.vue";
 
 const isRunning = computed(() => monitor.state === "running");
@@ -146,6 +147,44 @@ const hpRows = computed(() => [
 const modelName = computed(() => monitor.modelSummary.modelName || "模型");
 const inputShapeText = computed(() => formatShape(monitor.modelSummary.inputShape));
 const numClassesText = computed(() => monitor.modelSummary.numClasses ?? "--");
+
+// —— 顶栏任务切换器：在并行训练的各画布结果间跳转 ——
+// 列出所有带训练任务的画布；选中即切到该任务（同步活动画布 + 重装 monitor）。
+const taskEntries = computed(() =>
+  store.canvases
+    .filter(canvas => canvas.trainingJob?.job_id)
+    .map(canvas => ({
+      canvasId: canvas.id,
+      name: canvas.name,
+      jobId: canvas.trainingJob!.job_id!,
+      active: isTrainingJobActive(canvas.trainingJob),
+      isCurrent: canvas.trainingJob!.job_id === monitor.jobId,
+    }))
+);
+const showTaskSwitcher = computed(() => taskEntries.value.length > 1);
+
+const switcherOpen = ref(false);
+const switcherRef = ref<HTMLElement | null>(null);
+
+function toggleSwitcher(event: MouseEvent) {
+  event.stopPropagation();
+  switcherOpen.value = !switcherOpen.value;
+}
+
+function selectTask(event: MouseEvent, canvasId: number) {
+  event.stopPropagation();
+  switcherOpen.value = false;
+  switchTrainingMonitorToCanvas(canvasId);
+}
+
+function handleSwitcherOutside(event: MouseEvent) {
+  if (!switcherRef.value?.contains(event.target as Node)) {
+    switcherOpen.value = false;
+  }
+}
+
+onMounted(() => document.addEventListener("click", handleSwitcherOutside));
+onBeforeUnmount(() => document.removeEventListener("click", handleSwitcherOutside));
 
 // —— 进度总览（新手友好的主视觉区）——
 const overallPercent = computed(() =>
@@ -284,6 +323,36 @@ function formatBytes(value: number) {
             <iconify-icon icon="mdi:chevron-right"></iconify-icon>
             <strong>Training</strong>
           </nav>
+          <!-- 任务切换器：并行训练多个画布时，在结果间直接跳转，无需返回 -->
+          <div
+            v-if="showTaskSwitcher"
+            ref="switcherRef"
+            class="tm-task-switcher"
+            :class="{ open: switcherOpen }"
+          >
+            <button class="tm-switcher-trigger" title="切换训练任务" @click="toggleSwitcher">
+              <iconify-icon icon="mdi:swap-horizontal"></iconify-icon>
+              <span class="tm-switcher-current">{{ modelName }}</span>
+              <iconify-icon icon="mdi:chevron-down" class="tm-switcher-arrow"></iconify-icon>
+            </button>
+            <div class="tm-switcher-menu">
+              <button
+                v-for="entry in taskEntries"
+                :key="entry.canvasId"
+                class="tm-switcher-option"
+                :class="{ active: entry.isCurrent }"
+                @click="selectTask($event, entry.canvasId)"
+              >
+                <span class="tm-switcher-dot" :class="{ live: entry.active }"></span>
+                <span class="tm-switcher-name">{{ entry.name }}</span>
+                <iconify-icon
+                  v-if="entry.isCurrent"
+                  icon="mdi:check"
+                  class="tm-switcher-check"
+                ></iconify-icon>
+              </button>
+            </div>
+          </div>
         </div>
         <div class="tm-topbar-center">
           <span v-if="isCancelling" class="tm-badge stopping"><span class="tm-dot"></span>Stopping</span>
