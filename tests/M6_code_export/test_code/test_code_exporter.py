@@ -244,7 +244,7 @@ class CodeExporterTests(unittest.TestCase):
         self.assertIn("parser.add_argument('--train'", source)
 
         completed = self.run_generated_python(path)
-        self.assertIn("dataset: MNIST", completed.stdout)
+        self.assertIn("数据集： MNIST", completed.stdout)
         self.assertIn("(1, 10)", completed.stdout)
 
     def test_exports_and_runs_mlp_python_code(self):
@@ -439,8 +439,11 @@ class FrontendExportContractTests(unittest.TestCase):
         self.assertIn("format: canvas.exportFormat", actions_source)
         self.assertIn("train_config: getTrainConfig(canvas)", actions_source)
         self.assertIn("canvas.exportFilename = result?.filename", actions_source)
-        self.assertIn("application/x-ipynb+json;charset=utf-8", actions_source)
-        self.assertIn("text/x-python;charset=utf-8", actions_source)
+        self.assertIn('type: "application/zip"', actions_source)
+        self.assertIn('{ name: codeName, content: canvas.lastExportCode }', actions_source)
+        self.assertIn('{ name: "requirements.txt", content: requirements }', actions_source)
+        self.assertIn('{ name: "setup_env.sh"', actions_source)
+        self.assertIn('{ name: "setup_env.bat"', actions_source)
 
 
 if __name__ == "__main__":

@@ -18,40 +18,52 @@
 - 支持导出 PyTorch 模型代码。
 - 支持模型模板一键生成，降低初学者使用门槛。
 
-## 计划技术栈
+## 技术栈
 
 ### 前端
 
-- HTML
-- CSS
-- JavaScript
-- 后续可选：Vue 或 React
-- 后续可选图编辑库：Vue Flow、React Flow、AntV X6 或 jsPlumb
+- Vue 3.5（组合式 API、`<script setup>`、单文件组件）
+- TypeScript 5.8
+- Vite 7（开发服务器、类型检查与生产构建）
+- HTML5 / CSS3 / SVG（模型节点、贝塞尔连线、缩放与多画布工作台）
+- 原生 Vue 响应式状态管理（`reactive`、`ref`、`computed`）
+- Marked + DOMPurify（AI 助手 Markdown 渲染与内容净化）
+- Iconify Web Component（界面图标）
+- 浏览器原生 WebSocket、Fetch API、LocalStorage、Clipboard API
+- 浏览器端无依赖 ZIP 打包器（导出代码、依赖清单与环境脚本）
 
 ### 云端后端
 
-- Python
-- FastAPI
-- Pydantic
-- MySQL / SQLAlchemy
-- WebSocket（用于与本机 Agent 通信）
+- Python 3.10+
+- FastAPI + Uvicorn（REST API、WebSocket 与 ASGI 服务）
+- Pydantic（请求、响应及模型图数据校验）
+- SQLAlchemy（用户和项目数据持久化）
+- SQLite（默认数据库）/ MySQL 8 + PyMySQL（可选数据库）
+- python-jose + bcrypt / Passlib（JWT 身份认证与密码哈希）
+- WebSocket（浏览器、云端与本机 Agent 的实时双向通信）
+- OpenAI Python SDK（AI 助手自然语言对话与 Function Calling）
+- HTTPX（接口测试及 HTTP 客户端支持）
 
 ### 本机 Agent
 
-- Python
-- FastAPI
-- PyTorch
-- TorchVision
-- NumPy
+- Python 3.10+
+- Python 标准库 Tkinter（本机训练应用 GUI 启动器）
+- FastAPI（本机健康检查、设备查询和结构校验接口）
+- websockets（与云端建立长连接、接收指令和回传训练状态）
+- PyTorch + TorchVision（模型构建、数据集处理、CPU/GPU 训练与代码导出）
+- NumPy（数值数据处理）
+- 独立训练运行时（manifest 检查、ZIP 下载、SHA-256 校验与版本更新）
+- PyInstaller / 独立 CPython（本机应用打包与免安装分发）
 
-### 运行环境
+### 数据、测试与部署
 
-- Python 3.10 或更高版本
-- Node.js 20.19 或更高版本（前端 Vue 3 + TypeScript + Vite）
-- SQLite（默认部署数据库，使用 `DATABASE_URL=sqlite:////abs/path/app.db` 配置）
-- MySQL 8（可选，仅在需要独立数据库服务或更高并发时使用）
-- CUDA GPU 可选
-- 无 GPU 时自动使用 CPU
+- Node.js 20.19+（Vite 7 前端工具链）
+- pytest + unittest（单元测试、接口测试、端到端测试和全量回归）
+- FastAPI TestClient（进程内接口契约测试）
+- Nginx（HTTPS、前端静态资源、REST API 与 WebSocket 反向代理）
+- systemd + Uvicorn 单进程（生产后端常驻运行）
+- `.env` 环境变量（数据库、JWT 密钥和 Agent 发布目录配置）
+- CUDA GPU 可选；无可用 GPU 时自动回退到 CPU
 
 ## 服务启动方法
 

@@ -13,9 +13,7 @@ import backend.storage as storage
 
 _tmp_dir = tempfile.TemporaryDirectory()
 _data_dir = Path(_tmp_dir.name)
-storage._STORAGE_DIR = _data_dir
-storage._USERS_FILE = _data_dir / "users.json"
-storage._PROJECTS_FILE = _data_dir / "projects.json"
+storage.configure_database(f"sqlite:///{_data_dir / 'templates.db'}")
 
 from local_agent.runtime.validator import validate_model_graph
 
@@ -38,7 +36,14 @@ class TemplateApiIntegrationTests(unittest.TestCase):
     """测试模板相关 HTTP 接口和项目创建链路。"""
 
     @classmethod
+    def setUpClass(cls):
+        # pytest 会先收集全部模块，期间其它模块可能重新配置全局存储。
+        # 在本测试类真正执行前再次绑定独立数据库，确保全量回归时也完全隔离。
+        storage.configure_database(f"sqlite:///{_data_dir / 'templates.db'}")
+
+    @classmethod
     def tearDownClass(cls):
+        storage.dispose_database()
         _tmp_dir.cleanup()
 
     def setUp(self):
@@ -50,6 +55,7 @@ class TemplateApiIntegrationTests(unittest.TestCase):
         response = client.post("/users", json={
             "username": username,
             "email": f"{username}@test.com",
+            "password": "testpass123",
         })
         self.assertEqual(200, response.status_code, response.text)
         return response.json()["data"]
